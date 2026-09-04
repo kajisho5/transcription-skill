@@ -1,0 +1,40 @@
+# Manual trigger only for now (the account's Actions minutes are limited; ffmpeg-skill and
+# video-production-agent use the same policy). Add `pull_request:` under `on:` when minutes allow.
+name: tests
+on:
+  workflow_dispatch:
+jobs:
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.9", "3.11"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ matrix.python }}"}
+      - name: Install ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+      - run: pip install -e .
+      - run: python -m unittest -v tests/test_unit.py tests/test_security.py
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface/hub
+          key: faster-whisper-base-${{ runner.os }}
+      - run: pip install -e ".[faster-whisper]"
+      - run: transcription doctor
+      - run: python -m unittest -v tests/test_integration.py
+      - run: python evals/run.py

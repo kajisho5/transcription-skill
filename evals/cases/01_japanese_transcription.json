@@ -1,0 +1,9 @@
+{
+  "id": "01_japanese_transcription",
+  "input": "tests/fixtures/ja_short.wav",
+  "request": {"language": "ja", "word_timestamps": true},
+  "reference": "ja_short.wav",
+  "metric": "cer",
+  "max_error_rate": 0.25,
+  "note": "Homophone substitutions (講演→公園, 音響→音教) are ordinary ASR errors on synthetic speech and are tolerated by the threshold; ordering and structure are exact."
+}

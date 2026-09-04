@@ -1,0 +1,10 @@
+{
+  "id": "02_english_transcription",
+  "input": "tests/fixtures/en_short.wav",
+  "request": {},
+  "reference": "en_short.wav",
+  "metric": "wer",
+  "max_error_rate": 0.2,
+  "expect_language": "en",
+  "expect_language_source": "detected"
+}

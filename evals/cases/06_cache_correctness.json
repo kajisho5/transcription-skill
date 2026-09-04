@@ -1,0 +1,6 @@
+{
+  "id": "06_cache_correctness",
+  "input": "tests/fixtures/en_short.wav",
+  "request": {"language": "en"},
+  "metric": "cache"
+}
