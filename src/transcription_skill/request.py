@@ -9,7 +9,7 @@ import hashlib
 import json
 import os
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from .errors import TranscriptionError
 from .validate import CREDENTIAL_PATTERNS
@@ -19,7 +19,7 @@ DEFAULT_MODEL = "base"
 MAX_INITIAL_PROMPT_CHARS = 500
 
 ALLOWED_KEYS = {"input", "language", "engine", "model", "word_timestamps", "temperature", "initial_prompt", "beam_size",
-                "asset_id", "budget", "cache", "workspace", "offline"}
+                "asset_id", "budget", "cache", "workspace", "offline", "allowed_input_roots"}
 FORBIDDEN_KEYS = {"command", "argv", "cmd", "shell", "exec", "args", "script", "binary", "api_key", "apikey", "token",
                   "secret", "password", "credentials", "env"}
 BUDGET_KEYS = {"timeout", "max_audio_seconds"}
@@ -53,6 +53,7 @@ class TranscribeRequest:
     cache: bool = True
     workspace: Optional[str] = None
     offline: bool = False                # hard constraint: no network at any step (no remote engine, no model download)
+    allowed_input_roots: Optional[List[str]] = None   # when given, the input must resolve inside one of these directories
 
     def parameters(self) -> Dict[str, Any]:
         """The parameters that shape the ASR output. Part of provenance and of the cache identity."""
@@ -136,6 +137,11 @@ def parse_request(doc: Any) -> TranscribeRequest:
     offline = doc.get("offline", False)
     if not isinstance(offline, bool):
         raise _bad("'offline' must be a boolean")
+    roots = doc.get("allowed_input_roots")
+    if roots is not None:
+        if not isinstance(roots, list) or not roots or not all(isinstance(r, str) and r.strip() and "\x00" not in r for r in roots):
+            raise _bad("'allowed_input_roots' must be a non-empty list of directory paths")
+        roots = [r for r in roots]
     ws = doc.get("workspace")
     if ws is not None and (not isinstance(ws, str) or not ws.strip()):
         raise _bad("'workspace' must be a path string")
@@ -153,7 +159,7 @@ def parse_request(doc: Any) -> TranscribeRequest:
             setattr(budget, k, float(v))
 
     return TranscribeRequest(input=inp, language=lang, engine=engine, model=model, word_timestamps=wt, temperature=float(temp),
-                             initial_prompt=prompt, beam_size=beam, asset_id=asset_id, budget=budget, cache=cache, workspace=ws, offline=offline)
+                             initial_prompt=prompt, beam_size=beam, asset_id=asset_id, budget=budget, cache=cache, workspace=ws, offline=offline, allowed_input_roots=roots)
 
 
 def default_workspace() -> str:

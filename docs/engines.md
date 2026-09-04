@@ -132,6 +132,8 @@ under a daemon-thread timeout instead.
 
 - Dependency: `faster-whisper>=1.0` (CTranslate2). Install with `pip install ".[faster-whisper]"`.
 - Device/compute: CPU, `int8` by default (`FasterWhisperEngine(device=..., compute_type=...)`).
+- Model cache location comes from `HF_HUB_CACHE` / `HF_HOME` only (input paths, workspace and request
+  fields never influence it); it is reported by `doctor` as a root separate from the workspace.
 - Models: Whisper checkpoints by name (`tiny`, `base`, `small`, `medium`, `large-v3`, `large-v3-turbo`,
   `distil-*`, `.en` variants). `model_status` looks in the Hugging Face cache
   (`$HF_HUB_CACHE` / `$HF_HOME/hub` / `~/.cache/huggingface/hub`) and reports the snapshot id as

@@ -22,8 +22,9 @@ from .engines import TranscriptionEngine, get_engine
 from .engines.base import MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED, EngineRequest, EngineResult
 from .engines.faster_whisper import LANGUAGE_DETECTION_MIN_PROBABILITY
 from .errors import TranscriptionError
-from .media import check_input_file, child_env, extract_audio, fingerprint_file, probe
+from .media import child_env, extract_audio, fingerprint_file, probe
 from .models import LANGUAGE_UNKNOWN, Provenance, Segment, Source, Transcript, Word, new_id, now_iso
+from .paths import PathPolicy, make_run_dir, resolve_workspace
 from .normalize import normalize_text
 from .request import TranscribeRequest, default_workspace, summarize_for_display
 from .validate import CONTAINMENT_TOLERANCE, validate_transcript
@@ -35,12 +36,14 @@ class TranscriptionService:
     def __init__(self, workspace: Optional[str] = None, engine: Optional[TranscriptionEngine] = None):
         """engine: inject an engine object (tests, embedding). Registry engines run in a worker process;
         an injected engine runs in-process under a thread timeout."""
-        self.workspace = os.path.abspath(workspace or default_workspace())
+        self.workspace = resolve_workspace(workspace or default_workspace())
         self._engine_override = engine
 
     # ---- shared preparation -------------------------------------------------------------------
     def _prepare(self, req: TranscribeRequest) -> Dict[str, Any]:
-        path = check_input_file(req.input)
+        policy = PathPolicy(req.allowed_input_roots)
+        path = policy.resolve_input(req.input)                       # resolved path is used for every later step
+        display_name = os.path.basename(os.path.abspath(req.input))  # what the caller named, for source.filename
         meta = probe(path)
         if meta["duration"] > req.budget.max_audio_seconds:
             raise TranscriptionError("BUDGET_EXCEEDED", f"media is {meta['duration']:.1f}s, budget.max_audio_seconds is {req.budget.max_audio_seconds:g}s; transcription not started",
@@ -67,10 +70,11 @@ class TranscriptionService:
                                      {"engine": engine.id, "model": req.model, "availability": model.availability, "offline": req.offline})
         fp = fingerprint_file(path)
         key = cache_key(fp, engine.id, engine.version or "unknown", engine.execution_mode, req.model, None, req.parameters())
-        return {"path": path, "meta": meta, "engine": engine, "model": model, "fingerprint": fp, "cache_key": key}
+        return {"path": path, "display_name": display_name, "meta": meta, "engine": engine, "model": model, "fingerprint": fp, "cache_key": key,
+                "path_policy": policy.describe()}
 
     def _workspace_for(self, req: TranscribeRequest) -> str:
-        return os.path.abspath(req.workspace) if req.workspace else self.workspace
+        return resolve_workspace(req.workspace) if req.workspace else self.workspace
 
     # ---- dry run ------------------------------------------------------------------------------
     def dry_run(self, req: TranscribeRequest) -> Dict[str, Any]:
@@ -83,8 +87,9 @@ class TranscriptionService:
         return {
             "dry_run": True,
             "request": summarize_for_display(req),
-            "input": {"filename": os.path.basename(prep["path"]), "fingerprint": prep["fingerprint"], "duration": prep["meta"]["duration"],
+            "input": {"filename": prep["display_name"], "fingerprint": prep["fingerprint"], "duration": prep["meta"]["duration"],
                       "has_video": prep["meta"]["has_video"], "audio": prep["meta"]["audio"]},
+            "path_policy": prep["path_policy"],
             "engine": {"id": eng.id, "version": eng.version, "execution_mode": eng.execution_mode, "requires_network": eng.requires_network,
                        "capabilities": eng.capabilities(), "word_timestamps": eng.supports_word_timestamps(), "supported_languages": len(eng.supported_languages)},
             "model": prep["model"].to_dict(),
@@ -119,8 +124,7 @@ class TranscriptionService:
                 return {"transcript": hit, "cache_hit": True, "cache_key": prep["cache_key"], "warnings": warnings}
 
         engine: TranscriptionEngine = prep["engine"]
-        run_dir = os.path.join(ws, "tmp", uuid.uuid4().hex)
-        os.makedirs(run_dir, exist_ok=True)
+        run_dir = make_run_dir(ws, uuid.uuid4().hex)
         try:
             wav = os.path.join(run_dir, "audio.wav")
             extraction = extract_audio(prep["path"], wav)
@@ -282,7 +286,7 @@ def build_transcript(req: TranscribeRequest, prep: Dict[str, Any], result: Engin
         segments.append(Segment(id=seg_id, start=start, end=end, text=text, raw_text=raw,
                                 confidence=None if s.confidence is None else float(s.confidence), words=words, speaker_id=None).to_dict())
 
-    src = Source(filename=os.path.basename(prep["path"]), fingerprint=prep["fingerprint"], size_bytes=int(meta["size_bytes"]), media_duration=duration,
+    src = Source(filename=prep["display_name"], fingerprint=prep["fingerprint"], size_bytes=int(meta["size_bytes"]), media_duration=duration,
                  audio_channels=meta["audio"].get("channels"), sample_rate=meta["audio"].get("sample_rate"), container=meta.get("container"),
                  has_video=bool(meta["has_video"]))
     created = now_iso()

@@ -45,6 +45,7 @@ stdout) and `transcribe` accepts `--dry-run` (plan only, no ASR).
 | "no internet here", "air-gapped", "must not upload the audio" | `transcribe ... --offline` (refuses remote engines and any model download); `doctor --offline` first |
 | "which engines / models can I use here" | `engines` / `engines --engine faster_whisper` / `engines --offline --language ja` |
 | calling from another program / an agent adapter | `run -` with `{"tool": ..., "params": {...}}` on stdin; read the one JSON document on stdout |
+| "only transcribe files from this folder", agent-supplied paths | `transcribe ... --allowed-input DIR` (or `allowed_input_roots` in `run -`); `doctor --allowed-input DIR` shows the policy |
 
 ## Report format
 
@@ -84,6 +85,9 @@ never "fix" the transcript text yourself when the user asked for the transcript.
 - No shell strings: every parameter is a typed flag or JSON key. There is no `--command`.
 - No cloud, no API keys: the only implemented engine runs locally. Environment credentials are not
   passed to child processes and never appear in outputs. `--offline` is enforced, not advisory.
+- Input paths are untrusted. With `--allowed-input`, `..`, symlink escapes and sibling-prefix
+  directories are refused as `INVALID_INPUT` (`details.reason` says which); without it, any readable
+  regular file is accepted as before. The transcript never contains the input path.
 - No engine ranking: `engines --offline --language ja` lists candidates and rejection reasons; which
   candidate to use is your (or the production agent's) decision.
 - An engine without language detection needs `--language`; the skill never fills a language in.

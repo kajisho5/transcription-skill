@@ -29,6 +29,9 @@ from transcription_skill.engines import EngineRequirements, default_registry, ge
 from transcription_skill.errors import TranscriptionError  # noqa: E402
 from transcription_skill.skill import skill_contract  # noqa: E402
 from transcription_skill.cache import TranscriptCache  # noqa: E402
+from transcription_skill.paths import PathPolicy, is_within, make_run_dir  # noqa: E402
+from transcription_skill.doctor import run_doctor  # noqa: E402
+import ntpath  # noqa: E402
 from transcription_skill.export import to_srt  # noqa: E402
 from transcription_skill.request import parse_request  # noqa: E402
 from transcription_skill.service import TranscriptionService  # noqa: E402
@@ -78,6 +81,12 @@ def run_case(case: Dict[str, Any], svc: TranscriptionService, model: str) -> Dic
         return out
     if m in ("registry_contract", "model_status", "offline_no_download", "identity_separation", "selector_no_ranking", "json_protocol"):
         run_contract_case2(case, check)
+        out["ok"] = all(c["ok"] for c in checks)
+        out["seconds"] = round(time.time() - t0, 2)
+        return out
+    if m in ("allowed_root_inside", "traversal_rejected", "prefix_collision", "symlink_escape", "workspace_escape", "windows_path_boundary",
+             "cache_boundary", "doctor_path_policy", "run_stdin_path_policy"):
+        run_path_case(case, check, model)
         out["ok"] = all(c["ok"] for c in checks)
         out["seconds"] = round(time.time() - t0, 2)
         return out
@@ -331,6 +340,122 @@ def run_contract_case2(case: Dict[str, Any], check) -> None:
             check(f"run - with {stdin!r} -> error JSON", doc is not None and doc.get("ok") is False and rc == 2, rc, 2)
         rc, doc, err = run(["run", "-"], json.dumps({"tool": "transcription/check", "params": {"transcript": str(ROOT / "schemas" / "transcript.schema.json")}}))
         check("run - transport ok, tool result carries the verdict", doc is not None and doc["ok"] is True and doc["result"]["ok"] is False and rc == 0, (rc, doc and doc.get("ok")), (0, True))
+
+
+def _expect_error(fn, code, reason=None):
+    try:
+        fn()
+        return False, "no error"
+    except TranscriptionError as exc:
+        ok = exc.code == code and (reason is None or exc.details.get("reason") == reason)
+        return ok, f"{exc.code}/{exc.details.get('reason')}"
+
+
+def run_path_case(case: Dict[str, Any], check, model: str) -> None:
+    """Path boundary evals on a sandbox with real fixture audio (the real engine runs in case 21)."""
+    import shutil
+    m = case["metric"]
+    box = os.path.realpath(tempfile.mkdtemp(prefix="ts_eval_path_"))
+    root = os.path.join(box, "media"); os.makedirs(os.path.join(root, "sub"))
+    evil = os.path.join(box, "media_evil"); os.makedirs(evil)
+    outside = os.path.join(box, "outside"); os.makedirs(outside)
+    inside = os.path.join(root, "en.wav"); shutil.copy(ROOT / "tests/fixtures/en_short.wav", inside)
+    secret = os.path.join(outside, "secret.wav"); shutil.copy(ROOT / "tests/fixtures/en_short.wav", secret)
+    shutil.copy(ROOT / "tests/fixtures/en_short.wav", os.path.join(evil, "en.wav"))
+    ws = os.path.join(box, "ws")
+    svc = TranscriptionService(workspace=ws)
+    policy = PathPolicy([root])
+    cwd = os.getcwd()
+    try:
+        if m == "allowed_root_inside":
+            os.chdir(root)
+            a = svc.transcribe(parse_request({"input": "en.wav", "language": "en", "model": model, "allowed_input_roots": [root]}))
+            b = svc.transcribe(parse_request({"input": inside, "language": "en", "model": model, "allowed_input_roots": [root]}))
+            check("relative input inside root transcribed", validate_transcript(a["transcript"]).ok and not a["cache_hit"], a["cache_hit"], False)
+            check("absolute input hits the same cache entry", b["cache_hit"] and a["cache_key"] == b["cache_key"], b["cache_hit"], True)
+            check("one cache entry", TranscriptCache(ws).count() == 1, TranscriptCache(ws).count(), 1)
+            check("no input or workspace path in the transcript", root not in json.dumps(a["transcript"]) and ws not in json.dumps(a["transcript"]), True, True)
+            check("outside root refused", _expect_error(lambda: svc.transcribe(parse_request({"input": secret, "language": "en", "model": model, "allowed_input_roots": [root]})), "INVALID_INPUT", "outside_allowed_roots")[0], True, True)
+        elif m == "traversal_rejected":
+            os.chdir(os.path.join(root, "sub"))
+            forms = ["../en.wav", "../../outside/secret.wav", "..\\..\\outside\\secret.wav", root + "//..//outside//secret.wav", os.path.join(root, "..", "outside", "secret.wav")]
+            results = [_expect_error(lambda f=f: policy.resolve_input(f), "INVALID_INPUT", "traversal") for f in forms]
+            check("every traversal form refused with reason traversal", all(r[0] for r in results), [r[1] for r in results], "INVALID_INPUT/traversal x5")
+            check("unrestricted policy still resolves '..' (backward compatible)", PathPolicy().resolve_input("../en.wav") == inside, True, True)
+        elif m == "prefix_collision":
+            ok, got = _expect_error(lambda: policy.resolve_input(os.path.join(evil, "en.wav")), "INVALID_INPUT", "outside_allowed_roots")
+            check("media_evil not authorised by media root", ok, got, "INVALID_INPUT/outside_allowed_roots")
+            check("component-wise containment", not is_within(root, root + "_evil/en.wav") and is_within(root, os.path.join(root, "sub", "x.wav")), True, True)
+        elif m == "symlink_escape":
+            try:
+                os.symlink(secret, os.path.join(root, "link_out.wav"))
+                os.symlink(inside, os.path.join(root, "link_in.wav"))
+            except (OSError, NotImplementedError) as exc:
+                check("symlink support on this host", False, str(exc), "symlinks creatable")
+            else:
+                ok, got = _expect_error(lambda: policy.resolve_input(os.path.join(root, "link_out.wav")), "INVALID_INPUT", "symlink_escape")
+                check("symlink to outside refused", ok, got, "INVALID_INPUT/symlink_escape")
+                check("symlink to inside resolves to target", policy.resolve_input(os.path.join(root, "link_in.wav")) == inside, True, True)
+        elif m == "workspace_escape":
+            run_dir = make_run_dir(ws, "r1")
+            check("run dir inside workspace", is_within(os.path.realpath(ws), os.path.realpath(run_dir)), True, True)
+            try:
+                make_run_dir(ws, "r1"); check("run dir never reused", False, "reused", "FileExistsError")
+            except FileExistsError:
+                check("run dir never reused", True, True, True)
+            ws2 = os.path.join(box, "ws2"); os.makedirs(ws2)
+            try:
+                os.symlink(outside, os.path.join(ws2, "tmp"), target_is_directory=True)
+                ok, got = _expect_error(lambda: make_run_dir(ws2, "r2"), "INVALID_INPUT", "workspace_escape")
+                check("symlinked tmp/ refused", ok and not os.path.exists(os.path.join(outside, "r2")), got, "INVALID_INPUT/workspace_escape")
+            except (OSError, NotImplementedError) as exc:
+                check("symlink support on this host", False, str(exc), "symlinks creatable")
+        elif m == "windows_path_boundary":
+            cases = [(r"C:\w\media", r"c:\W\MEDIA\A.MP4", True), (r"C:\w\media", "C:/w/media/sub/a.mp4", True), (r"C:\w\media", r"C:\w\media_evil\a.mp4", False),
+                     (r"C:\w\media", r"D:\w\media\a.mp4", False), (r"C:\w\media", r"\\server\share\a.mp4", False),
+                     (r"\\server\share\media", r"\\server\share\media_evil\a.mp4", False), (r"\\server\share\media", r"\\server\share\media\a.mp4", True),
+                     (r"C:\w\media", r"C:\w\media\..\x.mp4", False)]
+            bad = [(r, p) for r, p, exp in cases if is_within(r, p, ntpath) != exp]
+            check("ntpath containment semantics", not bad, bad, [])
+            check("host OS rejects drive/UNC escapes", all(_expect_error(lambda f=f: policy.resolve_input(f), "INVALID_INPUT")[0] or _expect_error(lambda f=f: policy.resolve_input(f), "FILE_NOT_FOUND")[0]
+                                                            for f in (r"D:\evil\a.wav", r"\\server\share\a.wav")), True, True)
+        elif m == "cache_boundary":
+            cache = TranscriptCache(ws)
+            bad = [k for k in ("../../etc/passwd", "..\\x", "abc", "/" + "a" * 63) if not _expect_error(lambda k=k: cache.path(k), "CACHE_INVALID")[0]]
+            check("path-like keys refused", not bad, bad, [])
+            p = cache.path("b" * 64)
+            check("entries live under workspace/transcripts by key only", is_within(os.path.realpath(ws), p) and os.path.basename(p) == "b" * 64 + ".json", p, "<ws>/transcripts/<key>.json")
+            r1 = svc.transcribe(parse_request({"input": inside, "language": "en", "model": model}))
+            r2 = svc.transcribe(parse_request({"input": secret, "language": "en", "model": model}))
+            check("same content at two paths -> one entry", r2["cache_hit"] and r1["cache_key"] == r2["cache_key"] and TranscriptCache(ws).count() == 1, TranscriptCache(ws).count(), 1)
+        elif m == "doctor_path_policy":
+            rep = run_doctor(ws, allowed_input_roots=[root])
+            rows = {r["check"]: r for r in rep["checks"]}
+            check("policy row", rows["input path policy"]["mode"] == "allowed_roots" and rows["input path policy"]["allowed_roots"] == [root], rows["input path policy"].get("mode"), "allowed_roots")
+            check("cache/tmp/model cache roots distinct", len({rows["cache"]["root"], rows["tmp"]["root"], rows["model cache"]["root"]}) == 3, True, True)
+            check("workspace roots under workspace", all(is_within(os.path.realpath(ws), rows[k]["root"]) for k in ("cache", "tmp")), True, True)
+            check("model cache root outside workspace", not is_within(os.path.realpath(ws), rows["model cache"]["root"]), True, True)
+            text = json.dumps(rep)
+            check("no credential-like strings", not re.search(r"sk-[A-Za-z0-9]{16,}|hf_[A-Za-z0-9]{16,}|Bearer ", text), True, True)
+            check("unrestricted by default", {r["check"]: r for r in run_doctor(ws)["checks"]}["input path policy"]["mode"] == "unrestricted", True, True)
+        elif m == "run_stdin_path_policy":
+            env = dict(os.environ, TRANSCRIPTION_WORKSPACE=ws, PYTHONUTF8="1")
+            def run(params):
+                req = json.dumps({"tool": "transcription/transcribe", "params": dict(params, dry_run=True, model=model)})
+                p = subprocess.run([sys.executable, "-m", "transcription_skill.cli", "run", "-"], input=req, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+                return p.returncode, json.loads(p.stdout), p.stderr
+            rc, doc, err = run({"input": secret, "allowed_input_roots": [root]})
+            check("run - refuses outside root with one JSON document", rc == 2 and doc["ok"] is False and doc["error"]["details"].get("reason") == "outside_allowed_roots" and "Traceback" not in err, (rc, doc.get("error", {}).get("details")), (2, "outside_allowed_roots"))
+            rc, doc, err = run({"input": "../secret.wav", "allowed_input_roots": [root]})
+            check("run - refuses traversal", rc == 2 and doc["error"]["details"].get("reason") == "traversal", doc.get("error", {}).get("details"), "traversal")
+            rc, doc, err = run({"input": inside, "allowed_input_roots": [root]})
+            check("run - accepts inside root", rc == 0 and doc["ok"] and doc["result"]["path_policy"]["mode"] == "allowed_roots", rc, 0)
+            direct = subprocess.run([sys.executable, "-m", "transcription_skill.cli", "transcribe", secret, "--allowed-input", root, "--dry-run", "--json", "--model", model],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+            check("CLI and run - agree", direct.returncode == 2 and json.loads(direct.stdout)["error"]["details"].get("reason") == "outside_allowed_roots", direct.returncode, 2)
+    finally:
+        os.chdir(cwd)
+        shutil.rmtree(box, ignore_errors=True)
 
 
 def main() -> int:

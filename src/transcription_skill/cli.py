@@ -42,6 +42,8 @@ def _transcribe_params(args: argparse.Namespace) -> Dict[str, Any]:
         p["asset_id"] = args.asset_id
     if args.workspace:
         p["workspace"] = args.workspace
+    if args.allowed_input:
+        p["allowed_input_roots"] = list(args.allowed_input)
     budget: Dict[str, Any] = {}
     if args.timeout is not None:
         budget["timeout"] = args.timeout
@@ -68,6 +70,8 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
             print(f"  language  {res['language']}   word timestamps: {res['word_timestamps']}   offline: {res['offline']}   network use: {res['network_use']}")
             print(f"  budget    timeout {res['budget']['timeout']:g}s, max audio {res['budget']['max_audio_seconds']:g}s")
             print(f"  cache     {c['status']} ({c['key'][:16]}...)   workspace {res['workspace']}")
+            pp = res["path_policy"]
+            print(f"  input policy {pp['mode']}" + (f": {', '.join(pp['allowed_roots'])}" if pp["allowed_roots"] else ""))
             print(f"  would run ASR: {'yes' if res['would_run'] else 'no (cached)'}")
         return 0
     doc = res["transcript"]
@@ -182,7 +186,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    rep = run_doctor(args.workspace, offline=args.offline)
+    rep = run_doctor(args.workspace, offline=args.offline, allowed_input_roots=args.allowed_input)
     if args.json:
         _print_json(rep)
     else:
@@ -223,6 +227,7 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--no-cache", action="store_true", help="do not read or write the transcript cache")
     t.add_argument("--offline", action="store_true", help="hard constraint: no network at any step (remote engines refused, missing models are MODEL_UNAVAILABLE)")
     t.add_argument("--workspace", help="cache/tmp directory (default $TRANSCRIPTION_WORKSPACE or ~/.cache/transcription-skill)")
+    t.add_argument("--allowed-input", action="append", metavar="DIR", help="only accept inputs that resolve inside DIR (repeatable); default: any readable file")
     t.add_argument("-o", "--output", help="transcript JSON path (default <input>.transcript.json)")
     t.add_argument("--dry-run", action="store_true", help="show what would run (engine, model, language, budget, cache status) without running ASR")
     t.add_argument("--json", action="store_true", help="print one JSON document on stdout")
@@ -250,6 +255,7 @@ def build_parser() -> argparse.ArgumentParser:
     d = sub.add_parser("doctor", help="check engines, models, ffmpeg, workspace and cache")
     d.add_argument("--workspace")
     d.add_argument("--offline", action="store_true", help="report readiness for offline use (models must already be local)")
+    d.add_argument("--allowed-input", action="append", metavar="DIR", help="show the input path policy that would apply with these roots")
     d.add_argument("--json", action="store_true")
     d.set_defaults(func=cmd_doctor)
 

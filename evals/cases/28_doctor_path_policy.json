@@ -1,0 +1,1 @@
+{"id": "28_doctor_path_policy", "metric": "doctor_path_policy", "note": "doctor --json exposes mode, allowed roots, cache root, tmp root and model cache root, with no credentials."}

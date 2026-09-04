@@ -1,0 +1,1 @@
+{"id": "23_prefix_collision_rejected", "metric": "prefix_collision", "note": "A sibling directory sharing the root's name as a prefix is outside the root."}

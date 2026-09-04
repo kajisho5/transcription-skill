@@ -10,14 +10,16 @@ from typing import Any, Dict, List, Optional
 from . import __version__
 from .cache import TranscriptCache
 from .engines import all_engines
+from .errors import TranscriptionError
 from .media import find_tool, tool_version
+from .paths import PathPolicy, resolve_workspace
 from .request import DEFAULT_ENGINE, DEFAULT_MODEL, default_workspace
 
 CHECK_MODELS = ("tiny", "base", "small", "medium", "large-v3")
 
 
-def run_doctor(workspace: Optional[str] = None, offline: bool = False) -> Dict[str, Any]:
-    ws = os.path.abspath(workspace or default_workspace())
+def run_doctor(workspace: Optional[str] = None, offline: bool = False, allowed_input_roots: Optional[List[str]] = None) -> Dict[str, Any]:
+    ws = resolve_workspace(workspace or default_workspace())
     rows: List[Dict[str, Any]] = []
 
     def row(name: str, status: str, detail: str, **extra: Any) -> None:
@@ -52,7 +54,17 @@ def run_doctor(workspace: Optional[str] = None, offline: bool = False) -> Dict[s
         row("workspace", "AVAILABLE", ws)
     except OSError as exc:
         row("workspace", "MISSING", f"{ws} not writable: {exc}")
-    row("cache", "AVAILABLE", f"{TranscriptCache(ws).count()} cached transcript(s) under {os.path.join(ws, 'transcripts')}")
+    row("cache", "AVAILABLE", f"{TranscriptCache(ws).count()} cached transcript(s) under {os.path.join(ws, 'transcripts')}", root=os.path.join(ws, "transcripts"))
+    row("tmp", "AVAILABLE", f"per-run directories under {os.path.join(ws, 'tmp')} (exclusive, removed after each run)", root=os.path.join(ws, "tmp"))
+    hub = os.environ.get("HF_HUB_CACHE") or os.path.join(os.environ.get("HF_HOME", os.path.join(os.path.expanduser("~"), ".cache", "huggingface")), "hub")
+    row("model cache", "AVAILABLE" if os.path.isdir(hub) else "MISSING", f"{hub} (from HF_HUB_CACHE / HF_HOME only; never from an input path)", root=hub)
+    try:
+        policy = PathPolicy(allowed_input_roots)
+        pd = policy.describe()
+        row("input path policy", "AVAILABLE", f"{pd['mode']}" + (f": {', '.join(pd['allowed_roots'])}" if pd["allowed_roots"] else " (no allowed roots declared: any readable regular file)"),
+            mode=pd["mode"], allowed_roots=pd["allowed_roots"])
+    except TranscriptionError as exc:
+        row("input path policy", "MISSING", exc.message, mode=None, allowed_roots=list(allowed_input_roots or []))
 
     default_engine = engines.get(DEFAULT_ENGINE)
     ready = bool(find_tool("ffmpeg") and find_tool("ffprobe") and default_engine and default_engine.available())

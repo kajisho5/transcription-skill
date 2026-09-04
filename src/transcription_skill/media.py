@@ -48,17 +48,6 @@ def fingerprint_file(path: str, chunk: int = 1 << 20) -> str:
     return "sha256:" + h.hexdigest()
 
 
-def check_input_file(path: str) -> str:
-    """Resolve and check that the input is an existing regular file. Returns the absolute path."""
-    if not os.path.exists(path):
-        raise TranscriptionError("FILE_NOT_FOUND", f"input not found: {path}")
-    if not os.path.isfile(path):
-        raise TranscriptionError("INVALID_INPUT", f"input is not a regular file: {path}")
-    if not os.access(path, os.R_OK):
-        raise TranscriptionError("INVALID_INPUT", f"input is not readable: {path}")
-    return os.path.abspath(path)
-
-
 def probe(path: str) -> Dict[str, Any]:
     """ffprobe summary: duration, audio stream facts, presence of video. Raises UNSUPPORTED_MEDIA."""
     ffprobe = find_tool("ffprobe")

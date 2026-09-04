@@ -1,0 +1,1 @@
+{"id": "22_traversal_rejected", "metric": "traversal_rejected", "note": "Under a declared root every '..' form (posix, backslash, mixed, redundant separators) is INVALID_INPUT reason traversal, before any I/O."}

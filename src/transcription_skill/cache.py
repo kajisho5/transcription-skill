@@ -37,7 +37,8 @@ def cache_key(fingerprint: str, engine_id: str, engine_version: str, execution_m
 
 class TranscriptCache:
     def __init__(self, workspace: str):
-        self.root = os.path.join(os.path.abspath(workspace), "transcripts")
+        from .paths import resolve_workspace
+        self.root = os.path.join(resolve_workspace(workspace), "transcripts")
 
     def path(self, key: str) -> str:
         if not KEY_RE.match(key):

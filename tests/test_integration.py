@@ -204,6 +204,25 @@ class RealMediaTests(unittest.TestCase):
         self.assertEqual(doc["result"]["transcript"]["provenance"]["execution_mode"], "local")
         self.assertTrue(validate_transcript(doc["result"]["transcript"]).ok)
 
+    def test_allowed_root_real(self):
+        box = os.path.realpath(tempfile.mkdtemp(prefix="ts_int_root_"))
+        try:
+            root = os.path.join(box, "media"); os.makedirs(root)
+            shutil.copy(FX / "ja_short.wav", os.path.join(root, "ja.wav"))
+            outside = os.path.join(box, "secret.wav"); shutil.copy(FX / "ja_short.wav", outside)
+            svc = TranscriptionService(workspace=os.path.join(box, "ws"))
+            res = svc.transcribe(parse_request({"input": os.path.join(root, "ja.wav"), "language": "ja", "model": MODEL, "allowed_input_roots": [root]}))
+            self.assertTrue(validate_transcript(res["transcript"]).ok)
+            self.assertEqual(res["transcript"]["source"]["filename"], "ja.wav")
+            with self.assertRaises(TranscriptionError) as cm:
+                svc.transcribe(parse_request({"input": outside, "language": "ja", "model": MODEL, "allowed_input_roots": [root]}))
+            self.assertEqual(cm.exception.details["reason"], "outside_allowed_roots")
+            same = svc.transcribe(parse_request({"input": outside, "language": "ja", "model": MODEL}))   # no policy: same content -> cache hit
+            self.assertTrue(same["cache_hit"])
+            self.assertEqual(os.listdir(os.path.join(box, "ws", "tmp")), [])
+        finally:
+            shutil.rmtree(box, ignore_errors=True)
+
     def test_cli_smoke(self):
         env = dict(os.environ, TRANSCRIPTION_WORKSPACE=self.ws, PYTHONUTF8="1")
         out = os.path.join(self.tmp, "cli.json")

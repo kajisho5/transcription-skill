@@ -129,3 +129,19 @@
 - No `language` in the request + an engine without `language_detection` → `INVALID_INPUT`
   (`language_detection_unsupported`), mirroring the selector's reason code. Guessing a language, or
   defaulting to one, would turn a request parameter into a fabricated fact.
+
+## ADR-024 Allowed roots are opt-in; authorisation is resolved-path containment
+- Declaring `allowed_input_roots` (CLI `--allowed-input`) turns on the boundary; without it the 0.1.0
+  behaviour (any readable regular file) stays, so existing callers are not broken by a silent default
+  change. Authorisation = `realpath(input)` inside `realpath(root)` by path components; a string prefix
+  is never enough. Under a policy any `..` in the raw string is refused even when it would resolve
+  inside, because the caller had no reason to write it. No new error codes: `INVALID_INPUT` with
+  `details.reason` (`traversal`, `outside_allowed_roots`, `symlink_escape`, `not_regular_file`).
+
+## ADR-025 Five directories, five roles, none derived from an input path
+- input / allowed root / workspace / cache / model cache are distinct. The workspace comes from the
+  request or `TRANSCRIPTION_WORKSPACE`; the cache is `<workspace>/transcripts/<content key>`; the model
+  cache is `HF_HUB_CACHE`/`HF_HOME`; per-run temp dirs are created exclusively under the workspace and
+  verified to resolve inside it. `PathPolicy` is a standalone class so a future batch entry point
+  applies the same check per item. Cache identity is unaffected by the policy: the same bytes at a
+  relative, absolute or symlinked path are one entry.

@@ -10,7 +10,9 @@ pipeline, with the ASR engine isolated behind a contract and a subprocess bounda
 ```
 TranscribeRequest (typed JSON)         request.py     parse_request(): allow-list of keys, refuses command/argv/credentials
         ↓
-check_input_file / probe               media.py       regular file? ffprobe: duration, audio stream, video presence
+PathPolicy.resolve_input               paths.py       traversal (policy mode) → abspath → realpath → allowed-root containment → exists → regular → readable
+        ↓
+probe                                  media.py       ffprobe on the resolved path: duration, audio stream, video presence
         ↓
 Budget: max_audio_seconds              service.py     BUDGET_EXCEEDED before anything runs
         ↓
@@ -19,7 +21,7 @@ model availability (no download)       engines/       MODEL_UNKNOWN / MODEL_MISS
         ↓
 fingerprint + cache key                cache.py       sha256(file) ; key = H(fingerprint, {engine id, version, execution_mode}, {model, version}, parameters)
         ↓  hit → return cached Transcript (validated again; CACHE_INVALID → warning + recompute)
-extract_audio                          media.py       fixed ffmpeg argv → mono 16 kHz PCM WAV under <workspace>/tmp/<run>/
+make_run_dir + extract_audio           paths.py/media.py   exclusive <workspace>/tmp/<uuid>/ verified inside the workspace; fixed ffmpeg argv → mono 16 kHz PCM WAV
         ↓
 engine worker subprocess               engines/worker.py   python -m transcription_skill.engines.worker req.json result.json
         ↓  Budget: timeout → process group killed → TRANSCRIPTION_TIMEOUT
@@ -45,6 +47,7 @@ Transcript ──► validate.py      ──► ValidationReport         (transc
 | module | responsibility | runs external programs? |
 |--------|----------------|-------------------------|
 | `request.py` | input contract: allowed keys, types, ranges, budget | no |
+| `paths.py` | input boundary: `PathPolicy` (allowed roots, resolution, traversal/symlink refusal), `is_within` (component containment, posix/nt), `make_run_dir`, `resolve_workspace` | no |
 | `media.py` | fingerprint, ffprobe, fixed audio-extraction recipe, child environment | yes: `ffprobe`, `ffmpeg` (list argv) |
 | `engines/base.py` | `TranscriptionEngine` contract, `EngineSpec`, `ModelStatus`, execution modes and capability vocabulary, `EngineRequest`/`EngineResult` | no |
 | `engines/registry.py` | `EngineRegistry`: register / get / list / available / inspect / find_by_* ; `default_registry()` holds implemented engines only | no |
@@ -104,6 +107,14 @@ fetch. Implemented and registered today: `faster_whisper` (local). Remote engine
 | 10 | Offline = no network for the operation | `service._prepare` + `EngineRequest.offline`; `ServiceTests`, integration, evals 08 and 14 |
 | 11 | Engine availability ≠ model availability | `EngineSpec.available` vs `ModelStatus.availability`; `SelectionMatrixTests` |
 | 12 | Agent does not import engine internals | `skill --json` / `run -` are the interface; `ContractDriftTests` keep it truthful |
+| 13 | Input path is untrusted; prefix is never authorisation; resolved path ∈ resolved root; symlink/junction escapes refused | `paths.py`; `tests/test_paths.py`; evals 21–26 |
+| 14 | Input path controls neither model cache nor temporary output location | HF_* only for models; `make_run_dir` under the workspace; `ServicePathTests` |
+| 15 | Path policy ≠ cache identity | key is content/engine/model/parameters; relative vs absolute path share one entry (eval 21, 27) |
+| 16 | `run -` and the CLI share one boundary | both go through `run_tool` → `parse_request` → `PathPolicy` (eval 29) |
+
+Directory roles: input (caller's media, untrusted) · allowed root (boundary) · workspace (`tmp/<run>/`,
+worker files) · cache (`transcripts/<key>.json`, key = content identity) · model cache (engine models,
+`HF_HUB_CACHE`/`HF_HOME`). None is derived from another by string manipulation of an input path.
 
 Identity roles: `Transcript.id` names one result document (new per computation); `provenance.cache_key`
 names the computation (same inputs → same key); `source.fingerprint` / `asset_id` name the input; `engine`

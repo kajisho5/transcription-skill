@@ -1,0 +1,1 @@
+{"id": "24_symlink_escape_rejected", "metric": "symlink_escape", "note": "A symlink inside the root pointing outside is refused (symlink_escape); one pointing inside resolves to its target."}

@@ -52,9 +52,31 @@
   after each run.
 - Exports refuse to overwrite the transcript they were rendered from or the media input;
   `transcribe -o` refuses to overwrite the input. Output directories must already exist.
-- The media input can be any readable file the user names; there is no separate allowed-roots policy
-  in this version (the same limitation video-production-agent records in its ADR-010). A consumer that
-  needs one applies it before calling the skill.
+- **Allowed roots** (`--allowed-input DIR` / request `allowed_input_roots`): when declared, the input's
+  resolved path (symlinks followed, `os.path.realpath`) must be inside a resolved root by path
+  components (`os.path.commonpath`, case-folded with `normcase`); a string prefix never authorises.
+  With roots declared, any `..` component in the raw path is refused before any I/O (reason
+  `traversal`); a link or junction whose target leaves the root is refused (`symlink_escape`); a path
+  on another drive or a UNC share fails containment (`outside_allowed_roots`). Directories, FIFOs,
+  devices and other non-regular files are refused (`not_regular_file`); missing files and broken links
+  are `FILE_NOT_FOUND`. Without declared roots the historic behaviour (any readable regular file) is
+  kept: the default is not silently made strict. No new error codes: `INVALID_INPUT` +
+  `details.reason`.
+- The resolved path, not the raw string, is used for hashing, probing and extraction, so a later swap
+  of a symlink cannot redirect what was checked. The final open of the file itself is still
+  check-then-use (no O_NOFOLLOW / handle-based verification is attempted, for portability); a
+  filesystem the caller can race is outside this skill's guarantee and is documented as such.
+- Windows: junctions and directory symlinks are followed by `os.path.realpath` on Python ≥ 3.8 and
+  therefore fall under the same containment check; drive and UNC escapes are covered by ntpath
+  semantics, tested on every OS through `ntpath` and on Windows itself in CI. Behaviour on
+  filesystems without symlink support and with reparse points other than junctions/symlinks was not
+  exercised here.
+- Temporary files: every run gets an exclusively created `<workspace>/tmp/<uuid>/` (`os.mkdir`, never
+  reused), verified to resolve inside the workspace (a symlinked `tmp/` is refused as
+  `workspace_escape`), and removed after the run. Extracted audio never lands next to the input.
+- Model cache: located from `HF_HUB_CACHE` / `HF_HOME` only; no request field, input path or other
+  variable can move it. Transcript cache: `<workspace>/transcripts/<sha256>.json`, addressed by the
+  content key only (path-like keys are refused), so the input path never shapes a cache location.
 
 ## Result integrity
 

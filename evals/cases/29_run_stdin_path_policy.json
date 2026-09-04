@@ -1,0 +1,1 @@
+{"id": "29_run_stdin_path_policy", "metric": "run_stdin_path_policy", "note": "run - applies the same allowed-root boundary as the CLI and answers with one JSON error document."}
