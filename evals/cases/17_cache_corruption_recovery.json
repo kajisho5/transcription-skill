@@ -1,0 +1,2 @@
+{"id": "17_cache_corruption_recovery", "metric": "cache_corruption", "input": "tests/fixtures/en_short.wav", "request": {"language": "en"},
+ "note": "A corrupted or tampered cache entry is never returned: CACHE_INVALID warning, recompute, valid transcript."}

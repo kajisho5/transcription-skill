@@ -1,0 +1,25 @@
+{
+  "_comment": "Reference values for the committed fixtures. Regenerate the media with make_fixtures.sh; speech starts after `speech_onset` seconds of digital silence and ends `tail_silence` seconds before the end.",
+  "ja_short.wav": {
+    "language": "ja",
+    "reference_text": "本日の講演を始めます。よろしくお願いします。まず最初に、会場の音響設備についてご説明します。",
+    "speech_onset": 1.0,
+    "tail_silence": 0.5,
+    "tts": "open-jtalk 1.11 with hts-voice-nitech-jp-atr503-m001 (CC BY 3.0, Nagoya Institute of Technology)"
+  },
+  "en_short.wav": {
+    "language": "en",
+    "reference_text": "Good morning everyone. Welcome to the conference. Let's begin the first session with a short introduction.",
+    "speech_onset": 1.0,
+    "tail_silence": 0.5,
+    "tts": "espeak-ng en-us"
+  },
+  "lecture_short.mp4": {
+    "parts": [
+      {"language": "ja", "reference": "ja_short.wav", "offset": 0.0},
+      {"language": "en", "reference": "en_short.wav", "offset_after_first_plus_gap": 1.0}
+    ],
+    "video": "testsrc2 320x180 15 fps H.264",
+    "note": "Japanese part, 1.0 s of silence, then the English part; audio is AAC 48 kbps mono 16 kHz"
+  }
+}

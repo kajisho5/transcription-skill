@@ -1,0 +1,1 @@
+{"id": "26_windows_path_boundary", "metric": "windows_path_boundary", "note": "ntpath semantics: case-insensitive containment, forward slashes, drive escape, UNC escape, UNC prefix collision."}

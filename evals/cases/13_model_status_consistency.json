@@ -1,0 +1,2 @@
+{"id": "13_model_status_consistency", "metric": "model_status",
+ "note": "status / availability / source / version / download_required agree with each other for every supported model, online and offline."}

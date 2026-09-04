@@ -1,0 +1,2 @@
+{"id": "15_transcript_timestamp_integrity", "metric": "timestamp_integrity", "input": "tests/fixtures/lecture_short.mp4", "request": {"word_timestamps": true},
+ "note": "0 <= start < end <= duration (+0.5 s engine tolerance) for every segment and word; words inside their segment; no NaN/inf."}

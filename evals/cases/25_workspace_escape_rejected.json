@@ -1,0 +1,1 @@
+{"id": "25_workspace_escape_rejected", "metric": "workspace_escape", "note": "Per-run directories are exclusive and must resolve inside the workspace; a symlinked tmp/ is refused."}

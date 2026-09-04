@@ -1,0 +1,3 @@
+{"id": "07_local_engine_discovery", "metric": "registry",
+ "expect_engines": ["faster_whisper"], "expect_execution_mode": "local", "expect_requires_network": false,
+ "note": "The registry lists exactly the implemented engines; faster-whisper is a local engine whose recognition never needs the network."}

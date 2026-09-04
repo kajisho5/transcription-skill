@@ -1,0 +1,1 @@
+{"id": "27_cache_boundary", "metric": "cache_boundary", "note": "Cache files are addressed by content key only; keys with path characters are refused; entry location is independent of the input path."}

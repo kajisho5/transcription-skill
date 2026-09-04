@@ -1,0 +1,2 @@
+{"id": "16_transcript_provenance_completeness", "metric": "provenance_completeness", "input": "tests/fixtures/en_short.wav", "request": {"language": "en"},
+ "note": "provenance carries engine, engine_version, execution_mode, model, model_version, parameters, parameters_hash, cache_key, skill, skill_version, tool, created_at; source carries the fingerprint."}

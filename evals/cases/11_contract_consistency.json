@@ -1,0 +1,2 @@
+{"id": "11_contract_consistency", "metric": "contract",
+ "note": "`transcription skill --json` agrees with the registry and with schemas/engine_spec.schema.json, and carries no paths or credentials."}

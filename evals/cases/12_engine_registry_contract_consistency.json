@@ -1,0 +1,2 @@
+{"id": "12_engine_registry_contract_consistency", "metric": "registry_contract",
+ "note": "Every EngineSpec in `skill --json` equals the live engine's spec(), inspect(), class attributes and capability methods."}

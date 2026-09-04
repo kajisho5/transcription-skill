@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "transcription-skill"
+version = "0.2.0"
+description = "Speech recognition skill: audio/video in, structured Transcript (segments, word timestamps, SpeechEvent candidates) out. Not a video editing agent."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "kajisho5"}]
+keywords = ["transcription", "asr", "whisper", "agent-skill", "transcript", "speech-to-text"]
+dependencies = []
+
+[project.optional-dependencies]
+faster-whisper = ["faster-whisper>=1.0"]
+
+[project.scripts]
+transcription = "transcription_skill.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/kajisho5/transcription-skill"
+
+[tool.setuptools.packages.find]
+where = ["src"]

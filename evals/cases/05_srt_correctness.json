@@ -1,0 +1,6 @@
+{
+  "id": "05_srt_correctness",
+  "input": "tests/fixtures/ja_short.wav",
+  "request": {"language": "ja"},
+  "metric": "srt"
+}

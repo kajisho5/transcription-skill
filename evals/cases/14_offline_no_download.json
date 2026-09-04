@@ -1,0 +1,2 @@
+{"id": "14_offline_no_download", "metric": "offline_no_download",
+ "note": "Offline, a model that is not on disk is MODEL_MISSING (never DOWNLOAD_REQUIRED), the service refuses before extraction, and the Hugging Face cache is unchanged afterwards."}

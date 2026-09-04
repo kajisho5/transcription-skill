@@ -1,0 +1,2 @@
+{"id": "08_offline_availability", "metric": "offline", "input": "tests/fixtures/en_short.wav", "request": {"language": "en"},
+ "note": "After the model is on disk, an offline request must run with no network; a model that is not local must be refused as MODEL_UNAVAILABLE / MODEL_MISSING, and a remote-only requirement must yield no candidate."}
