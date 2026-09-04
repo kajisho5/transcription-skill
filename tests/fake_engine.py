@@ -1,12 +1,15 @@
-"""Deterministic test engine. Lives in tests/ only: it is never registered in the package's engine
+"""Deterministic test engine. Lives in tests/ only: it is never registered in the package's default
 registry, so nothing outside the test suite can select it. It exercises the engine contract, the
-service, the cache, budgets and validation without any model."""
+service, the cache, budgets, validation and, through `execution_mode`/`requires_network`, the
+local/remote parts of the contract without any model and without any network."""
 from __future__ import annotations
 
 import time
 from typing import Any, Dict, List, Optional
 
-from transcription_skill.engines.base import EngineRequest, EngineResult, EngineSegment, EngineWord, TranscriptionEngine
+from transcription_skill.engines.base import (EXECUTION_LOCAL, MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED, MODEL_MISSING, MODEL_UNKNOWN,
+                                              CAP_LOCAL_MODEL, CAP_MODEL_DOWNLOAD, EngineRequest, EngineResult, EngineSegment, EngineWord,
+                                              ModelStatus, TranscriptionEngine)
 
 FAKE_SEGMENTS: List[Dict[str, Any]] = [
     {"start": 1.0, "end": 3.0, "text": " 本日の講演を始めます。 ", "confidence": 0.9,
@@ -18,10 +21,15 @@ FAKE_SEGMENTS: List[Dict[str, Any]] = [
 
 class FakeEngine(TranscriptionEngine):
     id = "fake"
+    execution_mode = EXECUTION_LOCAL
+    requires_network = False
+    description = "test-only engine"
+    default_model = "fake-model"
 
     def __init__(self, segments: Optional[List[Dict[str, Any]]] = None, delay: float = 0.0, language: Optional[str] = "ja",
                  language_probability: Optional[float] = 0.99, version: str = "1.0", available: bool = True, words: bool = True,
-                 fail: Optional[Exception] = None):
+                 fail: Optional[Exception] = None, local_models: Optional[List[str]] = None, downloadable: bool = False,
+                 execution_mode: Optional[str] = None, requires_network: Optional[bool] = None, engine_id: Optional[str] = None):
         self.segments = FAKE_SEGMENTS if segments is None else segments
         self.delay = delay
         self.language = language
@@ -30,6 +38,14 @@ class FakeEngine(TranscriptionEngine):
         self._available = available
         self._words = words
         self.fail = fail
+        self.local_models = ["fake-model", "base"] if local_models is None else local_models
+        self.downloadable = downloadable
+        if execution_mode is not None:
+            self.execution_mode = execution_mode
+        if requires_network is not None:
+            self.requires_network = requires_network
+        if engine_id is not None:
+            self.id = engine_id
         self.calls: List[EngineRequest] = []
 
     @property
@@ -46,13 +62,29 @@ class FakeEngine(TranscriptionEngine):
     def supported_languages(self) -> List[str]:
         return ["en", "ja"]
 
+    @property
+    def supported_models(self) -> List[str]:
+        return ["fake-model", "base", "remote-only"]
+
     def supports_word_timestamps(self) -> bool:
         return self._words
 
-    def model_status(self, model: str) -> Dict[str, Any]:
-        if model not in ("fake-model", "base"):
-            return {"model": model, "status": "UNKNOWN", "version": None, "detail": "unknown fake model"}
-        return {"model": model, "status": "AVAILABLE", "version": "fake-snapshot", "detail": "built in"}
+    def supports_language_detection(self) -> bool:
+        return True
+
+    def model_capabilities(self) -> List[str]:
+        if self.execution_mode != EXECUTION_LOCAL:
+            return []
+        return [CAP_LOCAL_MODEL] + ([CAP_MODEL_DOWNLOAD] if self.downloadable else [])
+
+    def model_status(self, model: str, offline: bool = False) -> ModelStatus:
+        if model not in self.supported_models:
+            return ModelStatus(model, "UNKNOWN", MODEL_UNKNOWN, None, None, "unknown fake model")
+        if model in self.local_models:
+            return ModelStatus(model, "AVAILABLE", MODEL_AVAILABLE, "local", "fake-snapshot", "built in")
+        if self.downloadable and not offline:
+            return ModelStatus(model, "MISSING", MODEL_DOWNLOAD_REQUIRED, "downloadable", None, "would download", download_required=True)
+        return ModelStatus(model, "MISSING", MODEL_MISSING, None, None, "not local" + (" (offline)" if offline else ""))
 
     def transcribe(self, request: EngineRequest) -> EngineResult:
         self.calls.append(request)

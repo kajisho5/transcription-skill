@@ -1,8 +1,10 @@
 """Deterministic transcript cache.
 
-cache key = sha256 over (input fingerprint, engine id, engine version, model, model version if known,
-language, transcription parameters). Same identity -> same key -> ASR is not run again. A Transcript id
-is a different thing: it names one result document; the cache key names the computation.
+cache key = sha256 over (input fingerprint, engine identity {id, version, execution_mode}, model identity
+{name, version if known}, transcription parameters incl. language). Same identity -> same key -> ASR is
+not run again. Two engines never share a key, and neither do two execution modes of one engine id, so a
+future remote engine cannot return a local engine's cached result or vice versa. A Transcript id is a
+different thing: it names one result document; the cache key names the computation.
 
 Entries live at <workspace>/transcripts/<key>.json. An entry that cannot be read or fails validation
 is reported as CACHE_INVALID and treated as a miss; it is overwritten by the next good result.
@@ -21,10 +23,15 @@ from .validate import validate_transcript
 KEY_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
-def cache_key(fingerprint: str, engine_id: str, engine_version: str, model: str, model_version: Optional[str],
+def cache_identity(fingerprint: str, engine_id: str, engine_version: str, execution_mode: str, model: str, model_version: Optional[str],
+                   parameters: Dict[str, Any]) -> Dict[str, Any]:
+    return {"input": fingerprint, "engine": {"id": engine_id, "version": engine_version, "execution_mode": execution_mode},
+            "model": {"name": model, "version": model_version}, "parameters": parameters}
+
+
+def cache_key(fingerprint: str, engine_id: str, engine_version: str, execution_mode: str, model: str, model_version: Optional[str],
               parameters: Dict[str, Any]) -> str:
-    identity = {"input": fingerprint, "engine": engine_id, "engine_version": engine_version, "model": model,
-                "model_version": model_version, "parameters": parameters}
+    identity = cache_identity(fingerprint, engine_id, engine_version, execution_mode, model, model_version, parameters)
     return hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 

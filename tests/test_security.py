@@ -85,6 +85,25 @@ class StaticSecurityTests(unittest.TestCase):
             for p in pats:
                 self.assertIsNone(p.search(text), f"{f.relative_to(ROOT)} contains a credential-looking string")
 
+    def test_engine_layer_cannot_spawn_processes(self):
+        """Abstracting engines must not open a hole: no engine module may import subprocess or os.exec*/spawn*."""
+        for f in (SRC / "engines").rglob("*.py"):
+            tree = ast.parse(f.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for a in node.names:
+                        self.assertNotEqual(a.name.split(".")[0], "subprocess", f"{f.name} must not spawn processes; the service's worker boundary does")
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    self.assertNotEqual(node.module.split(".")[0], "subprocess", f.name)
+            self.assertNotRegex(f.read_text(encoding="utf-8"), r"os\.(exec\w*|spawn\w*|popen|system)\s*\(", f.name)
+
+    def test_only_faster_whisper_registered_and_no_network_capability(self):
+        from transcription_skill.engines import default_registry
+        specs = default_registry().list()
+        self.assertEqual([s.id for s in specs], ["faster_whisper"])
+        self.assertEqual(specs[0].execution_mode, "local")
+        self.assertFalse(specs[0].requires_network)
+
     def test_forbidden_request_keys_cover_command_passthrough(self):
         from transcription_skill.request import ALLOWED_KEYS, FORBIDDEN_KEYS
         for k in ("command", "argv", "cmd", "shell", "exec", "args"):

@@ -24,7 +24,10 @@ from typing import Any, Dict, List
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from transcription_skill.engines import get_engine  # noqa: E402
+from transcription_skill.cache import cache_key  # noqa: E402
+from transcription_skill.engines import EngineRequirements, default_registry, get_engine, select_engines  # noqa: E402
+from transcription_skill.errors import TranscriptionError  # noqa: E402
+from transcription_skill.skill import skill_contract  # noqa: E402
 from transcription_skill.export import to_srt  # noqa: E402
 from transcription_skill.request import parse_request  # noqa: E402
 from transcription_skill.service import TranscriptionService  # noqa: E402
@@ -60,19 +63,49 @@ def duration_of(path: Path) -> float:
 
 def run_case(case: Dict[str, Any], svc: TranscriptionService, model: str) -> Dict[str, Any]:
     t0 = time.time()
-    req = parse_request(dict(case.get("request", {}), input=str(ROOT / case["input"]), model=model))
-    res = svc.transcribe(req)
-    doc = res["transcript"]
-    rep = validate_transcript(doc)
-    out: Dict[str, Any] = {"id": case["id"], "metric": case["metric"], "valid": rep.ok, "checks": [], "seconds": 0.0}
+    out: Dict[str, Any] = {"id": case["id"], "metric": case["metric"], "checks": [], "seconds": 0.0}
     checks = out["checks"]
 
     def check(name: str, ok: bool, value: Any, expected: Any) -> None:
         checks.append({"check": name, "ok": bool(ok), "value": value, "expected": expected})
 
-    check("transcript valid", rep.ok, rep.errors[:3], [])
     m = case["metric"]
-    if m in ("cer", "wer"):
+    if m in ("registry", "cache_identity", "contract"):
+        run_contract_case(case, check)
+        out["ok"] = all(c["ok"] for c in checks)
+        out["seconds"] = round(time.time() - t0, 2)
+        return out
+    req = parse_request(dict(case.get("request", {}), input=str(ROOT / case["input"]), model=model))
+    res = svc.transcribe(req)
+    doc = res["transcript"]
+    rep = validate_transcript(doc)
+    out["valid"] = rep.ok
+    check("transcript valid", rep.ok, rep.errors[:3], [])
+    if m == "offline":
+        off = TranscriptionService(workspace=os.path.join(svc.workspace, "offline")).transcribe(parse_request(dict(case["request"], input=req.input, model=model, offline=True)))
+        check("offline run with a local model succeeds", off["transcript"]["provenance"]["execution_mode"] == "local", off["transcript"]["provenance"]["execution_mode"], "local")
+        check("offline run did not use the cache of the online run", not off["cache_hit"], off["cache_hit"], False)
+        eng = get_engine(req.engine)
+        not_local = next((mm for mm in eng.supported_models if eng.model_status(mm, offline=True).availability != "MODEL_AVAILABLE"), None)
+        try:
+            svc.transcribe(parse_request(dict(case["request"], input=req.input, model=not_local, offline=True)))
+            check("offline + missing model is refused", False, "no error", "MODEL_UNAVAILABLE")
+        except TranscriptionError as exc:
+            check("offline + missing model is refused", exc.code == "MODEL_UNAVAILABLE" and exc.details.get("availability") == "MODEL_MISSING",
+                  f"{exc.code}/{exc.details.get('availability')}", "MODEL_UNAVAILABLE/MODEL_MISSING")
+        sel = select_engines(EngineRequirements(offline=True, model=model))
+        check("offline candidates", [c.id for c in sel.candidates] == ["faster_whisper"], [c.id for c in sel.candidates], ["faster_whisper"])
+        sel = select_engines(EngineRequirements(execution_mode="remote"))
+        check("remote-only requirement has no candidate", sel.candidates == [] and sel.rejected[0].reasons == ["execution_mode_mismatch"],
+              [r.to_dict() for r in sel.rejected], "execution_mode_mismatch")
+    elif m == "provenance":
+        p = doc["provenance"]
+        check("engine recorded", p["engine"] == "faster_whisper" and doc["engine"] == p["engine"], p["engine"], "faster_whisper")
+        check("engine version recorded", isinstance(p["engine_version"], str) and p["engine_version"] not in ("", "unknown"), p["engine_version"], "installed version")
+        check("execution mode recorded", p["execution_mode"] == "local", p["execution_mode"], "local")
+        check("model and revision recorded", p["model"] == model and isinstance(p["model_version"], str), (p["model"], p["model_version"]), (model, "snapshot id"))
+        check("cache key recomputable", p["cache_key"] == cache_key(doc["source"]["fingerprint"], p["engine"], p["engine_version"], p["execution_mode"], p["model"], None, p["parameters"]), True, True)
+    elif m in ("cer", "wer"):
         ref = REF[case["reference"]]["reference_text"]
         joiner = "" if m == "cer" else " "
         hyp = joiner.join(s["text"] for s in doc["segments"])
@@ -135,6 +168,40 @@ def run_case(case: Dict[str, Any], svc: TranscriptionService, model: str) -> Dic
     out["ok"] = all(c["ok"] for c in checks)
     out["seconds"] = round(time.time() - t0, 2)
     return out
+
+
+def run_contract_case(case: Dict[str, Any], check) -> None:
+    reg = default_registry()
+    if case["metric"] == "registry":
+        specs = reg.list()
+        check("registered engines", [s.id for s in specs] == case["expect_engines"], [s.id for s in specs], case["expect_engines"])
+        fw = reg.get("faster_whisper").spec()
+        check("faster_whisper available", fw.available, fw.available, True)
+        check("execution mode", fw.execution_mode == case["expect_execution_mode"], fw.execution_mode, case["expect_execution_mode"])
+        check("requires_network", fw.requires_network == case["expect_requires_network"], fw.requires_network, case["expect_requires_network"])
+        check("local execution capability", fw.has("local_execution") and not fw.has("network_required"), fw.capabilities, "local_execution, no network_required")
+        check("ja and en supported", "ja" in fw.supported_languages and "en" in fw.supported_languages, len(fw.supported_languages), ">= 2")
+        check("remote query empty", reg.find_by_execution_mode("remote") == [], len(reg.find_by_execution_mode("remote")), 0)
+    elif case["metric"] == "cache_identity":
+        base = dict(fingerprint="sha256:" + "a" * 64, engine_id="faster_whisper", engine_version="1.2.1", execution_mode="local", model="base",
+                    model_version=None, parameters={"language": "ja"})
+        k = cache_key(**base)
+        check("deterministic", k == cache_key(**base), True, True)
+        for name, change in (("engine id", dict(engine_id="other_engine")), ("engine version", dict(engine_version="9.9")),
+                             ("execution mode", dict(execution_mode="remote")), ("model", dict(model="small")), ("model version", dict(model_version="rev"))):
+            check(f"different {name} -> different key", cache_key(**dict(base, **change)) != k, True, True)
+    elif case["metric"] == "contract":
+        c = skill_contract()
+        schema = json.loads((ROOT / "schemas" / "engine_spec.schema.json").read_text(encoding="utf-8"))
+        engines = c["engines"]
+        check("contract engines match registry", [e["id"] for e in engines] == reg.ids(), [e["id"] for e in engines], reg.ids())
+        check("engine spec fields match schema", all(set(e) == set(schema["required"]) for e in engines), True, True)
+        check("model entries match schema", all(set(mm) == set(schema["$defs"]["model_status"]["required"]) for e in engines for mm in e["models"]), True, True)
+        live = {e["id"]: e for e in reg.to_dict(include_models=True)}
+        check("contract engines equal live registry", all(live[e["id"]] == e for e in engines), True, True)
+        text = json.dumps(c, ensure_ascii=False)
+        check("no credential-like keys", not any(f'"{k}"' in text for k in ("api_key", "token", "secret", "password", "command", "argv")), True, True)
+        check("no absolute paths", not re.search(r'"(/|[A-Za-z]:\\)[^"]*"', text), True, True)
 
 
 def main() -> int:

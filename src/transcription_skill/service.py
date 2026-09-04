@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from . import __version__
 from .cache import TranscriptCache, cache_key
 from .engines import TranscriptionEngine, get_engine
-from .engines.base import EngineRequest, EngineResult
+from .engines.base import MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED, EngineRequest, EngineResult
 from .engines.faster_whisper import LANGUAGE_DETECTION_MIN_PROBABILITY
 from .errors import TranscriptionError
 from .media import check_input_file, child_env, extract_audio, fingerprint_file, probe
@@ -46,18 +46,23 @@ class TranscriptionService:
             raise TranscriptionError("BUDGET_EXCEEDED", f"media is {meta['duration']:.1f}s, budget.max_audio_seconds is {req.budget.max_audio_seconds:g}s; transcription not started",
                                      {"duration": meta["duration"], "max_audio_seconds": req.budget.max_audio_seconds})
         engine = self._engine_override or get_engine(req.engine)
+        if req.offline and engine.requires_network:
+            raise TranscriptionError("ENGINE_UNAVAILABLE", f"engine {engine.id} needs the network for recognition and the request is offline",
+                                     {"engine": engine.id, "execution_mode": engine.execution_mode, "reason": "network_required", "offline": True})
         if not engine.available():
-            raise TranscriptionError("ENGINE_UNAVAILABLE", engine.unavailable_reason() or f"engine {engine.id} unavailable")
+            raise TranscriptionError("ENGINE_UNAVAILABLE", engine.unavailable_reason() or f"engine {engine.id} unavailable",
+                                     {"engine": engine.id, "reason": "engine_not_installed"})
         if req.language is not None and req.language not in engine.supported_languages:
             raise TranscriptionError("INVALID_INPUT", f"language {req.language!r} is not supported by engine {engine.id}",
                                      {"supported_count": len(engine.supported_languages)})
         if req.word_timestamps and not engine.supports_word_timestamps():
             raise TranscriptionError("INVALID_INPUT", f"engine {engine.id} does not provide word timestamps")
-        model = engine.model_status(req.model)
-        if model["status"] == "UNKNOWN":
-            raise TranscriptionError("MODEL_UNAVAILABLE", f"model {req.model!r}: {model['detail']}")
+        model = engine.model_status(req.model, offline=req.offline)
+        if model.availability not in (MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED):
+            raise TranscriptionError("MODEL_UNAVAILABLE", f"model {req.model!r}: {model.detail}",
+                                     {"engine": engine.id, "model": req.model, "availability": model.availability, "offline": req.offline})
         fp = fingerprint_file(path)
-        key = cache_key(fp, engine.id, engine.version or "unknown", req.model, None, req.parameters())
+        key = cache_key(fp, engine.id, engine.version or "unknown", engine.execution_mode, req.model, None, req.parameters())
         return {"path": path, "meta": meta, "engine": engine, "model": model, "fingerprint": fp, "cache_key": key}
 
     def _workspace_for(self, req: TranscribeRequest) -> str:
@@ -76,10 +81,14 @@ class TranscriptionService:
             "request": summarize_for_display(req),
             "input": {"filename": os.path.basename(prep["path"]), "fingerprint": prep["fingerprint"], "duration": prep["meta"]["duration"],
                       "has_video": prep["meta"]["has_video"], "audio": prep["meta"]["audio"]},
-            "engine": {"id": eng.id, "version": eng.version, "word_timestamps": eng.supports_word_timestamps(), "supported_languages": len(eng.supported_languages)},
-            "model": prep["model"],
+            "engine": {"id": eng.id, "version": eng.version, "execution_mode": eng.execution_mode, "requires_network": eng.requires_network,
+                       "capabilities": eng.capabilities(), "word_timestamps": eng.supports_word_timestamps(), "supported_languages": len(eng.supported_languages)},
+            "model": prep["model"].to_dict(),
             "language": req.language or "auto",
             "word_timestamps": req.word_timestamps,
+            "offline": req.offline,
+            "network_use": "none" if (req.offline or (not eng.requires_network and prep["model"].availability == MODEL_AVAILABLE))
+                           else ("model download" if prep["model"].availability == MODEL_DOWNLOAD_REQUIRED else "recognition"),
             "budget": req.budget.to_dict(),
             "cache": {"status": cache_status, "key": prep["cache_key"]},
             "workspace": ws,
@@ -112,7 +121,7 @@ class TranscriptionService:
             wav = os.path.join(run_dir, "audio.wav")
             extraction = extract_audio(prep["path"], wav)
             ereq = EngineRequest(audio_path=wav, language=req.language, model=req.model, word_timestamps=req.word_timestamps,
-                                 temperature=req.temperature, initial_prompt=req.initial_prompt, beam_size=req.beam_size)
+                                 temperature=req.temperature, initial_prompt=req.initial_prompt, beam_size=req.beam_size, offline=req.offline)
             t_engine = time.time()
             result = self._run_engine(engine, ereq, req.budget.timeout, run_dir)
             engine_seconds = time.time() - t_engine
@@ -273,7 +282,9 @@ def build_transcript(req: TranscribeRequest, prep: Dict[str, Any], result: Engin
                  audio_channels=meta["audio"].get("channels"), sample_rate=meta["audio"].get("sample_rate"), container=meta.get("container"),
                  has_video=bool(meta["has_video"]))
     created = now_iso()
-    prov = Provenance(engine=result.engine_id, engine_version=result.engine_version, model=result.model, model_version=result.model_version,
+    engine: TranscriptionEngine = prep["engine"]
+    prov = Provenance(engine=result.engine_id, engine_version=result.engine_version, execution_mode=engine.execution_mode,
+                      model=result.model, model_version=result.model_version,
                       parameters=req.parameters(), parameters_hash=req.parameters_hash(), cache_key=prep["cache_key"], created_at=created,
                       processing_seconds=round(processing_seconds, 3), skill_version=__version__, language_detection=detection,
                       audio_extraction=dict(extraction, engine_seconds=round(engine_seconds, 3)))

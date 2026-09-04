@@ -69,3 +69,41 @@
 - `--json` = one JSON document on stdout; `--dry-run` runs no ASR; structured errors with exit codes
   0/1/2; `doctor` with AVAILABLE/MISSING/DEGRADED/UNKNOWN. This lets the adapter pattern already used
   for ffmpeg-skill (process boundary, stdout JSON contract) apply unchanged.
+
+## ADR-014 Engine ecosystem: one contract, one registry, filtering without ranking
+- `EngineSpec` is the static, publishable description (`execution_mode`, `requires_network`,
+  capabilities, languages, models with availability); `TranscriptionEngine` is the runtime. The
+  registry answers "what exists / what is usable"; `select_engines` applies hard constraints and returns
+  every survivor with reasons for the rest. No component of this skill decides which engine is best:
+  that is the consumer's (video-production-agent's) decision layer.
+
+## ADR-015 local / remote is a published fact, not an implementation detail
+- `execution_mode` and `requires_network` live on the engine class and in `EngineSpec`, so a consumer
+  can treat "local ASR available" as a capability. "Network for recognition" (`requires_network`) and
+  "network to fetch a model once" (`ModelStatus.availability = MODEL_DOWNLOAD_REQUIRED`) are separate
+  facts; an air-gapped machine with the model on disk is `MODEL_AVAILABLE` and fully usable.
+
+## ADR-016 Only implemented engines are registered; remote engines are contract-only
+- The default registry holds `faster_whisper`. Cloud ASR and whisper.cpp are expressible through the
+  contract and are tested through the test-only `FakeEngine` posing as remote, but no client, SDK,
+  HTTP code or credential handling exists in this repository. Registering a "future" engine as if it
+  existed would make `doctor`, `engines` and the contract lie.
+
+## ADR-017 `offline` is a hard constraint enforced in three places
+- Before running: a `requires_network` engine is `ENGINE_UNAVAILABLE` (reason `network_required`), a
+  model that is not on disk is `MODEL_UNAVAILABLE` (`availability: MODEL_MISSING`). At the engine:
+  `EngineRequest.offline` makes faster-whisper load with `local_files_only`. In discovery:
+  `engines --offline`, `doctor --offline` and `--dry-run` report the same facts. No new error codes:
+  `details.availability` carries the reason.
+
+## ADR-018 Cache identity includes engine identity and execution mode; provenance records execution mode
+- Key = H(fingerprint, {engine id, version, execution_mode}, {model, model_version}, parameters).
+  Two engines, or one engine id in two execution modes, never share a cached transcript.
+  `provenance.execution_mode` is required (schema stays `transcript/0.1`; no 0.1.0 documents were
+  released before this change) so any transcript says where it was produced.
+
+## ADR-019 Engine abstraction does not widen the execution boundary
+- Engine modules may not import `subprocess` or call `os.exec*/spawn*/popen/system` (static test). The
+  service's fixed worker argv remains the only process launch for recognition. An engine that needs a
+  binary (whisper.cpp, one day) must go through a fixed argv in the media/service layer, not spawn on
+  its own.

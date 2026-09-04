@@ -160,6 +160,28 @@ class RealMediaTests(unittest.TestCase):
             self.svc.transcribe(self.req("ja_short.wav", model="gigantic"))
         self.assertEqual(cm.exception.code, "MODEL_UNAVAILABLE")
 
+    def test_offline_end_to_end(self):
+        """Model is cached by the earlier tests: offline must work with no network and refuse a model that is not local."""
+        self.svc.transcribe(self.req("en_short.wav", language="en"))            # ensures the model is on disk
+        res = TranscriptionService(workspace=os.path.join(self.tmp, "ws_off")).transcribe(self.req("en_short.wav", language="en", offline=True))
+        doc = res["transcript"]
+        self.assertFalse(res["cache_hit"])
+        self.assertEqual(doc["provenance"]["execution_mode"], "local")
+        self.assertEqual(doc["language"], "en")
+        with self.assertRaises(TranscriptionError) as cm:
+            self.svc.transcribe(self.req("en_short.wav", model="large-v3", offline=True))
+        self.assertEqual(cm.exception.code, "MODEL_UNAVAILABLE")
+        self.assertEqual(cm.exception.details["availability"], "MODEL_MISSING")
+        env = dict(os.environ, TRANSCRIPTION_WORKSPACE=self.ws, PYTHONUTF8="1")
+        p = subprocess.run([sys.executable, "-m", "transcription_skill.cli", "engines", "--offline", "--language", "ja", "--json"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        sel = json.loads(p.stdout)
+        self.assertEqual([c["id"] for c in sel["candidates"]], ["faster_whisper"])
+        p = subprocess.run([sys.executable, "-m", "transcription_skill.cli", "doctor", "--offline"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        self.assertEqual(p.returncode, 0, p.stdout)
+        self.assertIn("ready to transcribe offline", p.stdout)
+
     def test_cli_smoke(self):
         env = dict(os.environ, TRANSCRIPTION_WORKSPACE=self.ws, PYTHONUTF8="1")
         out = os.path.join(self.tmp, "cli.json")

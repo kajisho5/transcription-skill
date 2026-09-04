@@ -19,7 +19,7 @@ DEFAULT_MODEL = "base"
 MAX_INITIAL_PROMPT_CHARS = 500
 
 ALLOWED_KEYS = {"input", "language", "engine", "model", "word_timestamps", "temperature", "initial_prompt", "beam_size",
-                "asset_id", "budget", "cache", "workspace"}
+                "asset_id", "budget", "cache", "workspace", "offline"}
 FORBIDDEN_KEYS = {"command", "argv", "cmd", "shell", "exec", "args", "script", "binary", "api_key", "apikey", "token",
                   "secret", "password", "credentials", "env"}
 BUDGET_KEYS = {"timeout", "max_audio_seconds"}
@@ -52,6 +52,7 @@ class TranscribeRequest:
     budget: Budget = field(default_factory=Budget)
     cache: bool = True
     workspace: Optional[str] = None
+    offline: bool = False                # hard constraint: no network at any step (no remote engine, no model download)
 
     def parameters(self) -> Dict[str, Any]:
         """The parameters that shape the ASR output. Part of provenance and of the cache identity."""
@@ -132,6 +133,9 @@ def parse_request(doc: Any) -> TranscribeRequest:
     cache = doc.get("cache", True)
     if not isinstance(cache, bool):
         raise _bad("'cache' must be a boolean")
+    offline = doc.get("offline", False)
+    if not isinstance(offline, bool):
+        raise _bad("'offline' must be a boolean")
     ws = doc.get("workspace")
     if ws is not None and (not isinstance(ws, str) or not ws.strip()):
         raise _bad("'workspace' must be a path string")
@@ -149,7 +153,7 @@ def parse_request(doc: Any) -> TranscribeRequest:
             setattr(budget, k, float(v))
 
     return TranscribeRequest(input=inp, language=lang, engine=engine, model=model, word_timestamps=wt, temperature=float(temp),
-                             initial_prompt=prompt, beam_size=beam, asset_id=asset_id, budget=budget, cache=cache, workspace=ws)
+                             initial_prompt=prompt, beam_size=beam, asset_id=asset_id, budget=budget, cache=cache, workspace=ws, offline=offline)
 
 
 def default_workspace() -> str:

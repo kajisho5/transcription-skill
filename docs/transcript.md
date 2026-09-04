@@ -55,10 +55,11 @@ never repaired or invented.
 | field | meaning |
 |-------|---------|
 | `engine`, `engine_version` | same as the top level |
+| `execution_mode` | `local` or `remote`: where recognition ran (from the engine's spec) |
 | `model`, `model_version` | model name; snapshot/commit id when the engine can report one, else `null` |
 | `parameters` | `language`, `word_timestamps`, `temperature`, `initial_prompt`, `beam_size` |
 | `parameters_hash` | sha256 of the canonical parameters JSON |
-| `cache_key` | sha256 identity of (fingerprint, engine, engine_version, model, parameters) |
+| `cache_key` | sha256 identity of (fingerprint, {engine id, version, execution_mode}, {model, model_version}, parameters) |
 | `created_at`, `processing_seconds` | when, and total wall clock of the run (probe + extraction + engine) |
 | `skill_version` | this package's version |
 | `language_detection` | `{candidate, probability, min_probability}` when auto-detect ran, else `null`; kept even when the result is `unknown` so the guess is visible but not stored as fact |

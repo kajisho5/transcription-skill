@@ -76,6 +76,7 @@ class Source(Model):
 class Provenance(Model):
     engine: str
     engine_version: str
+    execution_mode: str                  # local | remote: where recognition ran
     model: str
     model_version: Optional[str]
     parameters: Dict[str, Any]           # the transcription parameters that shaped the result

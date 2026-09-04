@@ -21,8 +21,9 @@ REQUIRED_TRANSCRIPT = ("schema", "id", "asset_id", "language", "language_source"
 REQUIRED_SEGMENT = ("id", "start", "end", "text", "raw_text", "confidence", "words", "speaker_id")
 REQUIRED_WORD = ("start", "end", "text", "confidence")
 REQUIRED_SOURCE = ("filename", "fingerprint", "size_bytes", "media_duration")
-REQUIRED_PROVENANCE = ("engine", "engine_version", "model", "model_version", "parameters", "parameters_hash",
+REQUIRED_PROVENANCE = ("engine", "engine_version", "execution_mode", "model", "model_version", "parameters", "parameters_hash",
                        "cache_key", "created_at", "processing_seconds", "skill_version")
+EXECUTION_MODES = ("local", "remote")
 
 # keys that must never appear anywhere in a transcript document
 FORBIDDEN_KEYS = {"command", "argv", "cmd", "shell", "api_key", "apikey", "token", "secret", "password", "authorization",
@@ -144,6 +145,8 @@ def validate_transcript(doc: Any, expected_asset_id: Optional[str] = None, expec
                 rep.errors.append(f"provenance.{k} is required")
         if prov.get("engine") != doc["engine"] or prov.get("engine_version") != doc["engine_version"]:
             rep.errors.append("provenance.engine/engine_version must match transcript.engine/engine_version")
+        if prov.get("execution_mode") not in EXECUTION_MODES:
+            rep.errors.append(f"provenance.execution_mode must be one of {EXECUTION_MODES}")
         if not isinstance(prov.get("parameters"), dict):
             rep.errors.append("provenance.parameters must be an object")
         for k in ("parameters_hash", "cache_key"):

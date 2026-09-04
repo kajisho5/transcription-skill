@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kajisho5/transcription-skill/schemas/engine_spec.schema.json",
+  "title": "EngineSpec",
+  "description": "transcription-skill/engine-spec/0.1. Static, machine-readable description of one registered ASR engine: where it runs, what it needs, what it provides. Published by `transcription skill --json` and `transcription engines --json`. Contains no paths and no credentials.",
+  "type": "object",
+  "required": ["id", "version", "execution_mode", "description", "available", "unavailable_reason", "requires_network", "deterministic", "capabilities", "supported_languages", "supported_models", "default_model", "models"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "version": {"type": ["string", "null"], "description": "installed engine version; null when not installed"},
+    "execution_mode": {"enum": ["local", "remote"], "description": "local: recognition runs on this machine; remote: on another host"},
+    "description": {"type": "string"},
+    "available": {"type": "boolean", "description": "the engine is installed and importable"},
+    "unavailable_reason": {"type": ["string", "null"]},
+    "requires_network": {"type": "boolean", "description": "recognition itself needs the network (true for every remote engine); a one-time model download is reported per model instead"},
+    "deterministic": {"type": "boolean"},
+    "capabilities": {"type": "array", "items": {"enum": ["local_execution", "remote_execution", "network_required", "local_model", "model_download", "word_timestamps", "language_detection"]}},
+    "supported_languages": {"type": "array", "items": {"type": "string"}},
+    "supported_models": {"type": "array", "items": {"type": "string"}},
+    "default_model": {"type": ["string", "null"]},
+    "models": {"type": "array", "items": {"$ref": "#/$defs/model_status"}}
+  },
+  "$defs": {
+    "model_status": {
+      "type": "object",
+      "required": ["model", "status", "availability", "source", "version", "detail", "download_required"],
+      "properties": {
+        "model": {"type": "string"},
+        "status": {"enum": ["AVAILABLE", "MISSING", "UNKNOWN"]},
+        "availability": {"enum": ["MODEL_AVAILABLE", "MODEL_DOWNLOAD_REQUIRED", "MODEL_MISSING", "MODEL_UNKNOWN"]},
+        "source": {"enum": ["local", "downloadable", null]},
+        "version": {"type": ["string", "null"]},
+        "detail": {"type": "string"},
+        "download_required": {"type": "boolean"}
+      }
+    }
+  }
+}

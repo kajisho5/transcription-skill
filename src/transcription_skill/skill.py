@@ -8,7 +8,7 @@ import os
 from typing import Any, Dict, List
 
 from . import SKILL_ID, __version__
-from .engines import all_engines
+from .engines import ENGINE_CAPABILITIES, EXECUTION_MODES, default_registry
 from .errors import TranscriptionError
 from .export import FORMATS, write
 from .request import parse_request
@@ -26,13 +26,15 @@ CAPABILITIES = [
     "transcript_export:srt",
     "transcript_export:vtt",
     "deterministic_cache",
+    "offline_mode",             # hard no-network constraint: local engines with a local model only
+    "engine_registry",          # machine-readable engine specs (execution_mode, network, models, capabilities)
 ]
 
 TOOLS: List[Dict[str, Any]] = [
     {"name": "transcription/transcribe", "description": "Transcribe an audio or video file into a validated Transcript.",
      "input": {"input": "path", "language": "iso639-1 | null", "engine": "engine id", "model": "model name", "word_timestamps": "bool",
                "temperature": "0..1", "initial_prompt": "str | null", "beam_size": "1..10", "asset_id": "str | null",
-               "budget": {"timeout": "seconds", "max_audio_seconds": "seconds"}, "cache": "bool", "workspace": "path | null", "dry_run": "bool"},
+               "budget": {"timeout": "seconds", "max_audio_seconds": "seconds"}, "cache": "bool", "workspace": "path | null", "offline": "bool", "dry_run": "bool"},
      "output": {"transcript": "Transcript", "cache_hit": "bool", "warnings": "list[str]"}, "deterministic": True, "side_effects": ["writes cache under workspace"]},
     {"name": "transcription/segments", "description": "Derive SpeechEvent-compatible candidates from a Transcript (one per segment, optional gap merge).",
      "input": {"transcript": "Transcript | path", "merge_gap": "seconds >= 0"}, "output": {"events": "list[SpeechEvent]"}, "deterministic": True, "side_effects": []},
@@ -44,15 +46,21 @@ TOOLS: List[Dict[str, Any]] = [
 ]
 
 
-def skill_contract() -> Dict[str, Any]:
+def skill_contract(include_models: bool = True, offline: bool = False) -> Dict[str, Any]:
+    """Machine-readable contract: the skill, its tools, and every registered engine's EngineSpec
+    (execution mode, network requirement, capabilities, languages, models and their availability).
+    This JSON, not the README, is the source of truth for consumers."""
     return {
         "id": SKILL_ID, "name": "Transcription Skill", "version": __version__,
         "description": "Speech recognition: audio/video in, structured Transcript (segments, optional word timestamps, language, "
                        "provenance) and SpeechEvent candidates out. Not an agent, not a subtitle renderer, not a media analyzer.",
         "capabilities": list(CAPABILITIES),
-        "engines": [e.describe() for e in all_engines().values()],
+        "engine_contract": {"schema": "transcription-skill/engine-spec/0.1", "execution_modes": list(EXECUTION_MODES),
+                            "capabilities": list(ENGINE_CAPABILITIES), "offline": offline},
+        "engines": default_registry().to_dict(include_models=include_models, offline=offline),
         "tools": [dict(t) for t in TOOLS],
-        "schemas": {"transcript": "transcription-skill/transcript/0.1", "speech_event": "transcription-skill/speech-event/0.1"},
+        "schemas": {"transcript": "transcription-skill/transcript/0.1", "speech_event": "transcription-skill/speech-event/0.1",
+                    "engine_spec": "transcription-skill/engine-spec/0.1"},
     }
 
 

@@ -1,18 +1,20 @@
-"""Reference engine: faster-whisper (CTranslate2 Whisper) running locally on CPU/GPU.
+"""Reference local engine: faster-whisper (CTranslate2 Whisper) running on this machine, CPU or GPU.
 
-Optional dependency: `pip install "transcription-skill[faster-whisper]"`. Models are Whisper checkpoints
-fetched into the Hugging Face cache on first use (or pre-placed there for offline machines).
-No credentials are involved; nothing leaves the machine.
+Optional dependency: `pip install "transcription-skill[faster-whisper]"`. Recognition never uses the
+network. Models are Whisper checkpoints in the Hugging Face cache: present on disk (MODEL_AVAILABLE)
+or fetchable on first use (MODEL_DOWNLOAD_REQUIRED, network needed once). With offline=True a model
+that is not on disk is MODEL_MISSING and nothing is fetched. No credentials are involved.
 """
 from __future__ import annotations
 
 import glob
 import math
 import os
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from ..errors import TranscriptionError
-from .base import EngineRequest, EngineResult, EngineSegment, EngineWord, TranscriptionEngine
+from .base import (CAP_LOCAL_MODEL, CAP_MODEL_DOWNLOAD, EXECUTION_LOCAL, MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED, MODEL_MISSING,
+                   MODEL_UNKNOWN, EngineRequest, EngineResult, EngineSegment, EngineWord, ModelStatus, TranscriptionEngine)
 
 ENGINE_ID = "faster_whisper"
 MODEL_NAMES = ("tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "medium.en", "large-v1", "large-v2",
@@ -30,11 +32,16 @@ def _import():
 
 class FasterWhisperEngine(TranscriptionEngine):
     id = ENGINE_ID
+    execution_mode = EXECUTION_LOCAL
+    requires_network = False
+    deterministic = True
+    description = "Whisper via CTranslate2, running locally on CPU/GPU. Reference local engine."
+    default_model = "base"
 
     def __init__(self, compute_type: str = "int8", device: str = "cpu", download: bool = True):
         self.compute_type = compute_type
         self.device = device
-        self.download = download
+        self.download = download            # False: never fetch a model, even when the request is not offline
         self._mod = _import()
 
     @property
@@ -59,8 +66,18 @@ class FasterWhisperEngine(TranscriptionEngine):
         except Exception:  # pragma: no cover - older releases
             return ["en", "ja"]
 
+    @property
+    def supported_models(self) -> List[str]:
+        return list(MODEL_NAMES)
+
     def supports_word_timestamps(self) -> bool:
         return True
+
+    def supports_language_detection(self) -> bool:
+        return True
+
+    def model_capabilities(self) -> List[str]:
+        return [CAP_LOCAL_MODEL] + ([CAP_MODEL_DOWNLOAD] if self.download else [])
 
     # ---- model resolution (never downloads)
     def _repo_id(self, model: str) -> Optional[str]:
@@ -83,29 +100,37 @@ class FasterWhisperEngine(TranscriptionEngine):
             return None
         return os.path.basename(os.path.dirname(snaps[-1]))
 
-    def model_status(self, model: str) -> Dict[str, Any]:
+    def model_status(self, model: str, offline: bool = False) -> ModelStatus:
         if model not in MODEL_NAMES:
-            return {"model": model, "status": "UNKNOWN", "version": None, "detail": f"not a known Whisper model name; known: {', '.join(MODEL_NAMES)}"}
+            return ModelStatus(model, "UNKNOWN", MODEL_UNKNOWN, None, None, f"not a known Whisper model name; known: {', '.join(MODEL_NAMES)}")
         if not self._mod:
-            return {"model": model, "status": "MISSING", "version": None, "detail": self.unavailable_reason()}
+            return ModelStatus(model, "MISSING", MODEL_MISSING, None, None, self.unavailable_reason() or "engine unavailable")
         snap = self._cached_snapshot(model)
         if snap:
-            return {"model": model, "status": "AVAILABLE", "version": snap, "detail": "in Hugging Face cache"}
-        return {"model": model, "status": "MISSING", "version": None,
-                "detail": "not in the local cache; downloaded on first use" if self.download else "not in the local cache and downloads are disabled"}
+            return ModelStatus(model, "AVAILABLE", MODEL_AVAILABLE, "local", snap, "in the local Hugging Face cache")
+        if self.download and not offline:
+            return ModelStatus(model, "MISSING", MODEL_DOWNLOAD_REQUIRED, "downloadable", None,
+                               "not on this machine; fetched from the Hugging Face Hub on first use (network)", download_required=True)
+        why = "offline" if offline else "downloads are disabled for this engine"
+        return ModelStatus(model, "MISSING", MODEL_MISSING, None, None, f"not on this machine and cannot be fetched ({why})")
 
     # ---- recognition
     def transcribe(self, request: EngineRequest) -> EngineResult:
         if not self._mod:
             raise TranscriptionError("ENGINE_UNAVAILABLE", self.unavailable_reason() or "engine unavailable")
-        if request.model not in MODEL_NAMES:
-            raise TranscriptionError("MODEL_UNAVAILABLE", f"unknown model {request.model!r}", {"known": list(MODEL_NAMES)})
+        ms = self.model_status(request.model, offline=request.offline)
+        if ms.availability == MODEL_UNKNOWN:
+            raise TranscriptionError("MODEL_UNAVAILABLE", f"unknown model {request.model!r}", {"availability": ms.availability, "known": list(MODEL_NAMES)})
+        if ms.availability == MODEL_MISSING:
+            raise TranscriptionError("MODEL_UNAVAILABLE", f"model {request.model!r}: {ms.detail}", {"availability": ms.availability, "model": request.model, "offline": request.offline})
         if request.language is not None and request.language not in self.supported_languages:
             raise TranscriptionError("INVALID_INPUT", f"language {request.language!r} is not supported by {self.id}")
         try:
-            model = self._mod.WhisperModel(request.model, device=self.device, compute_type=self.compute_type, local_files_only=not self.download)
+            model = self._mod.WhisperModel(request.model, device=self.device, compute_type=self.compute_type,
+                                           local_files_only=(not self.download) or request.offline)
         except Exception as exc:  # model download/load problems of any kind
-            raise TranscriptionError("MODEL_UNAVAILABLE", f"cannot load model {request.model!r}: {type(exc).__name__}: {exc}")
+            raise TranscriptionError("MODEL_UNAVAILABLE", f"cannot load model {request.model!r}: {type(exc).__name__}: {exc}",
+                                     {"availability": ms.availability, "model": request.model, "offline": request.offline})
         try:
             segments, info = model.transcribe(
                 request.audio_path, language=request.language, task="transcribe", beam_size=request.beam_size,

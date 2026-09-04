@@ -42,6 +42,8 @@ stdout) and `transcribe` accepts `--dry-run` (plan only, no ASR).
 | "use a bigger / better model" | `--model small` (or `medium`, `large-v3`); doctor shows which are cached |
 | "these names / terms keep coming out wrong" | `--initial-prompt "名前, 用語, ..."` (a vocabulary hint to the decoder, not an instruction) |
 | "don't reuse the old result" | `--no-cache` |
+| "no internet here", "air-gapped", "must not upload the audio" | `transcribe ... --offline` (refuses remote engines and any model download); `doctor --offline` first |
+| "which engines / models can I use here" | `engines` / `engines --engine faster_whisper` / `engines --offline --language ja` |
 
 ## Report format
 
@@ -65,6 +67,11 @@ never "fix" the transcript text yourself when the user asked for the transcript.
 - `confidence` on segments is `exp(avg_logprob)` from the engine and is shared by segments in the same
   30 s decoding window; use it to compare, not as a calibrated probability.
 - `speaker_id` is always `null`. This skill does no diarization; do not tell the user who is speaking.
+- `MODEL_UNAVAILABLE` with `availability: MODEL_MISSING` under `--offline` means the model is not on
+  this machine; either run once online (`MODEL_DOWNLOAD_REQUIRED` shows a download will happen) or pick
+  a model that `engines --engine faster_whisper --offline` lists as `MODEL_AVAILABLE`.
+- `execution_mode` in provenance says where recognition ran (`local` today). Only `faster_whisper`
+  exists; do not offer a cloud engine or whisper.cpp, they are not implemented.
 - `BUDGET_EXCEEDED` means the media is longer than `--max-audio-seconds`; raise the budget on purpose,
   or transcribe a cut made by ffmpeg-skill. `TRANSCRIPTION_TIMEOUT` means the engine was stopped; a
   smaller model or a longer `--timeout` are the options.
@@ -74,7 +81,9 @@ never "fix" the transcript text yourself when the user asked for the transcript.
 ## Boundaries
 
 - No shell strings: every parameter is a typed flag or JSON key. There is no `--command`.
-- No cloud, no API keys: the engine runs locally. Environment credentials are not passed to child
-  processes and never appear in outputs.
+- No cloud, no API keys: the only implemented engine runs locally. Environment credentials are not
+  passed to child processes and never appear in outputs. `--offline` is enforced, not advisory.
+- No engine ranking: `engines --offline --language ja` lists candidates and rejection reasons; which
+  candidate to use is your (or the production agent's) decision.
 - No interpretation: no chapters, topics, speakers, edit points or importance. Those are the
   production agent's decisions, made on top of this data.

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import platform
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from . import __version__
 from .cache import TranscriptCache
@@ -16,7 +16,7 @@ from .request import DEFAULT_ENGINE, DEFAULT_MODEL, default_workspace
 CHECK_MODELS = ("tiny", "base", "small", "medium", "large-v3")
 
 
-def run_doctor(workspace: str = None) -> Dict[str, Any]:
+def run_doctor(workspace: Optional[str] = None, offline: bool = False) -> Dict[str, Any]:
     ws = os.path.abspath(workspace or default_workspace())
     rows: List[Dict[str, Any]] = []
 
@@ -31,15 +31,17 @@ def run_doctor(workspace: str = None) -> Dict[str, Any]:
 
     engines = all_engines()
     for eid, eng in sorted(engines.items()):
-        d = eng.describe()
-        if d["available"]:
-            row(f"engine:{eid}", "AVAILABLE", f"version {d['version']}, {len(d['supported_languages'])} languages, word timestamps: {d['word_timestamps']}",
-                default=(eid == DEFAULT_ENGINE), supported_languages=d["supported_languages"])
+        d = eng.spec()
+        if d.available:
+            row(f"engine:{eid}", "AVAILABLE", f"version {d.version}, {d.execution_mode}, network for recognition: {'yes' if d.requires_network else 'no'}, "
+                f"{len(d.supported_languages)} languages, capabilities: {', '.join(d.capabilities)}",
+                default=(eid == DEFAULT_ENGINE), execution_mode=d.execution_mode, requires_network=d.requires_network, capabilities=d.capabilities)
             for m in CHECK_MODELS:
-                ms = eng.model_status(m)
-                row(f"model:{eid}:{m}", ms["status"], ms["detail"] + (f" (snapshot {ms['version']})" if ms.get("version") else ""), default=(m == DEFAULT_MODEL))
+                ms = eng.model_status(m, offline=offline)
+                row(f"model:{eid}:{m}", ms.status, f"{ms.availability}: {ms.detail}" + (f" (snapshot {ms.version})" if ms.version else ""),
+                    default=(m == DEFAULT_MODEL), availability=ms.availability, source=ms.source)
         else:
-            row(f"engine:{eid}", "MISSING", d["reason"] or "unavailable", default=(eid == DEFAULT_ENGINE))
+            row(f"engine:{eid}", "MISSING", d.unavailable_reason or "unavailable", default=(eid == DEFAULT_ENGINE), execution_mode=d.execution_mode)
 
     try:
         os.makedirs(ws, exist_ok=True)
@@ -54,7 +56,10 @@ def run_doctor(workspace: str = None) -> Dict[str, Any]:
 
     default_engine = engines.get(DEFAULT_ENGINE)
     ready = bool(find_tool("ffmpeg") and find_tool("ffprobe") and default_engine and default_engine.available())
-    return {"ok": ready, "checks": rows, "summary": "ready to transcribe" if ready else "not ready: see MISSING rows"}
+    if ready and offline and default_engine is not None:
+        ready = default_engine.model_status(DEFAULT_MODEL, offline=True).availability == "MODEL_AVAILABLE"
+    summary = "ready to transcribe" + (" offline" if offline else "") if ready else "not ready: see MISSING rows"
+    return {"ok": ready, "offline": offline, "checks": rows, "summary": summary}
 
 
 def format_doctor(report: Dict[str, Any]) -> str:

@@ -1,0 +1,2 @@
+{"id": "09_engine_identity_in_provenance", "metric": "provenance", "input": "tests/fixtures/ja_short.wav", "request": {"language": "ja"},
+ "note": "A transcript names the engine, its version, where it ran, the model and (when known) the model revision."}

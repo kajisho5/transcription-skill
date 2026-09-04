@@ -6,6 +6,7 @@ import copy
 import io
 import json
 import os
+import re
 import shutil
 import struct
 import sys
@@ -21,8 +22,10 @@ sys.path.insert(0, str(ROOT / "tests"))
 from fake_engine import FakeEngine  # noqa: E402
 from transcription_skill import cli  # noqa: E402
 from transcription_skill.cache import TranscriptCache, cache_key  # noqa: E402
-from transcription_skill.engines import engine_ids, get_engine  # noqa: E402
-from transcription_skill.engines.base import EngineRequest, EngineResult  # noqa: E402
+from transcription_skill.engines import (CAP_LOCAL_EXECUTION, CAP_NETWORK_REQUIRED, CAP_REMOTE_EXECUTION, CAP_WORD_TIMESTAMPS,  # noqa: E402
+                                         EngineRegistry, EngineRequirements, default_registry, engine_ids, get_engine, require_engine,
+                                         select_engines)
+from transcription_skill.engines.base import EngineRequest, EngineResult, EngineSpec  # noqa: E402
 from transcription_skill.errors import ERROR_CODES, TranscriptionError  # noqa: E402
 from transcription_skill.export import render, to_srt, write  # noqa: E402
 from transcription_skill.media import child_env  # noqa: E402
@@ -81,8 +84,8 @@ def good_doc() -> dict:
                   words=[Word(1.0, 1.6, "本日の", 0.95).to_dict(), Word(1.6, 3.0, "講演を始めます。", 0.9).to_dict()], speaker_id=None).to_dict()
     seg2 = Segment(id="seg_0002", start=3.5, end=5.0, text="よろしくお願いします。", raw_text="よろしくお願いします。", confidence=None, words=None).to_dict()
     fp = "sha256:" + "ab" * 32
-    prov = {"engine": "fake", "engine_version": "1.0", "model": "fake-model", "model_version": None, "parameters": {"language": "ja"},
-            "parameters_hash": "0" * 64, "cache_key": "1" * 64, "created_at": "2026-09-04T00:00:00Z", "processing_seconds": 0.5, "skill_version": "0.1.0",
+    prov = {"engine": "fake", "engine_version": "1.0", "execution_mode": "local", "model": "fake-model", "model_version": None, "parameters": {"language": "ja"},
+            "parameters_hash": "0" * 64, "cache_key": "1" * 64, "created_at": "2026-09-04T00:00:00Z", "processing_seconds": 0.5, "skill_version": "0.2.0",
             "language_detection": None, "audio_extraction": None}
     t = Transcript(id="tr_x", asset_id="asset_1", language="ja", language_source="requested", language_confidence=None, duration=6.0, segments=[seg, seg2],
                    source={"filename": "a.wav", "fingerprint": fp, "size_bytes": 10, "media_duration": 6.0, "audio_channels": 1, "sample_rate": 16000, "container": "wav", "has_video": False},
@@ -172,6 +175,7 @@ class SchemaTests(unittest.TestCase):
         self.assertInvalid(lambda d: d.__setitem__("provenance", "x"), "provenance must be an object")
 
     def test_credential_command_and_path_leakage(self):
+        self.assertInvalid(lambda d: d["provenance"].__setitem__("execution_mode", "cloud"), "execution_mode")
         self.assertInvalid(lambda d: d["provenance"].__setitem__("api_key", "x"), "forbidden key")
         self.assertInvalid(lambda d: d["provenance"].__setitem__("argv", ["whisper"]), "forbidden key")
         self.assertInvalid(lambda d: d["provenance"]["parameters"].__setitem__("initial_prompt", "sk-abcdefghijklmnopqrstuvwxyz0123"), "credential-like")
@@ -209,7 +213,7 @@ class EngineContractTests(unittest.TestCase):
             self.assertIn("ja", d["supported_languages"])
             self.assertIn("en", d["supported_languages"])
         st = eng.model_status("no-such-model")
-        self.assertEqual(st["status"], "UNKNOWN")
+        self.assertEqual((st.status, st.availability), ("UNKNOWN", "MODEL_UNKNOWN"))
 
     def test_engine_result_roundtrip(self):
         r = FakeEngine().transcribe(EngineRequest("x.wav", None, "fake-model", True, 0.0, None, 5))
@@ -223,7 +227,7 @@ class EngineContractTests(unittest.TestCase):
         c = skill_contract()
         names = [t["name"] for t in c["tools"]]
         self.assertEqual(names, ["transcription/transcribe", "transcription/segments", "transcription/export", "transcription/check"])
-        self.assertEqual((c["id"], c["version"]), ("transcription-skill", "0.1.0"))
+        self.assertEqual((c["id"], c["version"]), ("transcription-skill", "0.2.0"))
         for t in TOOLS:
             self.assertTrue(t["description"] and t["input"] and t["output"])
         with self.assertRaises(TranscriptionError):
@@ -233,12 +237,12 @@ class EngineContractTests(unittest.TestCase):
 
 class CacheKeyTests(unittest.TestCase):
     def test_determinism_and_invalidation(self):
-        base = dict(fingerprint="sha256:" + "a" * 64, engine_id="e", engine_version="1", model="base", model_version=None, parameters={"language": "ja", "beam_size": 5})
+        base = dict(fingerprint="sha256:" + "a" * 64, engine_id="e", engine_version="1", execution_mode="local", model="base", model_version=None, parameters={"language": "ja", "beam_size": 5})
         k = cache_key(**base)
         self.assertEqual(k, cache_key(**base))
         self.assertEqual(k, cache_key(**dict(base, parameters={"beam_size": 5, "language": "ja"})))
-        for change in (dict(fingerprint="sha256:" + "b" * 64), dict(engine_id="f"), dict(engine_version="2"), dict(model="small"),
-                       dict(parameters={"language": "en", "beam_size": 5}), dict(parameters={"language": "ja", "beam_size": 3})):
+        for change in (dict(fingerprint="sha256:" + "b" * 64), dict(engine_id="f"), dict(engine_version="2"), dict(execution_mode="remote"), dict(model="small"),
+                       dict(model_version="rev2"), dict(parameters={"language": "en", "beam_size": 5}), dict(parameters={"language": "ja", "beam_size": 3})):
             self.assertNotEqual(k, cache_key(**dict(base, **change)), change)
 
 
@@ -277,6 +281,7 @@ class ServiceTests(unittest.TestCase):
         self.assertNotIn(self.tmp, json.dumps(doc))
         self.assertEqual(doc["asset_id"], "asset_" + doc["source"]["fingerprint"][7:23])
         self.assertEqual(doc["provenance"]["model_version"], "fake-snapshot")
+        self.assertEqual(doc["provenance"]["execution_mode"], "local")
         self.assertEqual(doc["provenance"]["parameters_hash"], self.req(language="ja", word_timestamps=True).parameters_hash())
         self.assertIsNone(doc["provenance"]["language_detection"])
         self.assertEqual(doc["provenance"]["audio_extraction"]["recipe"]["sample_rate"], 16000)
@@ -423,6 +428,49 @@ class ServiceTests(unittest.TestCase):
         self.svc.transcribe(self.req())
         self.assertEqual(os.listdir(os.path.join(self.ws, "tmp")), [])
 
+    def test_offline_local_model_allowed_and_recorded(self):
+        res = self.svc.transcribe(self.req(language="ja", offline=True))
+        self.assertTrue(self.engine.calls[-1].offline)
+        self.assertEqual(res["transcript"]["provenance"]["execution_mode"], "local")
+        d = self.svc.dry_run(self.req(language="ja", offline=True))
+        self.assertTrue(d["offline"])
+        self.assertEqual(d["network_use"], "none")
+        self.assertEqual(d["engine"]["execution_mode"], "local")
+
+    def test_offline_missing_model_is_model_unavailable(self):
+        dl = TranscriptionService(workspace=self.ws, engine=FakeEngine(local_models=["fake-model"], downloadable=True))
+        d = dl.dry_run(self.req(model="base"))
+        self.assertEqual(d["model"]["availability"], "MODEL_DOWNLOAD_REQUIRED")
+        self.assertEqual(d["network_use"], "model download")
+        with self.assertRaises(TranscriptionError) as cm:
+            dl.transcribe(self.req(model="base", offline=True))
+        self.assertEqual(cm.exception.code, "MODEL_UNAVAILABLE")
+        self.assertEqual(cm.exception.details["availability"], "MODEL_MISSING")
+        self.assertTrue(cm.exception.details["offline"])
+
+    def test_offline_rejects_remote_engine(self):
+        remote = FakeEngine(engine_id="fake_remote", execution_mode="remote", requires_network=True)
+        svc = TranscriptionService(workspace=self.ws, engine=remote)
+        with self.assertRaises(TranscriptionError) as cm:
+            svc.transcribe(self.req(offline=True))
+        self.assertEqual(cm.exception.code, "ENGINE_UNAVAILABLE")
+        self.assertEqual(cm.exception.details["reason"], "network_required")
+        self.assertEqual(remote.calls, [])
+        doc = svc.transcribe(self.req())["transcript"]           # online: allowed, and provenance says where it ran
+        self.assertEqual(doc["provenance"]["execution_mode"], "remote")
+        self.assertEqual(doc["engine"], "fake_remote")
+
+    def test_cache_identity_separates_engines_modes_and_models(self):
+        local = self.svc.transcribe(self.req(language="ja"))["transcript"]
+        remote = TranscriptionService(workspace=self.ws, engine=FakeEngine(engine_id="fake_remote", execution_mode="remote", requires_network=True))
+        rdoc = remote.transcribe(self.req(language="ja"))["transcript"]
+        self.assertNotEqual(local["provenance"]["cache_key"], rdoc["provenance"]["cache_key"])
+        same_id_remote = TranscriptionService(workspace=self.ws, engine=FakeEngine(execution_mode="remote", requires_network=True))
+        r2 = same_id_remote.transcribe(self.req(language="ja"))
+        self.assertFalse(r2["cache_hit"])                         # same id, different execution mode: never shares a result
+        self.assertNotEqual(local["provenance"]["cache_key"], r2["transcript"]["provenance"]["cache_key"])
+        self.assertEqual(TranscriptCache(self.ws).count(), 3)
+
 
 class OutputTests(unittest.TestCase):
     def test_json_export_roundtrip(self):
@@ -486,6 +534,139 @@ class OutputTests(unittest.TestCase):
         bad["segments"][0]["end"] = 0.1
         with self.assertRaises(TranscriptionError):
             speech_events(bad)
+
+
+class EngineEcosystemTests(unittest.TestCase):
+    """Registry, EngineSpec, execution mode, capability filtering, offline selection, contract JSON."""
+
+    def test_default_registry_has_only_faster_whisper_as_local(self):
+        reg = default_registry()
+        self.assertEqual(reg.ids(), ["faster_whisper"])
+        spec = reg.get("faster_whisper").spec()
+        self.assertIsInstance(spec, EngineSpec)
+        self.assertEqual(spec.execution_mode, "local")
+        self.assertFalse(spec.requires_network)
+        self.assertIn(CAP_LOCAL_EXECUTION, spec.capabilities)
+        self.assertNotIn(CAP_REMOTE_EXECUTION, spec.capabilities)
+        self.assertNotIn(CAP_NETWORK_REQUIRED, spec.capabilities)
+        self.assertEqual(reg.find_by_execution_mode("remote"), [])
+        insp = reg.inspect("faster_whisper")
+        self.assertEqual(insp.id, "faster_whisper")
+        if insp.available:
+            self.assertTrue(insp.models)
+            self.assertEqual({m["model"] for m in insp.models}, set(insp.supported_models))
+            self.assertEqual([s.id for s in reg.find_by_language("ja")], ["faster_whisper"])
+        with self.assertRaises(TranscriptionError):
+            reg.get("fake")                       # test engine is never in the production registry
+        with self.assertRaises(TranscriptionError):
+            reg.find_by_capability("best_quality")
+
+    def test_registry_register_get_list_and_rejections(self):
+        reg = EngineRegistry()
+        reg.register(FakeEngine())
+        reg.register(FakeEngine(engine_id="fake_remote", execution_mode="remote", requires_network=True))
+        self.assertEqual(reg.ids(), ["fake", "fake_remote"])
+        self.assertEqual([s.id for s in reg.find_by_execution_mode("local")], ["fake"])
+        self.assertEqual([s.id for s in reg.find_by_execution_mode("remote")], ["fake_remote"])
+        self.assertEqual([s.id for s in reg.find_by_capability(CAP_NETWORK_REQUIRED)], ["fake_remote"])
+        self.assertEqual([s.id for s in reg.find_by_capability(CAP_WORD_TIMESTAMPS)], ["fake", "fake_remote"])
+        self.assertEqual([s.id for s in reg.find_by_language("ja")], ["fake", "fake_remote"])
+        self.assertEqual(reg.find_by_language("fr"), [])
+        with self.assertRaises(ValueError):
+            reg.register(FakeEngine())            # duplicate id
+        with self.assertRaises(ValueError):
+            reg.register(FakeEngine(execution_mode="cloud"))
+        off = EngineRegistry()
+        off.register(FakeEngine(available=False))
+        self.assertEqual(off.available(), [])
+        self.assertEqual(len(off.list()), 1)
+        self.assertFalse(off.list()[0].available)
+        self.assertEqual(off.find_by_execution_mode("local", available_only=False)[0].id, "fake")
+
+    def test_capability_filtering_is_constraint_only(self):
+        reg = EngineRegistry()
+        reg.register(FakeEngine())
+        reg.register(FakeEngine(engine_id="fake_remote", execution_mode="remote", requires_network=True))
+        sel = select_engines(EngineRequirements(execution_mode="local", language="ja"), reg)
+        self.assertEqual([c.id for c in sel.candidates], ["fake"])
+        self.assertEqual(sel.rejected[0].reasons, ["execution_mode_mismatch"])
+        sel = select_engines(EngineRequirements(execution_mode="remote"), reg)
+        self.assertEqual([c.id for c in sel.candidates], ["fake_remote"])
+        sel = select_engines(EngineRequirements(network="forbidden"), reg)
+        self.assertEqual([c.id for c in sel.candidates], ["fake"])
+        self.assertEqual([r.engine_id for r in sel.rejected], ["fake_remote"])
+        self.assertIn("network_required", sel.rejected[0].reasons)
+        sel = select_engines(EngineRequirements(language="fr"), reg)
+        self.assertEqual(sel.candidates, [])
+        sel = select_engines(EngineRequirements(model="remote-only"), reg)   # unknown locally? it is a supported name, not local; allowed when not offline
+        self.assertEqual([c.id for c in sel.candidates], ["fake", "fake_remote"])
+        sel = select_engines(EngineRequirements(model="nope"), reg)
+        self.assertTrue(all("model_unknown" in r.reasons for r in sel.rejected))
+        only_remote = EngineRegistry()
+        only_remote.register(FakeEngine(engine_id="fake_remote", execution_mode="remote", requires_network=True))
+        with self.assertRaises(TranscriptionError) as cm:
+            require_engine(EngineRequirements(network="forbidden"), only_remote)
+        self.assertEqual(cm.exception.code, "ENGINE_UNAVAILABLE")
+        self.assertEqual(cm.exception.details["rejected"][0]["reasons"], ["network_required"])
+        with self.assertRaises(TranscriptionError):
+            EngineRequirements(execution_mode="cloud")
+        with self.assertRaises(TranscriptionError):
+            EngineRequirements(network="maybe")
+
+    def test_offline_selection(self):
+        reg = EngineRegistry()
+        reg.register(FakeEngine(local_models=["fake-model"], downloadable=True))
+        reg.register(FakeEngine(engine_id="fake_remote", execution_mode="remote", requires_network=True))
+        ok = select_engines(EngineRequirements(offline=True, model="fake-model"), reg)
+        self.assertEqual([c.id for c in ok.candidates], ["fake"])
+        self.assertEqual(ok.requirements.network, "forbidden")
+        missing = select_engines(EngineRequirements(offline=True, model="base"), reg)
+        self.assertEqual(missing.candidates, [])
+        reasons = {r.engine_id: r.reasons for r in missing.rejected}
+        self.assertEqual(reasons["fake"], ["model_not_available_offline"])
+        self.assertIn("network_required", reasons["fake_remote"])
+        online = select_engines(EngineRequirements(model="base"), reg)   # downloadable when not offline
+        self.assertIn("fake", [c.id for c in online.candidates])
+
+    def test_model_status_distinguishes_download_from_missing(self):
+        e = FakeEngine(local_models=["fake-model"], downloadable=True)
+        self.assertEqual(e.model_status("fake-model").availability, "MODEL_AVAILABLE")
+        self.assertEqual(e.model_status("base").availability, "MODEL_DOWNLOAD_REQUIRED")
+        self.assertTrue(e.model_status("base").download_required)
+        self.assertEqual(e.model_status("base", offline=True).availability, "MODEL_MISSING")
+        self.assertEqual(e.model_status("zzz").availability, "MODEL_UNKNOWN")
+        self.assertEqual(FakeEngine(local_models=["fake-model"]).model_status("base").availability, "MODEL_MISSING")
+
+    def test_contract_json_engines_validate_and_leak_nothing(self):
+        c = skill_contract()
+        self.assertEqual(c["engine_contract"]["execution_modes"], ["local", "remote"])
+        self.assertEqual(c["schemas"]["engine_spec"], "transcription-skill/engine-spec/0.1")
+        self.assertEqual([e["id"] for e in c["engines"]], ["faster_whisper"])
+        schema = json.loads((ROOT / "schemas" / "engine_spec.schema.json").read_text(encoding="utf-8"))
+        for e in c["engines"]:
+            self.assertEqual(set(e), set(schema["required"]))
+            self.assertIn(e["execution_mode"], schema["properties"]["execution_mode"]["enum"])
+            for cap in e["capabilities"]:
+                self.assertIn(cap, schema["properties"]["capabilities"]["items"]["enum"])
+            for m in e["models"]:
+                self.assertEqual(set(m), set(schema["$defs"]["model_status"]["required"]))
+                self.assertIn(m["availability"], schema["$defs"]["model_status"]["properties"]["availability"]["enum"])
+        text = json.dumps(c, ensure_ascii=False)
+        for key in ("api_key", "token", "secret", "password", "command", "argv"):
+            self.assertNotIn(f'"{key}"', text)
+        for pat in V.ABS_PATH_PATTERNS:
+            for m in re.finditer(r'"([^"]*)"', text):
+                self.assertIsNone(pat.match(m.group(1)), f"path-like value in contract: {m.group(1)}")
+        self.assertIn("offline_mode", c["capabilities"])
+        self.assertIn("offline", c["tools"][0]["input"])
+
+    def test_fake_engine_is_contract_only(self):
+        self.assertNotIn("fake", engine_ids())
+        remote = FakeEngine(engine_id="fake_remote", execution_mode="remote", requires_network=True).spec()
+        self.assertEqual(remote.execution_mode, "remote")
+        self.assertTrue(remote.requires_network)
+        self.assertIn(CAP_REMOTE_EXECUTION, remote.capabilities)
+        self.assertNotIn("local_model", remote.capabilities)
 
 
 class LeakTests(unittest.TestCase):

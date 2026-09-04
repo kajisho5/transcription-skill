@@ -14,9 +14,10 @@ check_input_file / probe               media.py       regular file? ffprobe: dur
         ↓
 Budget: max_audio_seconds              service.py     BUDGET_EXCEEDED before anything runs
         ↓
-engine lookup + availability + model   engines/       ENGINE_UNAVAILABLE / MODEL_UNAVAILABLE / INVALID_INPUT (language, words)
+engine lookup (registry) + offline     engines/       offline + requires_network → ENGINE_UNAVAILABLE; not installed → ENGINE_UNAVAILABLE
+model availability (no download)       engines/       MODEL_UNKNOWN / MODEL_MISSING → MODEL_UNAVAILABLE {availability}; DOWNLOAD_REQUIRED ok unless offline
         ↓
-fingerprint + cache key                cache.py       sha256(file) ; key = H(fingerprint, engine, engine_version, model, language, parameters)
+fingerprint + cache key                cache.py       sha256(file) ; key = H(fingerprint, {engine id, version, execution_mode}, {model, version}, parameters)
         ↓  hit → return cached Transcript (validated again; CACHE_INVALID → warning + recompute)
 extract_audio                          media.py       fixed ffmpeg argv → mono 16 kHz PCM WAV under <workspace>/tmp/<run>/
         ↓
@@ -45,10 +46,12 @@ Transcript ──► validate.py      ──► ValidationReport         (transc
 |--------|----------------|-------------------------|
 | `request.py` | input contract: allowed keys, types, ranges, budget | no |
 | `media.py` | fingerprint, ffprobe, fixed audio-extraction recipe, child environment | yes: `ffprobe`, `ffmpeg` (list argv) |
-| `engines/base.py` | `TranscriptionEngine` contract, `EngineRequest`/`EngineResult` | no |
-| `engines/faster_whisper.py` | reference engine | no (in-process library) |
+| `engines/base.py` | `TranscriptionEngine` contract, `EngineSpec`, `ModelStatus`, execution modes and capability vocabulary, `EngineRequest`/`EngineResult` | no |
+| `engines/registry.py` | `EngineRegistry`: register / get / list / available / inspect / find_by_* ; `default_registry()` holds implemented engines only | no |
+| `engines/selector.py` | `EngineRequirements` → `select_engines` / `require_engine`: constraint filtering with per-engine rejection reasons, no ranking | no |
+| `engines/faster_whisper.py` | Reference Local Engine | no (in-process library; may fetch a model unless offline) |
 | `engines/worker.py` | subprocess entry point running one engine call | no |
-| `engines/__init__.py` | registry of implemented engines | no |
+| `engines/__init__.py` | public surface of the engine package | no |
 | `service.py` | orchestration, worker launch with timeout, Transcript construction | yes: the worker (list argv) |
 | `cache.py` | cache identity and storage | no |
 | `validate.py` | the Transcript contract as code | no |
@@ -68,6 +71,26 @@ rejects unknown keys. This is the same information a registry such as video-prod
 `SkillRegistry` (name, version, inputs, outputs, tools, deterministic flag) consumes, offered from the
 skill's side so the agent can adapt it without this repository importing the agent.
 
+## Engine ecosystem
+
+```
+EngineSpec (static contract)         id, version, execution_mode (local|remote), requires_network, deterministic,
+                                     capabilities, supported_languages, supported_models, default_model, models[ModelStatus]
+        ▲ spec()
+TranscriptionEngine (runtime)        available(), model_status(model, offline), transcribe(EngineRequest)
+        ▲ register(class)
+EngineRegistry                       what exists / what is usable; find_by_execution_mode / capability / language; inspect
+        ▲
+select_engines(EngineRequirements)   hard constraints in, candidates + rejection reasons out (no "best")
+```
+
+`execution_mode` and `requires_network` are facts a consumer can treat as capabilities. Model state
+is split on purpose: `requires_network` is about recognition; `ModelStatus.availability`
+(`MODEL_AVAILABLE` / `MODEL_DOWNLOAD_REQUIRED` / `MODEL_MISSING` / `MODEL_UNKNOWN`) is about the model
+on this machine. Offline = `network forbidden` + `model must be local` + the engine is told not to
+fetch. Implemented and registered today: `faster_whisper` (local). Remote engines are expressible
+(`execution_mode: remote`, `requires_network: true`) but none exists in this repository.
+
 ## Boundaries with the neighbours
 
 - **ffmpeg-skill**: not a dependency. This skill needs one deterministic media operation (decode the
@@ -83,4 +106,5 @@ skill's side so the agent can adapt it without this repository importing the age
 
 No AI provider, prompt, reasoning, inference, decision, approval or planning module. No diarization.
 No semantic segmentation. No plugin loader: engines are classes in this package, registered in a
-dict. No stubs for engines or tools that do not exist.
+registry object. No stubs for engines or tools that do not exist: no cloud client, no HTTP code, no
+whisper.cpp binding, no "best engine" chooser.

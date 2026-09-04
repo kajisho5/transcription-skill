@@ -1,0 +1,2 @@
+{"id": "10_cache_separation_by_engine", "metric": "cache_identity",
+ "note": "Cache keys differ across engine id, engine version, execution mode and model; two engines can never share a cached transcript."}
