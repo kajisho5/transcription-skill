@@ -252,6 +252,10 @@ use, and whether a remote one is acceptable for a given production, is the agent
 - [docs/testing.md](docs/testing.md): unit, security, integration, evals; fixtures
 - [docs/decisions.md](docs/decisions.md): architecture decision records
 
+## Support
+
+If this skill saves you time, you can help keep it maintained through [GitHub Sponsors](https://github.com/sponsors/kajisho5). Issues and pull requests are just as welcome.
+
 ## License
 
 MIT
