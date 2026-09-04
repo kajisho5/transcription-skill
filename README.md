@@ -66,6 +66,13 @@ the hard constraints and explains the rest; it never ranks. Picking among candid
 decision. Adding an engine means implementing `TranscriptionEngine` and registering the class; there
 is no plugin loader, and only implemented engines are registered.
 
+| layer | owns | does not do |
+|-------|------|-------------|
+| Skill (`transcription-skill`) | transcription: request → Transcript | interpret, plan, decide |
+| Engine (`faster_whisper`) | the recognition implementation | know about caches, budgets, other engines |
+| Selector | constraint filtering with reasons | rank, prefer, choose |
+| Agent (`video-production-agent`) | final policy: which candidate to adopt, whether remote is acceptable | import engine internals |
+
 ## CLI
 
 ```bash
@@ -79,6 +86,8 @@ transcription check lecture.transcript.json            # validate against the co
 transcription export lecture.transcript.json --format srt -o lecture.srt
 transcription segments lecture.transcript.json --merge-gap 0.5 --json   # SpeechEvent candidates
 transcription skill --json                             # the skill / tool / engine contract (source of truth)
+echo '{"tool":"transcription/transcribe","params":{"input":"lecture.mp4","language":"ja"}}' | transcription run -
+                                                       # process-boundary transport: one JSON request in, one JSON response out
 transcription transcribe lecture.mp4 --offline         # hard no-network constraint (local engine + local model only)
 transcription engines --offline --language ja          # which engines satisfy these constraints
 ```
@@ -112,7 +121,14 @@ Tools: `transcription/transcribe`, `transcription/segments`, `transcription/expo
 Every parameter is typed JSON. A request that contains `command`, `argv`, `shell` or a credential is
 refused with `INVALID_INPUT`. `transcription skill --json` returns the contract including every
 registered engine's `EngineSpec` (schema `transcription-skill/engine-spec/0.1`); that JSON, not this
-README, is what a consumer should read.
+README, is what a consumer should read, and `tests/test_unit.py::ContractDriftTests` fails whenever
+the contract and the implementation diverge (tools, engines, capabilities, schema versions).
+
+**Process boundary for external callers** (`transcription run -`): stdin carries one JSON object
+`{"tool": "<name>", "params": {...}}`; stdout carries exactly one JSON document,
+`{"ok": true, "tool": ..., "result": ...}` or `{"ok": false, "error": {"code", "message", "details"}}`.
+`ok` says whether the tool ran; a tool's own verdict (for example `check`) is inside `result`. Invalid
+or non-JSON stdin still yields an error document (exit 2), never a traceback. Diagnostics go to stderr.
 
 ## Transcript (summary)
 
@@ -139,6 +155,18 @@ README, is what a consumer should read.
 
 Full definition, validation rules and the SpeechEvent record: [docs/transcript.md](docs/transcript.md).
 JSON Schemas: [schemas/](schemas/).
+
+## Invariants
+
+1. transcription-skill owns speech recognition.
+2. An Engine owns a recognition implementation.
+3. The Selector filters by constraints and does not rank.
+4. The Agent owns final policy and decisions, including which engine to adopt.
+5. A Transcript is a recognition result: not an Event, not a Decision, not a Subtitle.
+6. Cache identity includes engine identity (id, version, execution mode) and model identity.
+7. Offline means no network use for the operation, model acquisition included.
+8. Engine availability and model availability are separate facts.
+9. The Agent does not import engine internals; it reads the JSON contract.
 
 ## Where this skill ends and others begin
 

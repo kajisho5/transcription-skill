@@ -127,10 +127,15 @@ class RealMediaTests(unittest.TestCase):
         self.assertEqual(events[0]["asset_id"], doc["asset_id"])
 
     def test_cache_hit_does_not_rerun_engine(self):
+        from unittest import mock
         r1 = self.svc.transcribe(self.req("en_short.wav", language="en"))
-        r2 = self.svc.transcribe(self.req("en_short.wav", language="en"))
+        with mock.patch("transcription_skill.service._run_process_group", side_effect=AssertionError("worker started on a cache hit")):
+            r2 = self.svc.transcribe(self.req("en_short.wav", language="en"))
         self.assertFalse(r1["cache_hit"])
         self.assertTrue(r2["cache_hit"])
+        self.assertEqual(r2["cache_key"], r1["transcript"]["provenance"]["cache_key"])
+        self.assertTrue(validate_transcript(r2["transcript"], expected_fingerprint=r2["transcript"]["source"]["fingerprint"]).ok)
+        self.assertEqual(r2["transcript"]["provenance"]["tool"], "transcription/transcribe")
         self.assertEqual(r1["transcript"], r2["transcript"])
         self.assertEqual(self.svc.dry_run(self.req("en_short.wav", language="en"))["cache"]["status"], "hit")
         r3 = self.svc.transcribe(self.req("en_short.wav", language="en", beam_size=1))
@@ -181,6 +186,23 @@ class RealMediaTests(unittest.TestCase):
         p = subprocess.run([sys.executable, "-m", "transcription_skill.cli", "doctor", "--offline"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
         self.assertEqual(p.returncode, 0, p.stdout)
         self.assertIn("ready to transcribe offline", p.stdout)
+
+    def test_real_engine_is_deterministic_without_cache(self):
+        a = self.svc.transcribe(self.req("ja_short.wav", language="ja", cache=False))["transcript"]
+        b = self.svc.transcribe(self.req("ja_short.wav", language="ja", cache=False))["transcript"]
+        self.assertEqual([(s["start"], s["end"], s["text"]) for s in a["segments"]], [(s["start"], s["end"], s["text"]) for s in b["segments"]])
+        self.assertEqual(a["provenance"]["cache_key"], b["provenance"]["cache_key"])
+        self.assertNotEqual(a["id"], b["id"])
+
+    def test_run_transport_real(self):
+        env = dict(os.environ, TRANSCRIPTION_WORKSPACE=self.ws, PYTHONUTF8="1")
+        req = json.dumps({"tool": "transcription/transcribe", "params": {"input": str(FX / "en_short.wav"), "language": "en", "model": MODEL, "offline": True}})
+        p = subprocess.run([sys.executable, "-m", "transcription_skill.cli", "run", "-"], input=req, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        doc = json.loads(p.stdout)
+        self.assertTrue(doc["ok"])
+        self.assertEqual(doc["result"]["transcript"]["provenance"]["execution_mode"], "local")
+        self.assertTrue(validate_transcript(doc["result"]["transcript"]).ok)
 
     def test_cli_smoke(self):
         env = dict(os.environ, TRANSCRIPTION_WORKSPACE=self.ws, PYTHONUTF8="1")

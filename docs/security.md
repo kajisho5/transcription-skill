@@ -22,6 +22,12 @@
   are refused, the engine is told `local_files_only`), not a hint.
 - The registry contains only implemented engines; the test `FakeEngine` (which can pose as local or
   remote for contract tests) is never registered there.
+- Executables are never configurable: `ffmpeg`/`ffprobe` come from `PATH`, the worker is
+  `sys.executable -m transcription_skill.engines.worker` (a literal argv, asserted by a static test).
+  The only environment variables the package reads are `TRANSCRIPTION_WORKSPACE`, `HF_HUB_CACHE` and
+  `HF_HOME` (allow-list test); none names a binary.
+- `transcription run -` accepts only `{"tool", "params"}`; unknown keys, unknown tools and non-object
+  params are `INVALID_INPUT`; malformed stdin yields an error document, not a traceback.
 
 ## Credentials
 

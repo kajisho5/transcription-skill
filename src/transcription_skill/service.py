@@ -56,7 +56,11 @@ class TranscriptionService:
             raise TranscriptionError("INVALID_INPUT", f"language {req.language!r} is not supported by engine {engine.id}",
                                      {"supported_count": len(engine.supported_languages)})
         if req.word_timestamps and not engine.supports_word_timestamps():
-            raise TranscriptionError("INVALID_INPUT", f"engine {engine.id} does not provide word timestamps")
+            raise TranscriptionError("INVALID_INPUT", f"engine {engine.id} does not provide word timestamps",
+                                     {"engine": engine.id, "reason": "word_timestamps_unsupported"})
+        if req.language is None and not engine.supports_language_detection():
+            raise TranscriptionError("INVALID_INPUT", f"engine {engine.id} cannot detect the language; pass 'language' explicitly",
+                                     {"engine": engine.id, "reason": "language_detection_unsupported"})
         model = engine.model_status(req.model, offline=req.offline)
         if model.availability not in (MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED):
             raise TranscriptionError("MODEL_UNAVAILABLE", f"model {req.model!r}: {model.detail}",
@@ -112,7 +116,7 @@ class TranscriptionService:
                 warnings.append(f"CACHE_INVALID: {exc.message}; recomputing")
                 hit = None
             if hit is not None:
-                return {"transcript": hit, "cache_hit": True, "warnings": warnings}
+                return {"transcript": hit, "cache_hit": True, "cache_key": prep["cache_key"], "warnings": warnings}
 
         engine: TranscriptionEngine = prep["engine"]
         run_dir = os.path.join(ws, "tmp", uuid.uuid4().hex)
@@ -134,7 +138,7 @@ class TranscriptionService:
             raise TranscriptionError("INVALID_RESULT", "engine output failed transcript validation; no transcript returned", {"errors": rep.errors[:10]})
         if req.cache:
             cache.put(prep["cache_key"], doc)
-        return {"transcript": doc, "cache_hit": False, "warnings": warnings}
+        return {"transcript": doc, "cache_hit": False, "cache_key": prep["cache_key"], "warnings": warnings}
 
     # ---- engine execution with a real timeout -------------------------------------------------
     def _run_engine(self, engine: TranscriptionEngine, ereq: EngineRequest, timeout: float, run_dir: str) -> EngineResult:

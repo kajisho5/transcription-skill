@@ -61,12 +61,24 @@ never repaired or invented.
 | `parameters_hash` | sha256 of the canonical parameters JSON |
 | `cache_key` | sha256 identity of (fingerprint, {engine id, version, execution_mode}, {model, model_version}, parameters) |
 | `created_at`, `processing_seconds` | when, and total wall clock of the run (probe + extraction + engine) |
-| `skill_version` | this package's version |
+| `skill`, `skill_version`, `tool` | which skill and tool produced the document (`transcription-skill`, `transcription/transcribe`) |
 | `language_detection` | `{candidate, probability, min_probability}` when auto-detect ran, else `null`; kept even when the result is `unknown` so the guess is visible but not stored as fact |
 | `audio_extraction` | the fixed recipe used (`mono`, `16000 Hz`, `pcm_s16le`) and `engine_seconds` |
 
 Credentials never appear anywhere; the validator rejects credential-looking values and keys such as
 `api_key`, `token`, `command`, `argv`.
+
+### Identity roles
+
+| value | names | changes when |
+|-------|-------|--------------|
+| `id` | this result document | every computation (a cache hit returns the stored document unchanged) |
+| `provenance.cache_key` | the computation | input, engine id/version/execution mode, model/model version, or parameters change |
+| `source.fingerprint`, `asset_id` | the input media | the file bytes change |
+| `engine`, `engine_version`, `provenance.execution_mode` | the recognition implementation | the engine changes |
+
+A cache hit is reported outside the document (`cache_hit`, `cache_key` in the tool response), so the
+cached document stays byte-identical and its provenance stays true.
 
 ## Validation rules (all enforced by `validate_transcript`)
 
@@ -78,6 +90,16 @@ Credentials never appear anywhere; the validator rejects credential-looking valu
 6. language: ISO code or `unknown`; `language_source` consistent with it; confidence only when detected
 7. confidence values in [0, 1] or null
 8. no forbidden keys, no credential-like strings, no command-like strings outside spoken text, no absolute paths
+9. source: bare non-empty `filename`, non-negative integer `size_bytes`, positive `media_duration`, boolean `has_video`
+10. provenance: `execution_mode` in {local, remote}; `skill`, `tool` (a `transcription/*` name), `model` non-empty
+11. numbers must be finite (NaN / ±inf are rejected everywhere a number is expected)
+
+### Language
+
+`language_source` says where the language fact came from: `requested` (the caller), `detected` (the
+engine, probability ≥ 0.5) or `unknown`. When the caller passes no language, the engine must declare
+the `language_detection` capability; otherwise the request is `INVALID_INPUT`
+(`reason: language_detection_unsupported`). The skill never fills a language in on an engine's behalf.
 
 ## Timestamp semantics
 

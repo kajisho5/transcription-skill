@@ -104,6 +104,19 @@ class StaticSecurityTests(unittest.TestCase):
         self.assertEqual(specs[0].execution_mode, "local")
         self.assertFalse(specs[0].requires_network)
 
+    def test_environment_reads_are_an_allow_list_and_never_name_an_executable(self):
+        allowed = {"TRANSCRIPTION_WORKSPACE", "HF_HUB_CACHE", "HF_HOME"}
+        found = set()
+        for f in FILES:
+            for m in re.finditer(r"os\.environ(?:\.get)?\(?\[?\s*[\"']([A-Z_]+)[\"']", f.read_text(encoding="utf-8")):
+                found.add(m.group(1))
+        self.assertTrue(found <= allowed, found - allowed)
+        for f in FILES:
+            text = f.read_text(encoding="utf-8")
+            self.assertNotRegex(text, r"(FFMPEG|FFPROBE|PYTHON|WHISPER)[A-Z_]*(_BIN|_PATH|_EXE)", f"{f.name}: executable override variable")
+        svc = (SRC / "service.py").read_text(encoding="utf-8")
+        self.assertIn('[sys.executable, "-m", WORKER_MODULE, req_path, out_path]', svc)   # the worker argv is literal
+
     def test_forbidden_request_keys_cover_command_passthrough(self):
         from transcription_skill.request import ALLOWED_KEYS, FORBIDDEN_KEYS
         for k in ("command", "argv", "cmd", "shell", "exec", "args"):

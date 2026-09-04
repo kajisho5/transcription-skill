@@ -237,7 +237,9 @@
         "cache_key",
         "created_at",
         "processing_seconds",
-        "skill_version"
+        "skill_version",
+        "skill",
+        "tool"
       ],
       "properties": {
         "engine": {
@@ -294,6 +296,14 @@
             "object",
             "null"
           ]
+        },
+        "skill": {
+          "type": "string",
+          "const": "transcription-skill"
+        },
+        "tool": {
+          "type": "string",
+          "pattern": "^transcription/"
         }
       }
     }

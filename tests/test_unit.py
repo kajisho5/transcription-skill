@@ -2,11 +2,13 @@
 FakeEngine (tests/fake_engine.py) and a silent WAV; they need ffmpeg/ffprobe for probing and extraction."""
 from __future__ import annotations
 
+import argparse
 import copy
 import io
 import json
 import os
 import re
+import subprocess
 import shutil
 import struct
 import sys
@@ -22,7 +24,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 from fake_engine import FakeEngine  # noqa: E402
 from transcription_skill import cli  # noqa: E402
 from transcription_skill.cache import TranscriptCache, cache_key  # noqa: E402
-from transcription_skill.engines import (CAP_LOCAL_EXECUTION, CAP_NETWORK_REQUIRED, CAP_REMOTE_EXECUTION, CAP_WORD_TIMESTAMPS,  # noqa: E402
+from transcription_skill.engines import (CAP_LANGUAGE_DETECTION, CAP_LOCAL_EXECUTION, CAP_NETWORK_REQUIRED, CAP_REMOTE_EXECUTION, CAP_WORD_TIMESTAMPS,  # noqa: E402
                                          EngineRegistry, EngineRequirements, default_registry, engine_ids, get_engine, require_engine,
                                          select_engines)
 from transcription_skill.engines.base import EngineRequest, EngineResult, EngineSpec  # noqa: E402
@@ -33,7 +35,8 @@ from transcription_skill.models import Segment, Transcript, Word  # noqa: E402
 from transcription_skill.normalize import normalize_text  # noqa: E402
 from transcription_skill.request import parse_request  # noqa: E402
 from transcription_skill.service import TranscriptionService  # noqa: E402
-from transcription_skill.skill import TOOLS, run_tool, skill_contract  # noqa: E402
+from transcription_skill.skill import TOOLS, run_request, run_tool, skill_contract, tool_names  # noqa: E402
+from transcription_skill.models import SPEECH_EVENT_SCHEMA, TRANSCRIPT_SCHEMA  # noqa: E402
 from transcription_skill.speech_events import speech_events  # noqa: E402
 from transcription_skill import validate as V  # noqa: E402
 
@@ -86,7 +89,7 @@ def good_doc() -> dict:
     fp = "sha256:" + "ab" * 32
     prov = {"engine": "fake", "engine_version": "1.0", "execution_mode": "local", "model": "fake-model", "model_version": None, "parameters": {"language": "ja"},
             "parameters_hash": "0" * 64, "cache_key": "1" * 64, "created_at": "2026-09-04T00:00:00Z", "processing_seconds": 0.5, "skill_version": "0.2.0",
-            "language_detection": None, "audio_extraction": None}
+            "skill": "transcription-skill", "tool": "transcription/transcribe", "language_detection": None, "audio_extraction": None}
     t = Transcript(id="tr_x", asset_id="asset_1", language="ja", language_source="requested", language_confidence=None, duration=6.0, segments=[seg, seg2],
                    source={"filename": "a.wav", "fingerprint": fp, "size_bytes": 10, "media_duration": 6.0, "audio_channels": 1, "sample_rate": 16000, "container": "wav", "has_video": False},
                    engine="fake", engine_version="1.0", created_at="2026-09-04T00:00:00Z", provenance=prov)
@@ -176,6 +179,15 @@ class SchemaTests(unittest.TestCase):
 
     def test_credential_command_and_path_leakage(self):
         self.assertInvalid(lambda d: d["provenance"].__setitem__("execution_mode", "cloud"), "execution_mode")
+        self.assertInvalid(lambda d: d["provenance"].__setitem__("tool", "ffmpeg-skill/caption"), "provenance.tool")
+        self.assertInvalid(lambda d: d["provenance"].__setitem__("skill", ""), "provenance.skill")
+        self.assertInvalid(lambda d: d["source"].__setitem__("size_bytes", -1), "size_bytes")
+        self.assertInvalid(lambda d: d["source"].__setitem__("size_bytes", True), "size_bytes")
+        self.assertInvalid(lambda d: d["source"].__setitem__("has_video", "yes"), "has_video")
+        self.assertInvalid(lambda d: d["source"].__setitem__("filename", ""), "filename")
+        self.assertInvalid(lambda d: d["segments"][0].__setitem__("start", float("nan")), "must be numbers")
+        self.assertInvalid(lambda d: d["segments"][0].__setitem__("end", float("inf")), "must be numbers")
+        self.assertInvalid(lambda d: d.__setitem__("duration", float("nan")), "positive")
         self.assertInvalid(lambda d: d["provenance"].__setitem__("api_key", "x"), "forbidden key")
         self.assertInvalid(lambda d: d["provenance"].__setitem__("argv", ["whisper"]), "forbidden key")
         self.assertInvalid(lambda d: d["provenance"]["parameters"].__setitem__("initial_prompt", "sk-abcdefghijklmnopqrstuvwxyz0123"), "credential-like")
@@ -428,6 +440,39 @@ class ServiceTests(unittest.TestCase):
         self.svc.transcribe(self.req())
         self.assertEqual(os.listdir(os.path.join(self.ws, "tmp")), [])
 
+    def test_engine_without_language_detection_needs_explicit_language(self):
+        class NoDetect(FakeEngine):
+            def supports_language_detection(self) -> bool:
+                return False
+        svc = TranscriptionService(workspace=self.ws, engine=NoDetect())
+        with self.assertRaises(TranscriptionError) as cm:
+            svc.transcribe(self.req())
+        self.assertEqual((cm.exception.code, cm.exception.details["reason"]), ("INVALID_INPUT", "language_detection_unsupported"))
+        doc = svc.transcribe(self.req(language="ja"))["transcript"]      # explicit language: fine, nothing was guessed
+        self.assertEqual((doc["language"], doc["language_source"]), ("ja", "requested"))
+        self.assertNotIn(CAP_LANGUAGE_DETECTION, NoDetect().spec().capabilities)
+
+    def test_determinism_of_result_semantics(self):
+        a = self.svc.transcribe(self.req(language="ja", word_timestamps=True, cache=False))["transcript"]
+        b = self.svc.transcribe(self.req(language="ja", word_timestamps=True, cache=False))["transcript"]
+        self.assertNotEqual(a["id"], b["id"])                             # a document identity per computation
+        volatile = {"created_at", "processing_seconds", "audio_extraction"}
+        self.assertEqual(a["segments"], b["segments"])
+        self.assertEqual({k: v for k, v in a["provenance"].items() if k not in volatile}, {k: v for k, v in b["provenance"].items() if k not in volatile})
+        self.assertEqual(a["provenance"]["cache_key"], b["provenance"]["cache_key"])
+        self.assertEqual((a["asset_id"], a["source"]), (b["asset_id"], b["source"]))
+        self.assertNotIn(self.ws, json.dumps(a))                        # no temporary path in the result
+
+    def test_cache_hit_response_is_valid_and_traceable(self):
+        first = self.svc.transcribe(self.req(language="ja"))
+        hit = self.svc.transcribe(self.req(language="ja"))
+        self.assertTrue(hit["cache_hit"])
+        self.assertEqual(hit["cache_key"], first["cache_key"])
+        self.assertEqual(hit["transcript"]["provenance"]["cache_key"], hit["cache_key"])
+        self.assertTrue(V.validate_transcript(hit["transcript"], expected_fingerprint=hit["transcript"]["source"]["fingerprint"]).ok)
+        self.assertEqual(hit["transcript"]["provenance"]["tool"], "transcription/transcribe")
+        self.assertEqual(len(self.engine.calls), 1)
+
     def test_offline_local_model_allowed_and_recorded(self):
         res = self.svc.transcribe(self.req(language="ja", offline=True))
         self.assertTrue(self.engine.calls[-1].offline)
@@ -667,6 +712,212 @@ class EngineEcosystemTests(unittest.TestCase):
         self.assertTrue(remote.requires_network)
         self.assertIn(CAP_REMOTE_EXECUTION, remote.capabilities)
         self.assertNotIn("local_model", remote.capabilities)
+
+
+class ContractDriftTests(unittest.TestCase):
+    """The JSON contract is the source of truth; these fail when implementation and contract diverge."""
+
+    def test_every_contract_tool_is_dispatched_and_nothing_else(self):
+        for name in tool_names():
+            with self.assertRaises(TranscriptionError) as cm:
+                run_tool(name, {})                    # reaches the tool's own validation, not "unknown tool"
+            self.assertNotIn("unknown tool", cm.exception.message, name)
+        with self.assertRaises(TranscriptionError) as cm:
+            run_tool("transcription/diarize", {})
+        self.assertIn("unknown tool", cm.exception.message)
+        src = (ROOT / "src" / "transcription_skill" / "skill.py").read_text(encoding="utf-8")
+        dispatched = sorted(set(re.findall(r'if name == "(transcription/[a-z_]+)"', src)))
+        self.assertEqual(dispatched, sorted(tool_names()))
+        parser = cli.build_parser()
+        subs = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices
+        for name in tool_names():
+            self.assertIn(name.split("/")[1], subs, f"tool {name} has no CLI subcommand")
+
+    def test_engine_specs_in_contract_equal_registry_and_live_engines(self):
+        c = skill_contract()
+        reg = default_registry()
+        self.assertEqual([e["id"] for e in c["engines"]], reg.ids())
+        for e in c["engines"]:
+            engine = reg.get(e["id"])
+            self.assertEqual(e, engine.spec(include_models=True).to_dict())
+            self.assertEqual(e, reg.inspect(e["id"]).to_dict())
+            self.assertEqual(e["execution_mode"], type(engine).execution_mode)
+            self.assertEqual(e["requires_network"], type(engine).requires_network)
+            self.assertEqual(e["available"], engine.available())
+            self.assertEqual(e["version"], engine.version)
+            if e["available"]:
+                self.assertEqual(CAP_WORD_TIMESTAMPS in e["capabilities"], engine.supports_word_timestamps())
+                self.assertEqual(CAP_LANGUAGE_DETECTION in e["capabilities"], engine.supports_language_detection())
+                self.assertEqual(sorted(e["supported_languages"]), sorted(engine.supported_languages))
+                self.assertEqual(e["supported_models"], engine.supported_models)
+                self.assertIn(e["default_model"], e["supported_models"])
+                for m in e["models"]:
+                    self.assertEqual(m, engine.model_status(m["model"]).to_dict())
+            self.assertEqual(CAP_LOCAL_EXECUTION in e["capabilities"], e["execution_mode"] == "local")
+            self.assertEqual(CAP_REMOTE_EXECUTION in e["capabilities"], e["execution_mode"] == "remote")
+            self.assertEqual(CAP_NETWORK_REQUIRED in e["capabilities"], e["requires_network"])
+            for cap in e["capabilities"]:
+                self.assertIn(cap, c["engine_contract"]["capabilities"])
+
+    def test_schema_versions_agree_everywhere(self):
+        c = skill_contract()
+        self.assertEqual(c["schemas"]["transcript"], TRANSCRIPT_SCHEMA)
+        self.assertEqual(c["schemas"]["speech_event"], SPEECH_EVENT_SCHEMA)
+        self.assertEqual(c["schemas"]["engine_spec"], c["engine_contract"]["schema"])
+        t = json.loads((ROOT / "schemas" / "transcript.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual(t["properties"]["schema"]["const"], TRANSCRIPT_SCHEMA)
+        e = json.loads((ROOT / "schemas" / "speech_event.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual(e["properties"]["schema"]["const"], SPEECH_EVENT_SCHEMA)
+        g = json.loads((ROOT / "schemas" / "engine_spec.schema.json").read_text(encoding="utf-8"))
+        self.assertIn(c["schemas"]["engine_spec"], g["description"])
+        self.assertEqual(g["properties"]["execution_mode"]["enum"], c["engine_contract"]["execution_modes"])
+        self.assertEqual(g["properties"]["capabilities"]["items"]["enum"], c["engine_contract"]["capabilities"])
+        self.assertEqual(set(t["$defs"]["provenance"]["required"]), set(V.REQUIRED_PROVENANCE))
+        from transcription_skill import __version__
+        self.assertEqual(c["version"], __version__)
+        self.assertTrue(V.validate_transcript(good_doc()).ok)             # good_doc tracks the current contract
+
+    def test_run_transport_contract(self):
+        with self.assertRaises(TranscriptionError):
+            run_request([])
+        with self.assertRaises(TranscriptionError):
+            run_request({"tool": "transcription/check", "params": {}, "command": "x"})
+        with self.assertRaises(TranscriptionError) as cm:
+            run_request({"tool": "transcription/diarize", "params": {}})
+        self.assertEqual(cm.exception.details["tools"], tool_names())
+        with self.assertRaises(TranscriptionError):
+            run_request({"tool": "transcription/check", "params": "x"})
+        tmp = tempfile.mkdtemp(prefix="ts_run_")
+        try:
+            p = os.path.join(tmp, "t.json")
+            Path(p).write_text(json.dumps(good_doc()), encoding="utf-8")
+            res = run_request({"tool": "transcription/check", "params": {"transcript": p}})
+            self.assertEqual((res["ok"], res["tool"], res["result"]["ok"]), (True, "transcription/check", True))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class SelectionMatrixTests(unittest.TestCase):
+    """Engine/model availability matrix as the selector and the service see it (FakeEngine, no models)."""
+
+    def reg(self, *engines):
+        r = EngineRegistry()
+        for e in engines:
+            r.register(e)
+        return r
+
+    def ids(self, sel):
+        return [c.id for c in sel.candidates]
+
+    def reasons(self, sel, eid):
+        return next(r.reasons for r in sel.rejected if r.engine_id == eid)
+
+    def test_engine_available_vs_unavailable(self):
+        self.assertEqual(self.ids(select_engines(EngineRequirements(), self.reg(FakeEngine()))), ["fake"])
+        sel = select_engines(EngineRequirements(), self.reg(FakeEngine(available=False)))
+        self.assertEqual((self.ids(sel), self.reasons(sel, "fake")), ([], ["engine_not_installed"]))
+
+    def test_engine_available_is_not_model_available(self):
+        e = FakeEngine(local_models=[], downloadable=False)
+        self.assertTrue(e.spec().available)
+        self.assertEqual(e.model_status("base").availability, "MODEL_MISSING")
+        self.assertEqual(self.ids(select_engines(EngineRequirements(), self.reg(e))), ["fake"])                    # engine usable online
+        sel = select_engines(EngineRequirements(offline=True), self.reg(e))
+        self.assertEqual((self.ids(sel), self.reasons(sel, "fake")), ([], ["model_not_available_offline"]))      # but not offline
+
+    def test_model_available_missing_download_required(self):
+        e = FakeEngine(local_models=["fake-model"], downloadable=True)
+        st = {m: e.model_status(m) for m in ("fake-model", "base", "zzz")}
+        self.assertEqual([st[m].availability for m in ("fake-model", "base", "zzz")], ["MODEL_AVAILABLE", "MODEL_DOWNLOAD_REQUIRED", "MODEL_UNKNOWN"])
+        self.assertEqual([st[m].status for m in ("fake-model", "base", "zzz")], ["AVAILABLE", "MISSING", "UNKNOWN"])
+        self.assertEqual([st[m].source for m in ("fake-model", "base", "zzz")], ["local", "downloadable", None])
+        self.assertEqual([st[m].download_required for m in ("fake-model", "base", "zzz")], [False, True, False])
+        self.assertIsNotNone(st["fake-model"].version)
+        self.assertEqual(e.model_status("base", offline=True).availability, "MODEL_MISSING")        # download required is not "usable offline"
+        self.assertFalse(e.model_status("base", offline=True).download_required)
+
+    def test_offline_matrix(self):
+        r = self.reg(FakeEngine(local_models=["fake-model"], downloadable=True))
+        self.assertEqual(self.ids(select_engines(EngineRequirements(offline=True, model="fake-model"), r)), ["fake"])
+        sel = select_engines(EngineRequirements(offline=True, model="base"), r)
+        self.assertEqual(self.reasons(sel, "fake"), ["model_not_available_offline"])
+
+    def test_remote_word_timestamps_language_detection_engine_model_mismatch(self):
+        local = FakeEngine(words=False)
+        remote = FakeEngine(engine_id="fake_remote", execution_mode="remote", requires_network=True)
+        r = self.reg(local, remote)
+        sel = select_engines(EngineRequirements(execution_mode="remote"), r)
+        self.assertEqual(self.ids(sel), ["fake_remote"])
+        sel = select_engines(EngineRequirements(word_timestamps=True), r)
+        self.assertEqual((self.ids(sel), self.reasons(sel, "fake")), (["fake_remote"], ["word_timestamps_unsupported"]))
+        class NoDetect(FakeEngine):
+            def supports_language_detection(self) -> bool:
+                return False
+        sel = select_engines(EngineRequirements(language_detection=True), self.reg(NoDetect()))
+        self.assertEqual(self.reasons(sel, "fake"), ["language_detection_unsupported"])
+        sel = select_engines(EngineRequirements(engine_id="fake_remote"), r)
+        self.assertEqual((self.ids(sel), self.reasons(sel, "fake")), (["fake_remote"], ["engine_id_mismatch"]))
+        sel = select_engines(EngineRequirements(model="nope"), r)
+        self.assertEqual(self.ids(sel), [])
+        self.assertEqual(self.reasons(sel, "fake"), ["model_unknown"])
+
+    def test_selector_returns_registry_order_not_a_ranking(self):
+        r = self.reg(FakeEngine(engine_id="zeta"), FakeEngine(engine_id="alpha"))
+        sel = select_engines(EngineRequirements(), r)
+        self.assertEqual(self.ids(sel), ["alpha", "zeta"])          # sorted ids, nothing else
+        self.assertFalse(any(k in sel.to_dict() for k in ("best", "score", "rank", "preferred")))
+        self.assertFalse(hasattr(sel, "best"))
+
+
+class JsonProtocolTests(unittest.TestCase):
+    """With --json (and `run -`), stdout is exactly one JSON document, on success and on error."""
+
+    def run_cli(self, argv, stdin=""):
+        env = dict(os.environ, PYTHONUTF8="1")
+        p = subprocess.run([sys.executable, "-m", "transcription_skill.cli"] + argv, input=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        return p.returncode, p.stdout, p.stderr
+
+    def assertOneJson(self, out):
+        doc = json.loads(out)                    # raises when more than one document / any noise
+        self.assertTrue(out.endswith("\n"))
+        return doc
+
+    def test_json_commands_emit_one_document_even_on_error(self):
+        tmp = tempfile.mkdtemp(prefix="ts_json_")
+        try:
+            bad = os.path.join(tmp, "bad.json")
+            Path(bad).write_text("{not json", encoding="utf-8")
+            good = os.path.join(tmp, "good.json")
+            Path(good).write_text(json.dumps(good_doc()), encoding="utf-8")
+            cases = [
+                (["skill", "--json"], 0), (["doctor", "--json", "--workspace", tmp], None), (["engines", "--json"], 0),
+                (["engines", "--offline", "--language", "ja", "--json"], 0), (["engines", "--engine", "faster_whisper", "--json"], 0),
+                (["check", good, "--json"], 0), (["check", bad, "--json"], 1),
+                (["segments", good, "--json"], 0), (["segments", bad, "--json"], 1),
+                (["export", good, "--format", "srt", "-o", os.path.join(tmp, "x.srt"), "--json"], 0),
+                (["export", bad, "--format", "srt", "-o", os.path.join(tmp, "y.srt"), "--json"], 1),
+                (["transcribe", os.path.join(tmp, "missing.wav"), "--json"], 2),
+                (["transcribe", good, "--json", "--engine", "nope"], 1),
+            ]
+            for argv, code in cases:
+                rc, out, err = self.run_cli(argv)
+                doc = self.assertOneJson(out)
+                if code is not None:
+                    self.assertEqual(rc, code, (argv, out, err))
+                if rc != 0 and "error" in doc:
+                    self.assertIn(doc["error"]["code"], ERROR_CODES)
+                self.assertNotIn("Traceback", out + err)
+            for stdin, code in (("", 2), ("{not json", 2), ("[]", 2), ('{"tool": "transcription/nope", "params": {}}', 2),
+                                (json.dumps({"tool": "transcription/check", "params": {"transcript": good}}), 0),
+                                (json.dumps({"tool": "transcription/check", "params": {"transcript": bad}}), 1)):
+                rc, out, err = self.run_cli(["run", "-"], stdin)
+                doc = self.assertOneJson(out)
+                self.assertEqual(rc, code, (stdin, out, err))
+                self.assertEqual(doc["ok"], rc == 0)
+            rc, out, err = self.run_cli(["run", "file.json"])
+            self.assertEqual(self.assertOneJson(out)["error"]["code"], "INVALID_INPUT")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 class LeakTests(unittest.TestCase):

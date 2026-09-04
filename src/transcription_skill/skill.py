@@ -35,7 +35,8 @@ TOOLS: List[Dict[str, Any]] = [
      "input": {"input": "path", "language": "iso639-1 | null", "engine": "engine id", "model": "model name", "word_timestamps": "bool",
                "temperature": "0..1", "initial_prompt": "str | null", "beam_size": "1..10", "asset_id": "str | null",
                "budget": {"timeout": "seconds", "max_audio_seconds": "seconds"}, "cache": "bool", "workspace": "path | null", "offline": "bool", "dry_run": "bool"},
-     "output": {"transcript": "Transcript", "cache_hit": "bool", "warnings": "list[str]"}, "deterministic": True, "side_effects": ["writes cache under workspace"]},
+     "output": {"transcript": "Transcript", "cache_hit": "bool", "cache_key": "sha256 hex", "warnings": "list[str]"}, "deterministic": True,
+     "side_effects": ["writes cache under workspace"]},
     {"name": "transcription/segments", "description": "Derive SpeechEvent-compatible candidates from a Transcript (one per segment, optional gap merge).",
      "input": {"transcript": "Transcript | path", "merge_gap": "seconds >= 0"}, "output": {"events": "list[SpeechEvent]"}, "deterministic": True, "side_effects": []},
     {"name": "transcription/export", "description": "Render a Transcript as json, srt or vtt (plain timed text, no styling).",
@@ -116,3 +117,25 @@ def run_tool(name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         doc = load_transcript(params.get("transcript"))
         return validate_transcript(doc).to_dict()
     raise TranscriptionError("INVALID_INPUT", f"unknown tool {name!r}", {"tools": [t["name"] for t in TOOLS]})
+
+
+def tool_names() -> List[str]:
+    return [t["name"] for t in TOOLS]
+
+
+def run_request(doc: Any) -> Dict[str, Any]:
+    """Process-boundary transport: one JSON request {"tool": name, "params": {...}} -> one JSON response.
+    Success: {"ok": true, "tool": name, "result": ...}. Errors are raised as TranscriptionError and
+    rendered by the caller as {"ok": false, "error": {...}}. Nothing else is accepted on this channel."""
+    if not isinstance(doc, dict):
+        raise TranscriptionError("INVALID_INPUT", "request must be a JSON object with 'tool' and 'params'")
+    extra = set(doc) - {"tool", "params"}
+    if extra:
+        raise TranscriptionError("INVALID_INPUT", f"unknown request keys {sorted(extra)}")
+    name = doc.get("tool")
+    if not isinstance(name, str) or name not in tool_names():
+        raise TranscriptionError("INVALID_INPUT", f"'tool' must be one of {tool_names()}", {"tools": tool_names()})
+    params = doc.get("params", {})
+    if not isinstance(params, dict):
+        raise TranscriptionError("INVALID_INPUT", "'params' must be a JSON object")
+    return {"ok": True, "tool": name, "result": run_tool(name, params)}

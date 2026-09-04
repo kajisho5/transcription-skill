@@ -22,7 +22,7 @@ REQUIRED_SEGMENT = ("id", "start", "end", "text", "raw_text", "confidence", "wor
 REQUIRED_WORD = ("start", "end", "text", "confidence")
 REQUIRED_SOURCE = ("filename", "fingerprint", "size_bytes", "media_duration")
 REQUIRED_PROVENANCE = ("engine", "engine_version", "execution_mode", "model", "model_version", "parameters", "parameters_hash",
-                       "cache_key", "created_at", "processing_seconds", "skill_version")
+                       "cache_key", "created_at", "processing_seconds", "skill_version", "skill", "tool")
 EXECUTION_MODES = ("local", "remote")
 
 # keys that must never appear anywhere in a transcript document
@@ -130,8 +130,17 @@ def validate_transcript(doc: Any, expected_asset_id: Optional[str] = None, expec
         if "media_duration" in src and dur is not None and _is_num(src["media_duration"]) and abs(src["media_duration"] - dur) > 1e-6:
             rep.errors.append("duration must equal source.media_duration")
         fn = src.get("filename")
-        if isinstance(fn, str) and ("/" in fn or "\\" in fn):
+        if not isinstance(fn, str) or not fn:
+            rep.errors.append("source.filename must be a non-empty string")
+        elif "/" in fn or "\\" in fn:
             rep.errors.append("source.filename must be a bare file name, not a path")
+        sb = src.get("size_bytes")
+        if not isinstance(sb, int) or isinstance(sb, bool) or sb < 0:
+            rep.errors.append("source.size_bytes must be a non-negative integer")
+        if "media_duration" in src and (not _is_num(src["media_duration"]) or src["media_duration"] <= 0):
+            rep.errors.append("source.media_duration must be a positive number")
+        if "has_video" in src and not isinstance(src["has_video"], bool):
+            rep.errors.append("source.has_video must be a boolean")
     if expected_asset_id and doc["asset_id"] != expected_asset_id:
         rep.errors.append(f"asset_id {doc['asset_id']!r} does not match expected {expected_asset_id!r}")
 
@@ -155,6 +164,11 @@ def validate_transcript(doc: Any, expected_asset_id: Optional[str] = None, expec
                 rep.errors.append(f"provenance.{k} must be a sha256 hex string")
         if not _is_num(prov.get("processing_seconds")) or prov["processing_seconds"] < 0:
             rep.errors.append("provenance.processing_seconds must be a non-negative number")
+        for k in ("skill", "tool", "skill_version", "model"):
+            if not isinstance(prov.get(k), str) or not prov.get(k):
+                rep.errors.append(f"provenance.{k} must be a non-empty string")
+        if isinstance(prov.get("tool"), str) and not prov["tool"].startswith("transcription/"):
+            rep.errors.append("provenance.tool must be a transcription/* tool name")
 
     # segments
     segs = doc["segments"]

@@ -107,3 +107,25 @@
   service's fixed worker argv remains the only process launch for recognition. An engine that needs a
   binary (whisper.cpp, one day) must go through a fixed argv in the media/service layer, not spawn on
   its own.
+
+## ADR-020 The JSON contract is the source of truth, and drift is a test failure
+- `skill --json` must equal the live registry and engine objects; every tool in the contract must be
+  dispatched by `run_tool` and reachable from the CLI; schema ids in code, contract and schema files must
+  agree. `ContractDriftTests` and evals 11–13 enforce it, so the README can never be the only place a
+  fact lives.
+
+## ADR-021 `run -` is the process-boundary transport; transport `ok` ≠ tool verdict
+- One JSON object in, one JSON document out, always parseable (also for malformed stdin, exit 2).
+  `ok` reports whether the tool ran; a tool's own judgement (`check`'s validity) lives in `result`.
+  This is the surface an agent adapter calls; it is a thin layer over `run_tool`, exactly what an MCP
+  transport would also wrap. No batch mode: one request per process keeps the boundary simple.
+
+## ADR-022 Provenance names the producing skill and tool; cache hits are reported outside the document
+- `provenance.skill`, `provenance.tool` and `provenance.skill_version` make a Transcript
+  self-describing when it is stored next to results of other skills. A cache hit returns the stored
+  document unchanged (its provenance stays true) and the response carries `cache_hit` / `cache_key`.
+
+## ADR-023 The skill never supplies a language an engine cannot detect
+- No `language` in the request + an engine without `language_detection` → `INVALID_INPUT`
+  (`language_detection_unsupported`), mirroring the selector's reason code. Guessing a language, or
+  defaulting to one, would turn a request parameter into a fabricated fact.

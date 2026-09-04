@@ -17,7 +17,7 @@ from .doctor import format_doctor, run_doctor
 from .engines import EngineRequirements, default_registry, select_engines
 from .errors import TranscriptionError
 from .export import FORMATS
-from .skill import run_tool, skill_contract
+from .skill import run_request, run_tool, skill_contract
 
 
 def _print_json(obj: Any) -> None:
@@ -166,6 +166,21 @@ def cmd_engines(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run(args: argparse.Namespace) -> int:
+    """`transcription run -` : one JSON request on stdin -> exactly one JSON document on stdout.
+    This is the process-boundary transport an external caller (an agent adapter) uses; invalid or
+    non-JSON input still yields a parseable error document, never a traceback."""
+    if args.request != "-":
+        raise TranscriptionError("INVALID_INPUT", "run takes '-' and reads one JSON request from stdin")
+    raw = sys.stdin.read()
+    try:
+        doc = json.loads(raw)
+    except ValueError as exc:
+        raise TranscriptionError("INVALID_INPUT", f"stdin is not valid JSON: {exc}")
+    _print_json(run_request(doc))
+    return 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     rep = run_doctor(args.workspace, offline=args.offline)
     if args.json:
@@ -247,6 +262,10 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--offline", action="store_true", help="only engines usable with no network and a local model")
     g.add_argument("--json", action="store_true")
     g.set_defaults(func=cmd_engines)
+
+    r = sub.add_parser("run", help="read one JSON tool request ({\"tool\": ..., \"params\": {...}}) from stdin, print one JSON response")
+    r.add_argument("request", help="'-' (stdin)")
+    r.set_defaults(func=cmd_run, json=True)
 
     k = sub.add_parser("skill", help="print the skill / tool contract")
     k.add_argument("--json", action="store_true")

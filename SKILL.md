@@ -44,6 +44,7 @@ stdout) and `transcribe` accepts `--dry-run` (plan only, no ASR).
 | "don't reuse the old result" | `--no-cache` |
 | "no internet here", "air-gapped", "must not upload the audio" | `transcribe ... --offline` (refuses remote engines and any model download); `doctor --offline` first |
 | "which engines / models can I use here" | `engines` / `engines --engine faster_whisper` / `engines --offline --language ja` |
+| calling from another program / an agent adapter | `run -` with `{"tool": ..., "params": {...}}` on stdin; read the one JSON document on stdout |
 
 ## Report format
 
@@ -85,5 +86,7 @@ never "fix" the transcript text yourself when the user asked for the transcript.
   passed to child processes and never appear in outputs. `--offline` is enforced, not advisory.
 - No engine ranking: `engines --offline --language ja` lists candidates and rejection reasons; which
   candidate to use is your (or the production agent's) decision.
+- An engine without language detection needs `--language`; the skill never fills a language in.
+  "Engine available" and "model available" are different rows in `doctor`: both must hold.
 - No interpretation: no chapters, topics, speakers, edit points or importance. Those are the
   production agent's decisions, made on top of this data.

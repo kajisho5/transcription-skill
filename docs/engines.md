@@ -50,6 +50,16 @@ null), `version` (snapshot/revision when known), `detail`, `download_required`.
 (`start`, `end`, `text`, `confidence`, `words`), `language` + `language_probability` (detection, only
 when the request language was `None`), `warnings`.
 
+Engine availability (`EngineSpec.available`: installed and importable) and model availability
+(`ModelStatus.availability` per model) are separate facts: faster-whisper can be installed while
+`large-v3` is not on disk. The service checks both; `doctor` shows both as separate rows; the selector
+checks the model only when a model is named or the engine has a default.
+
+Capabilities are checked, never assumed: a request without `language` needs `language_detection`
+(else `INVALID_INPUT`, `reason: language_detection_unsupported`), `word_timestamps: true` needs
+`word_timestamps` (else `INVALID_INPUT`, `reason: word_timestamps_unsupported`). The selector reports
+the same conditions as `language_detection_unsupported` / `word_timestamps_unsupported`.
+
 An engine knows nothing about Transcript ids, caches, budgets, provenance or files other than the WAV
 it is given. Errors are `TranscriptionError` with `ENGINE_UNAVAILABLE`, `MODEL_UNAVAILABLE` (details
 carry `availability`), `TRANSCRIPTION_FAILED` or `INVALID_INPUT`. No error code was added for model
@@ -94,8 +104,10 @@ rejection when no candidate remains. Reason codes: `engine_not_installed`, `exec
 `language_detection_unsupported`, `model_unknown`, `model_not_available_offline`, `engine_id_mismatch`.
 
 This is filtering, not decision-making. Candidates come back in registry order; nothing here says
-which one is better. `offline=True` implies `network="forbidden"` and requires the model to be
-`MODEL_AVAILABLE`.
+which one is better, and the selector's source contains no sort, score or rank (eval 19). Which
+candidate to adopt, whether a remote engine is acceptable for a given production, and what to do when
+no candidate remains are decisions of the caller: video-production-agent's decision layer in the
+future. `offline=True` implies `network="forbidden"` and requires the model to be `MODEL_AVAILABLE`.
 
 ## Offline behaviour (`--offline`, request key `offline`)
 

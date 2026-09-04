@@ -1,0 +1,2 @@
+{"id": "20_json_protocol_stability", "metric": "json_protocol",
+ "note": "skill/doctor/engines --json and `run -` print exactly one JSON document on stdout, on success and on invalid input."}

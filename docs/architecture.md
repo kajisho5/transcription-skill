@@ -61,7 +61,7 @@ Transcript ──► validate.py      ──► ValidationReport         (transc
 | `export.py` | json / srt / vtt renderings | no |
 | `doctor.py` | environment report | via `media.tool_version` |
 | `skill.py` | Skill contract, Tool contract, single `run_tool` dispatch | no |
-| `cli.py` | argparse front end over `run_tool` | no |
+| `cli.py` | argparse front end over `run_tool`; `run -` = one JSON request on stdin → one JSON response (`skill.run_request`) | no |
 
 ## Skill / Tool contract
 
@@ -90,6 +90,25 @@ is split on purpose: `requires_network` is about recognition; `ModelStatus.avail
 on this machine. Offline = `network forbidden` + `model must be local` + the engine is told not to
 fetch. Implemented and registered today: `faster_whisper` (local). Remote engines are expressible
 (`execution_mode: remote`, `requires_network: true`) but none exists in this repository.
+
+## Invariants (fixed by docs and tests)
+
+| # | invariant | where it is enforced |
+|---|-----------|----------------------|
+| 1 | transcription-skill owns speech recognition | `skill.py` tools; no inference/decision module exists |
+| 2 | Engine owns the recognition implementation | `engines/base.py` contract; engine modules cannot spawn processes (`test_security`) |
+| 3 | Selector filters, never ranks | `engines/selector.py`; `SelectionMatrixTests`, eval 19 |
+| 4 | Agent owns final policy / decision | selector returns all candidates + reasons; nothing here picks one |
+| 5–8 | Transcript is a recognition result, not an Event / Decision / Subtitle | `models.py`; SpeechEvent is a separate derived record; SRT/VTT are views |
+| 9 | Cache identity includes engine identity | `cache.py` (`cache_identity`); `CacheKeyTests`, evals 10 and 18 |
+| 10 | Offline = no network for the operation | `service._prepare` + `EngineRequest.offline`; `ServiceTests`, integration, evals 08 and 14 |
+| 11 | Engine availability ≠ model availability | `EngineSpec.available` vs `ModelStatus.availability`; `SelectionMatrixTests` |
+| 12 | Agent does not import engine internals | `skill --json` / `run -` are the interface; `ContractDriftTests` keep it truthful |
+
+Identity roles: `Transcript.id` names one result document (new per computation); `provenance.cache_key`
+names the computation (same inputs → same key); `source.fingerprint` / `asset_id` name the input; `engine`
++ `engine_version` + `execution_mode` name the recognition implementation. They are never substituted
+for one another (eval 18).
 
 ## Boundaries with the neighbours
 

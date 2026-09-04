@@ -85,6 +85,8 @@ class Provenance(Model):
     created_at: str
     processing_seconds: float
     skill_version: str
+    skill: str = "transcription-skill"   # which skill produced the document
+    tool: str = "transcription/transcribe"  # which tool of that skill
     language_detection: Optional[Dict[str, Any]] = None   # {"candidate": "ja", "probability": 0.99} when auto
     audio_extraction: Optional[Dict[str, Any]] = None      # how audio was prepared (fixed ffmpeg recipe)
 
