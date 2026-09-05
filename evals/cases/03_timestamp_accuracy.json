@@ -1,9 +1,14 @@
 {
   "id": "03_timestamp_accuracy",
-  "input": "tests/fixtures/lecture_short.mp4",
-  "request": {"word_timestamps": true},
-  "reference": "lecture_short.mp4",
+  "derived": {
+    "twice": "tests/fixtures/ja_short.wav",
+    "gap": 1.5
+  },
+  "request": {
+    "language": "ja",
+    "word_timestamps": true
+  },
   "metric": "timestamps",
   "onset_tolerance": 1.5,
-  "note": "Whisper attaches leading silence to the first segment, so onsets are checked with a 1.5 s tolerance; the second part's onset is derived from the first fixture's duration + the 1.0 s gap + its own 1.0 s lead."
+  "note": "Same Japanese utterance twice with a 1.5 s gap, built at run time from the committed fixture. Whisper attaches leading silence to the first segment, so onsets are checked with a 1.5 s tolerance; the second onset is the first copy's duration + gap + its 1.0 s lead."
 }

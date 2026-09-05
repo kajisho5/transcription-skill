@@ -357,6 +357,23 @@ class ServiceTests(unittest.TestCase):
         self.assertIsNone(doc["segments"][0]["words"])
         self.assertTrue(any("word timestamps discarded" in w for w in doc["warnings"]))
 
+    def test_small_end_overrun_is_clamped_with_warning_large_one_rejected(self):
+        # media is 6.0 s (make_wav); an engine that overruns by 0.8 s
+        over = FakeEngine(segments=[{"start": 1.0, "end": 3.0, "text": "a"}, {"start": 3.5, "end": 6.8, "text": "b",
+                                                                                   "words": [(3.5, 4.0, "b1", 0.9), (4.0, 6.8, "b2", 0.9)]}])
+        doc = TranscriptionService(workspace=self.ws, engine=over).transcribe(self.req(word_timestamps=True, cache=False))["transcript"]
+        self.assertTrue(V.validate_transcript(doc).ok)
+        self.assertAlmostEqual(doc["segments"][1]["end"], doc["duration"], places=6)
+        self.assertAlmostEqual(doc["segments"][1]["words"][-1]["end"], doc["duration"], places=6)
+        self.assertTrue(any("clamped to media duration" in w for w in doc["warnings"]), doc["warnings"])
+        far = FakeEngine(segments=[{"start": 1.0, "end": 9.5, "text": "a"}])            # 3.5 s past the end: not repaired
+        with self.assertRaises(TranscriptionError) as cm:
+            TranscriptionService(workspace=self.ws, engine=far).transcribe(self.req(cache=False))
+        self.assertEqual(cm.exception.code, "INVALID_RESULT")
+        beyond = FakeEngine(segments=[{"start": 6.2, "end": 6.9, "text": "a"}])        # starts after the media ends: not clamped
+        with self.assertRaises(TranscriptionError):
+            TranscriptionService(workspace=self.ws, engine=beyond).transcribe(self.req(cache=False))
+
     def test_engine_failure_is_structured(self):
         svc = TranscriptionService(workspace=self.ws, engine=FakeEngine(fail=RuntimeError("boom")))
         with self.assertRaises(TranscriptionError) as cm:

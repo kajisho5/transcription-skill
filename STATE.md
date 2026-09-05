@@ -36,20 +36,23 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   convention). Input confinement, tmp/cache confinement and no-clobber are enforced; output-root policy is PLANNED.
 - Mixed-language fixture `tests/fixtures/lecture_short.mp4` (ja then en) sits on a decision boundary of faster-whisper `base`
   int8: one session on this host produced 1 segment (English part dropped) while later runs on the same host produced
-  3 segments across thread counts and repeats. Cause UNKNOWN (host migration between sessions is possible). Affects
-  `test_video_with_audio_ordering_and_timestamps` and evals 03/04 intermittently. Not yet made robust.
+  3 segments across thread counts and repeats. Cause UNKNOWN (host migration between sessions is possible). Since the
+  robustness change, the file is used only for video handling + language detection + the Japanese part; ordering and
+  onset checks use a derived same-language fixture (`tests/fixtures/derived.py`, built at run time, stable in int8 and
+  float32). Whether the engine keeps the English part is deliberately not asserted.
 - One language per transcript (Whisper detects once over the first 30 s); whisper attaches leading silence to the first segment.
+- A segment/word end that overruns the media end by ≤ 2 s is clamped to the duration with a warning (ADR-028); larger
+  overruns are `INVALID_RESULT`. Observed 0.69 s overrun on a 20.7 s file with `base` and no word timestamps.
 - Windows / macOS CI matrix exists but has not been run; junctions and symlink-less filesystems unverified.
 - No batch mode; one request per process through `run -`.
 
 ## Active work / next highest-value tasks (ordered)
-1. Make the mixed-language real-media test/evals robust without weakening them (e.g. a second same-language fixture for
-   ordering/timestamps, keep the mixed file for language detection only) — reliability.
-2. Output-root policy (`allowed_output_roots` or workspace-confined `-o` default) — SKILL_SPEC §4 completeness.
-3. Trigger CI once (workflow_dispatch) and record the matrix result here.
-4. First tagged release (v0.2.x) once 1–3 are done; keep git-install as the distribution channel.
+1. Output-root policy (`allowed_output_roots` or workspace-confined `-o` default) — SKILL_SPEC §4 completeness.
+2. Trigger CI once (workflow_dispatch) and record the matrix result here.
+3. First tagged release (v0.2.x) once 1–2 are done; keep git-install as the distribution channel.
 
 ## Change log (session-level)
 - 2026-09-04: 0.1.0 → 0.2.0 (engine ecosystem, agent readiness, input boundary) merged as PR #1
 - 2026-09-05: sponsors (#2), README landing page (#3), subtitle-skill link (#4), `provides` (#5),
-  OS contract fields + conformance tests + CLAUDE.md/STATE.md (this change)
+  OS contract fields + conformance tests + CLAUDE.md/STATE.md (#6), real-media tests made robust with a derived
+  same-language fixture + end-overrun clamp (ADR-028) (this change)

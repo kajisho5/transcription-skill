@@ -105,8 +105,11 @@ the `language_detection` capability; otherwise the request is `INVALID_INPUT`
 
 Seconds as floats on the input file's own timeline (no offset, no drift correction; those are timeline
 concerns of the consumer). Engine precision is what it is: Whisper reports 0.02 s steps and tends to
-attach leading silence to the first segment. The skill does not shift, snap or clamp timestamps; the
-validator's 0.5 s end tolerance only absorbs engine rounding past the media end.
+attach leading silence to the first segment. The skill does not shift or snap timestamps, with one
+documented exception: a segment (or word) end that overruns the media end by at most 2 s is clamped to
+the media duration and the transcript carries a warning naming the segment (Whisper regularly places the
+last end slightly past the audio). A larger overrun is not repaired: the result is `INVALID_RESULT`. The
+validator's own 0.5 s end tolerance remains for documents produced elsewhere.
 
 ## Text semantics
 

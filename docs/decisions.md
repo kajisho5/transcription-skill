@@ -169,3 +169,11 @@
 - Known gap left explicit: `export --output` and `transcribe -o` may write outside the workspace (next to the
   input, the same convention as ffmpeg-skill). Input confinement, tmp and cache confinement and no-clobber
   are enforced; output-root confinement is not (see STATE.md).
+
+## ADR-028 Small end overruns are clamped to the media duration, larger ones are rejected
+- Observed on a real fixture: without word timestamps, faster-whisper `base` ended the last segment 0.69 s past a
+  20.71 s file, and the 0.5 s validator tolerance turned a routine Whisper artifact into `INVALID_RESULT` for the
+  whole transcript. `build_transcript` now clamps an end overrun of at most `END_OVERRUN_CLAMP_SECONDS` (2.0) to the
+  media duration and records `seg_xxxx: end ... clamped to media duration ...` in `warnings`; word ends are clamped
+  the same way. Overruns beyond that still fail validation: the engine's claim would then be materially wrong, and a
+  transcript is never silently repaired past that point. The validator itself is unchanged.

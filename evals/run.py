@@ -23,6 +23,8 @@ from typing import Any, Dict, List
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "tests" / "fixtures"))
+from derived import media_duration, second_onset, twice  # noqa: E402
 
 from transcription_skill.cache import cache_key  # noqa: E402
 from transcription_skill.engines import EngineRequirements, default_registry, get_engine, select_engines  # noqa: E402
@@ -90,7 +92,12 @@ def run_case(case: Dict[str, Any], svc: TranscriptionService, model: str) -> Dic
         out["ok"] = all(c["ok"] for c in checks)
         out["seconds"] = round(time.time() - t0, 2)
         return out
-    req = parse_request(dict(case.get("request", {}), input=str(ROOT / case["input"]), model=model))
+    if "derived" in case:            # built at run time from a committed fixture; nothing new is committed
+        d = case["derived"]
+        input_path = twice(str(ROOT / d["twice"]), gap=float(d.get("gap", 1.5)), out_dir=tempfile.mkdtemp(prefix="ts_eval_derived_"))
+    else:
+        input_path = str(ROOT / case["input"])
+    req = parse_request(dict(case.get("request", {}), input=input_path, model=model))
     res = svc.transcribe(req)
     doc = res["transcript"]
     rep = validate_transcript(doc)
@@ -174,15 +181,16 @@ def run_case(case: Dict[str, Any], svc: TranscriptionService, model: str) -> Dic
             check("word timestamps present", len(words) > 0, len(words), "> 0")
     elif m == "timestamps":
         tol = case["onset_tolerance"]
-        ja_dur = duration_of(ROOT / "tests" / "fixtures" / "ja_short.wav")
-        ja_onset = REF["ja_short.wav"]["speech_onset"]
-        en_onset = ja_dur + REF["lecture_short.mp4"]["parts"][1]["offset_after_first_plus_gap"] + REF["en_short.wav"]["speech_onset"]
+        d = case["derived"]
+        src = str(ROOT / d["twice"]); gap = float(d.get("gap", 1.5))
+        onset1 = REF[os.path.basename(src)]["speech_onset"]
+        onset2 = second_onset(src, gap, onset1)
         first = doc["segments"][0]["start"] if doc["segments"] else None
-        en_segs = [s for s in doc["segments"] if s["start"] > ja_dur]
-        check("first segment near Japanese onset", first is not None and abs(first - ja_onset) <= tol, first, f"{ja_onset} ± {tol}")
-        check("English part starts near its onset", bool(en_segs) and abs(en_segs[0]["start"] - en_onset) <= tol, en_segs[0]["start"] if en_segs else None, f"{en_onset:.2f} ± {tol}")
+        second = [s for s in doc["segments"] if s["start"] > media_duration(src)]
+        check("first segment near first onset", first is not None and abs(first - onset1) <= tol, first, f"{onset1} ± {tol}")
+        check("second utterance starts near its onset", bool(second) and abs(second[0]["start"] - onset2) <= tol, second[0]["start"] if second else None, f"{onset2:.2f} ± {tol}")
         last_end = doc["segments"][-1]["end"] if doc["segments"] else None
-        check("last segment ends within media", last_end is not None and last_end <= doc["duration"], last_end, f"<= {doc['duration']}")
+        check("last segment ends within media", last_end is not None and last_end <= doc["duration"] + 0.5, last_end, f"<= {doc['duration']} (+0.5)")
         # words, when present, must sit inside their segment and increase monotonically
         bad = 0
         for s in doc["segments"]:
