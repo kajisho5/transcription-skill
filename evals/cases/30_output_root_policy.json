@@ -1,0 +1,5 @@
+{
+  "id": "30_output_root_policy",
+  "metric": "output_root_policy",
+  "note": "With allowed_output_roots declared, export/segments/transcribe outputs outside the roots (incl. traversal and a symlinked directory) are refused with one JSON error document, inside succeeds, and an input is never overwritten; without roots, behaviour is unchanged."
+}

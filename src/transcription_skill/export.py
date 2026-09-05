@@ -7,7 +7,6 @@ subtitle-skill. The transcript's data model is JSON; SRT/VTT are lossy views of 
 from __future__ import annotations
 
 import json
-import os
 from typing import Any, Dict
 
 from .errors import TranscriptionError
@@ -51,16 +50,12 @@ def render(transcript: Dict[str, Any], fmt: str) -> str:
     return {"json": to_json, "srt": to_srt, "vtt": to_vtt}[fmt](transcript)
 
 
-def write(transcript: Dict[str, Any], fmt: str, output: str, forbid: Any = None) -> str:
-    """Write the rendering to `output`. Never overwrites `forbid` (the transcript file / media input)."""
+def write(transcript: Dict[str, Any], fmt: str, output: str, forbid: Any = None, allowed_output_roots: Any = None) -> str:
+    """Write the rendering to `output` through the output policy. Never overwrites `forbid` (the transcript
+    file / media input); with `allowed_output_roots`, the resolved destination must sit inside one of them."""
+    from .paths import OutputPolicy
     text = render(transcript, fmt)
-    out = os.path.abspath(output)
-    for f in (forbid or []):
-        if f and os.path.abspath(f) == out:
-            raise TranscriptionError("INVALID_INPUT", f"refusing to overwrite {os.path.basename(f)}")
-    parent = os.path.dirname(out) or "."
-    if not os.path.isdir(parent):
-        raise TranscriptionError("INVALID_INPUT", f"output directory does not exist: {parent}")
+    out = OutputPolicy(allowed_output_roots).resolve_output(output, forbid=[f for f in (forbid or []) if f])
     with open(out, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
     return out

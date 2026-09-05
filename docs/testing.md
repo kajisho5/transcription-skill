@@ -70,8 +70,9 @@ is a borderline decision that has flipped between sessions (STATE.md). Generated
 | 27 cache boundary | path-like keys refused; entries by key under the workspace; same content at two paths → one entry. |
 | 28 doctor path policy | mode, roots, and distinct cache/tmp/model-cache roots; no credentials. |
 | 29 run stdin path policy | `run -` and the CLI refuse the same input with the same reason in one JSON document. |
+| 30 output root policy | with `allowed_output_roots`: inside succeeds, outside / traversal / symlinked directory refused; an input is never overwritten; without roots, unchanged. |
 
-Cases 07–29 evaluate the contract and the boundary, not recognition quality, and make no semantic judgement.
+Cases 07–30 evaluate the contract and the boundary, not recognition quality, and make no semantic judgement.
 
 Exact-match is not a criterion anywhere: ASR output has errors, and the evals state how much is
 acceptable. Raise the bar by running with `--model small` or larger.

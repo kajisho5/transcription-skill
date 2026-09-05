@@ -138,6 +138,21 @@ class ProcessChecks(unittest.TestCase):
                 self.skipTest("symlinks not creatable here")
             rc, doc, _ = run_tool("transcription/transcribe", {"input": os.path.join(root, "link.wav"), "allowed_input_roots": [root], "dry_run": True, "workspace": self.env_ws})
             self.assertEqual(doc["error"]["details"]["reason"], "symlink_escape")
+        # outputs: with declared output roots, a destination outside them (also via a symlinked directory) is refused
+        good_json = os.path.join(root, "t.json")
+        from test_unit import good_doc
+        Path(good_json).write_text(json.dumps(good_doc()), encoding="utf-8")
+        out_root = os.path.join(self.tmp, "deliver"); os.makedirs(out_root)
+        rc, doc, _ = run_tool("transcription/export", {"transcript": good_json, "format": "srt", "output": os.path.join(self.tmp, "escape.srt"), "allowed_output_roots": [out_root]})
+        self.assertEqual((doc["ok"], doc["error"]["details"]["reason"]), (False, "outside_allowed_roots"))
+        if hasattr(os, "symlink"):
+            try:
+                os.symlink(self.tmp, os.path.join(out_root, "up"), target_is_directory=True)
+                rc, doc, _ = run_tool("transcription/export", {"transcript": good_json, "format": "srt", "output": os.path.join(out_root, "up", "escape.srt"), "allowed_output_roots": [out_root]})
+                self.assertEqual(doc["error"]["details"]["reason"], "symlink_escape")
+            except OSError:
+                pass
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "escape.srt")))
         # temporary and cache output only inside the declared workspace
         rc, doc, _ = cli(["doctor", "--json", "--workspace", self.env_ws])
         rows = {r["check"]: r for r in doc["checks"]}
@@ -151,6 +166,11 @@ class ProcessChecks(unittest.TestCase):
         self.assertFalse(doc["ok"])
         self.assertIn(doc["error"]["code"], ("INVALID_INPUT", "VERIFICATION_FAILED"))
         self.assertEqual(Path(good).read_text(encoding="utf-8"), json.dumps({"schema": "x"}))   # untouched
+        from test_unit import good_doc
+        Path(good).write_text(json.dumps(good_doc()), encoding="utf-8")
+        rc, doc, _ = run_tool("transcription/export", {"transcript": good, "format": "srt", "output": good})
+        self.assertEqual(doc["error"]["details"]["reason"], "would_overwrite_input")
+        self.assertEqual(json.loads(Path(good).read_text(encoding="utf-8")), good_doc())            # still untouched
 
     def test_7_doctor_status_machine_readable(self):
         rc, doc, err = cli(["doctor", "--json", "--workspace", self.env_ws])

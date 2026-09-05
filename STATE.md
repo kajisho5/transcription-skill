@@ -20,6 +20,7 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 - Input boundary: opt-in `allowed_input_roots` (resolved-path containment, traversal/symlink refusal); default unchanged
 - Provenance: engine, engine_version, execution_mode, model, model_version, parameters(+hash), cache_key, skill, tool, created_at
 - OS contract fields: `skill_id`, `contract_version`, `provides` (`transcribe.audio`, EXPERIMENTAL), `dependencies` ([]), `not_provided`
+- Output boundary: opt-in `allowed_output_roots` / `--allowed-output` (transcribe, segments, export); inputs never overwritten
 - Tests: unit / security / paths / conformance (SKILL_SPEC §8, all eight checks) / integration (real engine) ; evals 29 cases
 
 ## OS integration status
@@ -32,8 +33,8 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   is VISION on the OS side; not published here until the OS registry validates it.
 
 ## Known limitations
-- Output confinement: `export --output` / `transcribe -o` may write outside the workspace (next to the input, ffmpeg-skill
-  convention). Input confinement, tmp/cache confinement and no-clobber are enforced; output-root policy is PLANNED.
+- Output confinement is opt-in (`--allowed-output` / `allowed_output_roots`, ADR-029); without roots, outputs are written
+  where asked (next to the input by default, ffmpeg-skill convention). No-clobber of inputs is enforced in both modes.
 - Mixed-language fixture `tests/fixtures/lecture_short.mp4` (ja then en) sits on a decision boundary of faster-whisper `base`
   int8: one session on this host produced 1 segment (English part dropped) while later runs on the same host produced
   3 segments across thread counts and repeats. Cause UNKNOWN (host migration between sessions is possible). Since the
@@ -47,12 +48,12 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 - No batch mode; one request per process through `run -`.
 
 ## Active work / next highest-value tasks (ordered)
-1. Output-root policy (`allowed_output_roots` or workspace-confined `-o` default) — SKILL_SPEC §4 completeness.
-2. Trigger CI once (workflow_dispatch) and record the matrix result here.
-3. First tagged release (v0.2.x) once 1–2 are done; keep git-install as the distribution channel.
+1. Trigger CI once (workflow_dispatch) and record the matrix result here.
+2. First tagged release (v0.2.x) once 1 is done; keep git-install as the distribution channel.
+3. Batch entry point (many inputs, one process) reusing PathPolicy/OutputPolicy per item — only if a consumer needs it.
 
 ## Change log (session-level)
 - 2026-09-04: 0.1.0 → 0.2.0 (engine ecosystem, agent readiness, input boundary) merged as PR #1
 - 2026-09-05: sponsors (#2), README landing page (#3), subtitle-skill link (#4), `provides` (#5),
   OS contract fields + conformance tests + CLAUDE.md/STATE.md (#6), real-media tests made robust with a derived
-  same-language fixture + end-overrun clamp (ADR-028) (this change)
+  same-language fixture + end-overrun clamp (ADR-028) (#7), output-root policy (ADR-029) (this change)

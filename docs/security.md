@@ -50,8 +50,13 @@
 - The workspace (`--workspace`, `$TRANSCRIPTION_WORKSPACE`, default `~/.cache/transcription-skill`)
   holds `transcripts/<key>.json` and `tmp/<run>/` (extracted audio, worker request/result), deleted
   after each run.
-- Exports refuse to overwrite the transcript they were rendered from or the media input;
-  `transcribe -o` refuses to overwrite the input. Output directories must already exist.
+- **Allowed output roots** (`--allowed-output DIR` on `transcribe` / `segments` / `export`, request key
+  `allowed_output_roots` on `transcription/export`): the destination's parent directory is resolved
+  through symlinks (and the file itself when it already exists) and must sit inside a resolved root by
+  path components; `..` is refused under a policy; a symlinked directory or an existing link pointing
+  outside is `symlink_escape`. With or without roots, an output never overwrites a declared input
+  (`would_overwrite_input`) or an existing directory, and the parent directory must already exist.
+  Without declared roots any writable location is accepted (unchanged behaviour).
 - **Allowed roots** (`--allowed-input DIR` / request `allowed_input_roots`): when declared, the input's
   resolved path (symlinks followed, `os.path.realpath`) must be inside a resolved root by path
   components (`os.path.commonpath`, case-folded with `normcase`); a string prefix never authorises.

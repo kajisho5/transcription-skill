@@ -29,6 +29,7 @@ CAPABILITIES = [
     "offline_mode",             # hard no-network constraint: local engines with a local model only
     "engine_registry",          # machine-readable engine specs (execution_mode, network, models, capabilities)
     "input_path_policy",        # allowed_input_roots: resolved-path containment, traversal and symlink escape refused
+    "output_path_policy",       # allowed_output_roots: outputs confined the same way; inputs are never overwritten
 ]
 
 TOOLS: List[Dict[str, Any]] = [
@@ -41,7 +42,8 @@ TOOLS: List[Dict[str, Any]] = [
     {"name": "transcription/segments", "description": "Derive SpeechEvent-compatible candidates from a Transcript (one per segment, optional gap merge).",
      "input": {"transcript": "Transcript | path", "merge_gap": "seconds >= 0"}, "output": {"events": "list[SpeechEvent]"}, "deterministic": True, "side_effects": []},
     {"name": "transcription/export", "description": "Render a Transcript as json, srt or vtt (plain timed text, no styling).",
-     "input": {"transcript": "Transcript | path", "format": "|".join(FORMATS), "output": "path"}, "output": {"output": "path", "format": "str"},
+     "input": {"transcript": "Transcript | path", "format": "|".join(FORMATS), "output": "path", "allowed_output_roots": "list[dir] | null"},
+     "output": {"output": "path", "format": "str"},
      "deterministic": True, "side_effects": ["writes output file"]},
     {"name": "transcription/check", "description": "Validate a Transcript document against the contract.",
      "input": {"transcript": "Transcript | path"}, "output": {"ok": "bool", "errors": "list[str]", "warnings": "list[str]"}, "deterministic": True, "side_effects": []},
@@ -140,15 +142,18 @@ def run_tool(name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         doc = load_transcript(params.get("transcript"))
         return {"events": speech_events(doc, params.get("merge_gap", 0.0))}
     if name == "transcription/export":
-        extra = set(params) - {"transcript", "format", "output"}
+        extra = set(params) - {"transcript", "format", "output", "allowed_output_roots"}
         if extra:
             raise TranscriptionError("INVALID_INPUT", f"unknown keys {sorted(extra)}")
         doc = load_transcript(params.get("transcript"))
         out = params.get("output")
         if not isinstance(out, str) or not out:
             raise TranscriptionError("INVALID_INPUT", "'output' path is required")
+        roots = params.get("allowed_output_roots")
+        if roots is not None and (not isinstance(roots, list) or not roots or not all(isinstance(r, str) and r.strip() for r in roots)):
+            raise TranscriptionError("INVALID_INPUT", "'allowed_output_roots' must be a non-empty list of directory paths")
         src = params.get("transcript") if isinstance(params.get("transcript"), str) else None
-        path = write(doc, params.get("format", "json"), out, forbid=[src])
+        path = write(doc, params.get("format", "json"), out, forbid=[src], allowed_output_roots=roots)
         return {"output": path, "format": params.get("format", "json")}
     if name == "transcription/check":
         extra = set(params) - {"transcript"}
