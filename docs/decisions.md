@@ -145,3 +145,14 @@
   verified to resolve inside it. `PathPolicy` is a standalone class so a future batch entry point
   applies the same check per item. Cache identity is unaffected by the policy: the same bytes at a
   relative, absolute or symlinked path are one entry.
+
+## ADR-026 `provides` publishes exactly one Capability id: `transcription/transcribe` -> `transcribe.audio`
+- `skill.py` adds a top-level `provides` list for `kajisho5/AI-video-production-OS`'s `CapabilityContract.provides`
+  (`docs/SPEC.md` there), so a registry can resolve "who provides `transcribe.audio`" without hardcoding this
+  repository. The id matches the one already assigned to this Skill in that project's own
+  `docs/CAPABILITY_MATRIX.md`. Only `transcription/transcribe` gets one: it produces the actual Transcript
+  artifact. `transcription/segments`, `transcription/export` and `transcription/check` all operate on a Transcript
+  the caller already has (derive events, render a format, validate structure) rather than producing a new one, so
+  - the same reasoning `thumbnail-skill` applied to its own `validate` tool - they are not published as a separate
+  Capability. Additive: a new top-level `provides` key; `ContractDriftTests` makes no exact-equality assertion on
+  the whole contract dict, so nothing there needed to change.

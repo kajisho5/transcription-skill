@@ -48,6 +48,21 @@ TOOLS: List[Dict[str, Any]] = [
 ]
 
 
+# Cross-repository Capability ids (kajisho5/AI-video-production-OS docs/SPEC.md
+# `CapabilityContract.provides`), matching the id already assigned to this Skill in that
+# project's own docs/CAPABILITY_MATRIX.md. Only `transcription/transcribe` gets one: it is
+# the tool that produces the actual Transcript artifact. `segments`, `export` and `check`
+# operate on a Transcript someone already has (derive events, render a format, validate
+# structure) rather than producing a new one, so - like `thumbnail-skill`'s `validate`
+# tool - they are not published as a separate Capability.
+CAPABILITY_IDS: Dict[str, str] = {"transcription/transcribe": "transcribe.audio"}
+
+
+def capability_provides() -> List[Dict[str, str]]:
+    return [{"id": CAPABILITY_IDS[name], "lifecycle": "EXPERIMENTAL", "tool_id": name}
+            for name in tool_names() if name in CAPABILITY_IDS]
+
+
 def skill_contract(include_models: bool = True, offline: bool = False) -> Dict[str, Any]:
     """Machine-readable contract: the skill, its tools, and every registered engine's EngineSpec
     (execution mode, network requirement, capabilities, languages, models and their availability).
@@ -61,6 +76,7 @@ def skill_contract(include_models: bool = True, offline: bool = False) -> Dict[s
                             "capabilities": list(ENGINE_CAPABILITIES), "offline": offline},
         "engines": default_registry().to_dict(include_models=include_models, offline=offline),
         "tools": [dict(t) for t in TOOLS],
+        "provides": capability_provides(),
         "schemas": {"transcript": "transcription-skill/transcript/0.1", "speech_event": "transcription-skill/speech-event/0.1",
                     "engine_spec": "transcription-skill/engine-spec/0.1"},
     }

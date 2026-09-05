@@ -203,6 +203,14 @@ registered engine's `EngineSpec` (schema `transcription-skill/engine-spec/0.1`);
 README, is what a consumer should read, and `tests/test_unit.py::ContractDriftTests` fails whenever
 the contract and the implementation diverge (tools, engines, capabilities, schema versions).
 
+`skill --json` → `provides` publishes exactly one cross-repository Capability id:
+`transcription/transcribe` → `transcribe.audio`, matching the id assigned to this Skill in
+[`kajisho5/AI-video-production-OS`](https://github.com/kajisho5/AI-video-production-OS)'s
+`docs/CAPABILITY_MATRIX.md`, so a registry can resolve "who provides `transcribe.audio`" without
+hardcoding this repository. `segments`/`export`/`check` operate on a Transcript the caller already
+has rather than producing a new one, so - like `thumbnail-skill`'s `validate` tool - they are not
+published as a separate Capability; see `docs/decisions.md` ADR-026.
+
 **Process boundary for external callers** (`transcription run -`): stdin carries one JSON object
 `{"tool": "<name>", "params": {...}}`; stdout carries exactly one JSON document,
 `{"ok": true, "tool": ..., "result": ...}` or `{"ok": false, "error": {"code", "message", "details"}}`.
