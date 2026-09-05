@@ -30,6 +30,10 @@ from .request import TranscribeRequest, default_workspace, summarize_for_display
 from .validate import CONTAINMENT_TOLERANCE, validate_transcript
 
 WORKER_MODULE = "transcription_skill.engines.worker"
+# Whisper-family engines emit timestamps on a 0.02 s grid inside 30 s windows and regularly place the last
+# segment's end a little past the end of the audio. An overrun up to this many seconds is clamped to the
+# media duration and recorded as a warning; a larger one is left for the validator to reject (INVALID_RESULT).
+END_OVERRUN_CLAMP_SECONDS = 2.0
 
 
 class TranscriptionService:
@@ -257,6 +261,9 @@ def build_transcript(req: TranscribeRequest, prep: Dict[str, Any], result: Engin
             continue
         n += 1
         seg_id = f"seg_{n:04d}"
+        if duration < end <= duration + END_OVERRUN_CLAMP_SECONDS and start < duration:
+            warnings.append(f"{seg_id}: end {end:.2f} clamped to media duration {duration:.3f}")
+            end = duration
         words: Optional[List[Dict[str, Any]]] = None
         if req.word_timestamps and s.words is not None:
             words, bad = [], None
@@ -267,6 +274,8 @@ def build_transcript(req: TranscribeRequest, prep: Dict[str, Any], result: Engin
                 if not wt:
                     bad = f"empty word text at {ws:.2f}"
                     break
+                if ws < duration < we <= duration + END_OVERRUN_CLAMP_SECONDS:
+                    we = duration                                   # same clamp as the segment end
                 if we <= ws:
                     bad = f"non-positive word duration at {ws:.2f}"
                     break

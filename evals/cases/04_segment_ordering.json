@@ -1,7 +1,13 @@
 {
   "id": "04_segment_ordering",
-  "input": "tests/fixtures/lecture_short.mp4",
-  "request": {},
+  "derived": {
+    "twice": "tests/fixtures/ja_short.wav",
+    "gap": 1.5
+  },
+  "request": {
+    "language": "ja"
+  },
   "metric": "ordering",
-  "min_segments": 2
+  "min_segments": 2,
+  "note": "Two speech intervals in one language (derived fixture): segment count, ascending starts, no overlaps, sequential ids. The mixed-language video stays in case 02/integration for language detection only (STATE.md, known limitations)."
 }
