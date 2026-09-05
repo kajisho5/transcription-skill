@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [{name = "kajisho5"}]
-keywords = ["transcription", "asr", "whisper", "agent-skill", "transcript", "speech-to-text"]
+keywords = ["transcription", "speech-recognition", "asr", "speech-to-text", "whisper", "faster-whisper", "timestamped-transcript", "offline-transcription", "agent-skill", "transcript", "speech-event", "video-production"]
 dependencies = []
 
 [project.optional-dependencies]
