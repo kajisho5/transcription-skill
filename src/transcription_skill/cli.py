@@ -17,6 +17,7 @@ from .doctor import format_doctor, run_doctor
 from .engines import EngineRequirements, default_registry, select_engines
 from .errors import TranscriptionError
 from .export import FORMATS
+from .paths import OutputPolicy
 from .skill import run_request, run_tool, skill_contract
 
 
@@ -75,9 +76,7 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
             print(f"  would run ASR: {'yes' if res['would_run'] else 'no (cached)'}")
         return 0
     doc = res["transcript"]
-    out = args.output or _default_output(args.input)
-    if os.path.abspath(out) == os.path.abspath(args.input):
-        raise TranscriptionError("INVALID_INPUT", "output would overwrite the input")
+    out = OutputPolicy(args.allowed_output).resolve_output(args.output or _default_output(args.input), forbid=[args.input])
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, ensure_ascii=False, indent=2)
     if args.json:
@@ -102,7 +101,8 @@ def _default_output(inp: str) -> str:
 def cmd_segments(args: argparse.Namespace) -> int:
     res = run_tool("transcription/segments", {"transcript": args.transcript, "merge_gap": args.merge_gap})
     if args.output:
-        with open(args.output, "w", encoding="utf-8") as fh:
+        out = OutputPolicy(args.allowed_output).resolve_output(args.output, forbid=[args.transcript])
+        with open(out, "w", encoding="utf-8") as fh:
             json.dump(res, fh, ensure_ascii=False, indent=2)
     if args.json:
         _print_json(res)
@@ -114,7 +114,10 @@ def cmd_segments(args: argparse.Namespace) -> int:
 
 
 def cmd_export(args: argparse.Namespace) -> int:
-    res = run_tool("transcription/export", {"transcript": args.transcript, "format": args.format, "output": args.output})
+    params: Dict[str, Any] = {"transcript": args.transcript, "format": args.format, "output": args.output}
+    if args.allowed_output:
+        params["allowed_output_roots"] = list(args.allowed_output)
+    res = run_tool("transcription/export", params)
     if args.json:
         _print_json(dict(res, ok=True))
     else:
@@ -186,7 +189,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    rep = run_doctor(args.workspace, offline=args.offline, allowed_input_roots=args.allowed_input)
+    rep = run_doctor(args.workspace, offline=args.offline, allowed_input_roots=args.allowed_input, allowed_output_roots=args.allowed_output)
     if args.json:
         _print_json(rep)
     else:
@@ -228,6 +231,7 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--offline", action="store_true", help="hard constraint: no network at any step (remote engines refused, missing models are MODEL_UNAVAILABLE)")
     t.add_argument("--workspace", help="cache/tmp directory (default $TRANSCRIPTION_WORKSPACE or ~/.cache/transcription-skill)")
     t.add_argument("--allowed-input", action="append", metavar="DIR", help="only accept inputs that resolve inside DIR (repeatable); default: any readable file")
+    t.add_argument("--allowed-output", action="append", metavar="DIR", help="only write the transcript JSON inside DIR (repeatable); default: anywhere writable")
     t.add_argument("-o", "--output", help="transcript JSON path (default <input>.transcript.json)")
     t.add_argument("--dry-run", action="store_true", help="show what would run (engine, model, language, budget, cache status) without running ASR")
     t.add_argument("--json", action="store_true", help="print one JSON document on stdout")
@@ -237,6 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("transcript")
     s.add_argument("--merge-gap", type=float, default=0.0, help="merge consecutive segments separated by at most this many seconds (default 0: one event per segment)")
     s.add_argument("-o", "--output", help="write the events JSON here")
+    s.add_argument("--allowed-output", action="append", metavar="DIR", help="only write inside DIR (repeatable)")
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_segments)
 
@@ -244,6 +249,7 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("transcript")
     e.add_argument("--format", choices=FORMATS, default="srt")
     e.add_argument("-o", "--output", required=True)
+    e.add_argument("--allowed-output", action="append", metavar="DIR", help="only write inside DIR (repeatable)")
     e.add_argument("--json", action="store_true")
     e.set_defaults(func=cmd_export)
 
@@ -256,6 +262,7 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--workspace")
     d.add_argument("--offline", action="store_true", help="report readiness for offline use (models must already be local)")
     d.add_argument("--allowed-input", action="append", metavar="DIR", help="show the input path policy that would apply with these roots")
+    d.add_argument("--allowed-output", action="append", metavar="DIR", help="show the output path policy that would apply with these roots")
     d.add_argument("--json", action="store_true")
     d.set_defaults(func=cmd_doctor)
 

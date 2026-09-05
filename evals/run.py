@@ -87,7 +87,7 @@ def run_case(case: Dict[str, Any], svc: TranscriptionService, model: str) -> Dic
         out["seconds"] = round(time.time() - t0, 2)
         return out
     if m in ("allowed_root_inside", "traversal_rejected", "prefix_collision", "symlink_escape", "workspace_escape", "windows_path_boundary",
-             "cache_boundary", "doctor_path_policy", "run_stdin_path_policy"):
+             "cache_boundary", "doctor_path_policy", "run_stdin_path_policy", "output_root_policy"):
         run_path_case(case, check, model)
         out["ok"] = all(c["ok"] for c in checks)
         out["seconds"] = round(time.time() - t0, 2)
@@ -446,6 +446,31 @@ def run_path_case(case: Dict[str, Any], check, model: str) -> None:
             text = json.dumps(rep)
             check("no credential-like strings", not re.search(r"sk-[A-Za-z0-9]{16,}|hf_[A-Za-z0-9]{16,}|Bearer ", text), True, True)
             check("unrestricted by default", {r["check"]: r for r in run_doctor(ws)["checks"]}["input path policy"]["mode"] == "unrestricted", True, True)
+        elif m == "output_root_policy":
+            r = svc.transcribe(parse_request({"input": inside, "language": "en", "model": model}))
+            t = os.path.join(box, "t.json"); Path(t).write_text(json.dumps(r["transcript"]), encoding="utf-8")
+            deliver = os.path.join(box, "deliver"); os.makedirs(deliver)
+            env = dict(os.environ, TRANSCRIPTION_WORKSPACE=ws, PYTHONUTF8="1")
+            def run(params):
+                p = subprocess.run([sys.executable, "-m", "transcription_skill.cli", "run", "-"], input=json.dumps({"tool": "transcription/export", "params": params}),
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+                return p.returncode, json.loads(p.stdout)
+            rc, doc = run({"transcript": t, "format": "srt", "output": os.path.join(deliver, "a.srt"), "allowed_output_roots": [deliver]})
+            check("export inside root succeeds", rc == 0 and doc["ok"] and os.path.exists(doc["result"]["output"]), rc, 0)
+            rc, doc = run({"transcript": t, "format": "srt", "output": os.path.join(outside, "b.srt"), "allowed_output_roots": [deliver]})
+            check("export outside root refused", rc == 2 and doc["error"]["details"].get("reason") == "outside_allowed_roots" and not os.path.exists(os.path.join(outside, "b.srt")), doc.get("error", {}).get("details"), "outside_allowed_roots")
+            rc, doc = run({"transcript": t, "format": "srt", "output": os.path.join(deliver, "..", "c.srt"), "allowed_output_roots": [deliver]})
+            check("traversal refused", rc == 2 and doc["error"]["details"].get("reason") == "traversal", doc.get("error", {}).get("details"), "traversal")
+            try:
+                os.symlink(outside, os.path.join(deliver, "link"), target_is_directory=True)
+                rc, doc = run({"transcript": t, "format": "srt", "output": os.path.join(deliver, "link", "d.srt"), "allowed_output_roots": [deliver]})
+                check("symlinked directory refused", rc == 2 and doc["error"]["details"].get("reason") == "symlink_escape", doc.get("error", {}).get("details"), "symlink_escape")
+            except (OSError, NotImplementedError) as exc:
+                check("symlink support on this host", False, str(exc), "symlinks creatable")
+            rc, doc = run({"transcript": t, "format": "json", "output": t})
+            check("input never overwritten (no roots)", rc == 2 and doc["error"]["details"].get("reason") == "would_overwrite_input" and json.loads(Path(t).read_text(encoding="utf-8")) == r["transcript"], doc.get("error", {}).get("details"), "would_overwrite_input")
+            rc, doc = run({"transcript": t, "format": "vtt", "output": os.path.join(outside, "free.vtt")})
+            check("without roots any writable location is accepted (unchanged)", rc == 0 and os.path.exists(os.path.join(outside, "free.vtt")), rc, 0)
         elif m == "run_stdin_path_policy":
             env = dict(os.environ, TRANSCRIPTION_WORKSPACE=ws, PYTHONUTF8="1")
             def run(params):

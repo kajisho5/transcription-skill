@@ -12,13 +12,14 @@ from .cache import TranscriptCache
 from .engines import all_engines
 from .errors import TranscriptionError
 from .media import find_tool, tool_version
-from .paths import PathPolicy, resolve_workspace
+from .paths import OutputPolicy, PathPolicy, resolve_workspace
 from .request import DEFAULT_ENGINE, DEFAULT_MODEL, default_workspace
 
 CHECK_MODELS = ("tiny", "base", "small", "medium", "large-v3")
 
 
-def run_doctor(workspace: Optional[str] = None, offline: bool = False, allowed_input_roots: Optional[List[str]] = None) -> Dict[str, Any]:
+def run_doctor(workspace: Optional[str] = None, offline: bool = False, allowed_input_roots: Optional[List[str]] = None,
+               allowed_output_roots: Optional[List[str]] = None) -> Dict[str, Any]:
     ws = resolve_workspace(workspace or default_workspace())
     rows: List[Dict[str, Any]] = []
 
@@ -65,6 +66,12 @@ def run_doctor(workspace: Optional[str] = None, offline: bool = False, allowed_i
             mode=pd["mode"], allowed_roots=pd["allowed_roots"])
     except TranscriptionError as exc:
         row("input path policy", "MISSING", exc.message, mode=None, allowed_roots=list(allowed_input_roots or []))
+    try:
+        od = OutputPolicy(allowed_output_roots).describe()
+        row("output path policy", "AVAILABLE", f"{od['mode']}" + (f": {', '.join(od['allowed_roots'])}" if od["allowed_roots"] else " (no allowed roots declared: any writable location; inputs are never overwritten)"),
+            mode=od["mode"], allowed_roots=od["allowed_roots"])
+    except TranscriptionError as exc:
+        row("output path policy", "MISSING", exc.message, mode=None, allowed_roots=list(allowed_output_roots or []))
 
     default_engine = engines.get(DEFAULT_ENGINE)
     ready = bool(find_tool("ffmpeg") and find_tool("ffprobe") and default_engine and default_engine.available())

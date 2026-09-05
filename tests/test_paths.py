@@ -23,7 +23,7 @@ from fake_engine import FakeEngine  # noqa: E402
 from transcription_skill.cache import TranscriptCache  # noqa: E402
 from transcription_skill.doctor import run_doctor  # noqa: E402
 from transcription_skill.errors import TranscriptionError  # noqa: E402
-from transcription_skill.paths import MODE_ALLOWED_ROOTS, MODE_UNRESTRICTED, PathPolicy, has_traversal, is_within, make_run_dir  # noqa: E402
+from transcription_skill.paths import MODE_ALLOWED_ROOTS, MODE_UNRESTRICTED, OutputPolicy, PathPolicy, has_traversal, is_within, make_run_dir  # noqa: E402
 from transcription_skill.request import parse_request  # noqa: E402
 from transcription_skill.service import TranscriptionService  # noqa: E402
 from transcription_skill.skill import run_request, run_tool  # noqa: E402
@@ -239,6 +239,62 @@ class PolicyTests(unittest.TestCase):
                     os.environ[k] = v
 
 
+class OutputPolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="ts_out_"))
+        self.root = os.path.join(self.tmp, "out"); os.makedirs(os.path.join(self.root, "sub"))
+        self.outside = os.path.join(self.tmp, "elsewhere"); os.makedirs(self.outside)
+        self.inp = os.path.join(self.root, "in.wav"); make_wav(self.inp, 1.0)
+        self.policy = OutputPolicy([self.root])
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def assertRejected(self, policy, raw, reason=None, forbid=None):
+        with self.assertRaises(TranscriptionError) as cm:
+            policy.resolve_output(raw, forbid=forbid)
+        self.assertEqual(cm.exception.code, "INVALID_INPUT", raw)
+        if reason:
+            self.assertEqual(cm.exception.details.get("reason"), reason, raw)
+
+    def test_inside_and_default(self):
+        self.assertEqual(self.policy.resolve_output(os.path.join(self.root, "a.srt")), os.path.join(self.root, "a.srt"))
+        self.assertEqual(self.policy.resolve_output(os.path.join(self.root, "sub", "b.srt")), os.path.join(self.root, "sub", "b.srt"))
+        self.assertEqual(OutputPolicy().mode, MODE_UNRESTRICTED)
+        self.assertEqual(OutputPolicy().resolve_output(os.path.join(self.outside, "x.srt")), os.path.join(self.outside, "x.srt"))
+        self.assertEqual(self.policy.describe(), {"mode": MODE_ALLOWED_ROOTS, "allowed_roots": [self.root]})
+
+    def test_outside_traversal_prefix(self):
+        self.assertRejected(self.policy, os.path.join(self.outside, "x.srt"), "outside_allowed_roots")
+        self.assertRejected(self.policy, os.path.join(self.root, "..", "elsewhere", "x.srt"), "traversal")
+        os.makedirs(self.root + "_evil")
+        self.assertRejected(self.policy, os.path.join(self.root + "_evil", "x.srt"), "outside_allowed_roots")
+
+    def test_never_overwrites_input_or_directory_and_parent_must_exist(self):
+        self.assertRejected(self.policy, self.inp, "would_overwrite_input", forbid=[self.inp])
+        self.assertRejected(OutputPolicy(), self.inp, "would_overwrite_input", forbid=[self.inp])
+        self.assertRejected(self.policy, os.path.join(self.root, "sub"), "not_regular_file")
+        self.assertRejected(self.policy, os.path.join(self.root, "nodir", "x.srt"))
+        self.assertRejected(self.policy, "")
+        with self.assertRaises(TranscriptionError):
+            OutputPolicy([self.inp])
+
+    def test_symlinks(self):
+        if not can_symlink(self.tmp):
+            self.skipTest("symlink support needed")
+        os.symlink(self.outside, os.path.join(self.root, "dirlink"), target_is_directory=True)
+        self.assertRejected(self.policy, os.path.join(self.root, "dirlink", "x.srt"), "symlink_escape")
+        target = os.path.join(self.outside, "secret.srt"); Path(target).write_text("x")
+        os.symlink(target, os.path.join(self.root, "link.srt"))
+        self.assertRejected(self.policy, os.path.join(self.root, "link.srt"), "symlink_escape")
+        self.assertEqual(Path(target).read_text(), "x")
+        inside_target = os.path.join(self.root, "sub", "real.srt"); Path(inside_target).write_text("y")
+        os.symlink(inside_target, os.path.join(self.root, "inlink.srt"))
+        self.assertEqual(self.policy.resolve_output(os.path.join(self.root, "inlink.srt")), inside_target)
+        os.symlink(self.inp, os.path.join(self.root, "to_input.srt"))
+        self.assertRejected(self.policy, os.path.join(self.root, "to_input.srt"), "would_overwrite_input", forbid=[self.inp])
+
+
 @unittest.skipUnless(HAVE_FFMPEG, "needs ffmpeg/ffprobe")
 class ServicePathTests(unittest.TestCase):
     def setUp(self):
@@ -339,6 +395,27 @@ class ServicePathTests(unittest.TestCase):
         self.assertEqual({r["check"]: r for r in bad["checks"]}["input path policy"]["status"], "MISSING")
         text = json.dumps(rep)
         self.assertNotIn("sk-", text)
+
+    def test_export_tool_and_cli_honour_output_roots(self):
+        from test_unit import good_doc
+        t = os.path.join(self.root, "t.json"); Path(t).write_text(json.dumps(good_doc()), encoding="utf-8")
+        ok_dir = os.path.join(self.tmp, "deliver"); os.makedirs(ok_dir)
+        res = run_tool("transcription/export", {"transcript": t, "format": "srt", "output": os.path.join(ok_dir, "t.srt"), "allowed_output_roots": [ok_dir]})
+        self.assertTrue(os.path.exists(res["output"]))
+        with self.assertRaises(TranscriptionError) as cm:
+            run_tool("transcription/export", {"transcript": t, "format": "srt", "output": os.path.join(self.root, "t.srt"), "allowed_output_roots": [ok_dir]})
+        self.assertEqual(cm.exception.details["reason"], "outside_allowed_roots")
+        with self.assertRaises(TranscriptionError):
+            run_tool("transcription/export", {"transcript": t, "format": "srt", "output": os.path.join(ok_dir, "t.srt"), "allowed_output_roots": []})
+        env = dict(os.environ, TRANSCRIPTION_WORKSPACE=self.ws, PYTHONUTF8="1")
+        p = subprocess.run([sys.executable, "-m", "transcription_skill.cli", "segments", t, "-o", os.path.join(self.root, "ev.json"), "--allowed-output", ok_dir, "--json"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertEqual(json.loads(p.stdout)["error"]["details"]["reason"], "outside_allowed_roots")
+        self.assertFalse(os.path.exists(os.path.join(self.root, "ev.json")))
+        rep = run_doctor(self.ws, allowed_output_roots=[ok_dir])
+        rows = {r["check"]: r for r in rep["checks"]}
+        self.assertEqual((rows["output path policy"]["mode"], rows["output path policy"]["allowed_roots"]), (MODE_ALLOWED_ROOTS, [ok_dir]))
 
     def test_cli_json_on_policy_violation(self):
         env = dict(os.environ, TRANSCRIPTION_WORKSPACE=self.ws, PYTHONUTF8="1")

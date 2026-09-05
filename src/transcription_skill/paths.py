@@ -40,19 +40,24 @@ def has_traversal(raw: str) -> bool:
     return any(part == ".." for part in raw.replace("\\", "/").split("/"))
 
 
+def _resolve_roots(roots: Optional[List[str]], field: str) -> List[str]:
+    out: List[str] = []
+    for r in roots or []:
+        if not isinstance(r, str) or not r.strip() or "\x00" in r:
+            raise TranscriptionError("INVALID_INPUT", f"{field} entries must be non-empty path strings")
+        resolved = os.path.realpath(os.path.abspath(r))
+        if not os.path.isdir(resolved):
+            raise TranscriptionError("INVALID_INPUT", f"{field}: not a directory: {r}", {"reason": "root_not_directory"})
+        out.append(resolved)
+    return out
+
+
 class PathPolicy:
     """Resolve and authorise input paths. Reusable by any future entry point (batch included)."""
 
     def __init__(self, allowed_roots: Optional[List[str]] = None):
         self.raw_roots = list(allowed_roots or [])
-        self.roots: List[str] = []
-        for r in self.raw_roots:
-            if not isinstance(r, str) or not r.strip() or "\x00" in r:
-                raise TranscriptionError("INVALID_INPUT", "allowed_input_roots entries must be non-empty path strings")
-            resolved = os.path.realpath(os.path.abspath(r))
-            if not os.path.isdir(resolved):
-                raise TranscriptionError("INVALID_INPUT", f"allowed input root is not a directory: {r}", {"reason": "root_not_directory"})
-            self.roots.append(resolved)
+        self.roots: List[str] = _resolve_roots(self.raw_roots, "allowed_input_roots")
 
     @property
     def mode(self) -> str:
@@ -93,6 +98,49 @@ class PathPolicy:
         return resolved
 
 
+class OutputPolicy:
+    """Resolve and authorise output paths (files this skill writes for the caller: transcript JSON, SRT/VTT,
+    events JSON). Same principle as inputs: with roots declared, the resolved destination must sit inside a
+    resolved root by path components; without roots, any writable location is accepted (unchanged behaviour).
+    In both modes an output never overwrites a declared input or an existing directory."""
+
+    def __init__(self, allowed_roots: Optional[List[str]] = None):
+        self.raw_roots = list(allowed_roots or [])
+        self.roots: List[str] = _resolve_roots(self.raw_roots, "allowed_output_roots")
+
+    @property
+    def mode(self) -> str:
+        return MODE_ALLOWED_ROOTS if self.roots else MODE_UNRESTRICTED
+
+    def describe(self) -> Dict[str, Any]:
+        return {"mode": self.mode, "allowed_roots": list(self.roots)}
+
+    def resolve_output(self, raw: str, forbid: Optional[List[str]] = None) -> str:
+        """Return the absolute destination to write. The parent directory must exist; the destination is
+        resolved through symlinks (parent directory always, the file itself when it already exists) before
+        the containment check, so a symlinked directory or an existing link cannot redirect the write."""
+        if not isinstance(raw, str) or not raw or "\x00" in raw:
+            raise TranscriptionError("INVALID_INPUT", "output path must be a non-empty string")
+        if self.roots and has_traversal(raw):
+            raise TranscriptionError("INVALID_INPUT", "output path contains '..' and allowed output roots are enforced", {"reason": "traversal"})
+        absolute = os.path.abspath(raw)
+        parent, name = os.path.split(absolute)
+        if not name:
+            raise TranscriptionError("INVALID_INPUT", "output path must name a file", {"reason": "not_regular_file"})
+        if not os.path.isdir(parent):
+            raise TranscriptionError("INVALID_INPUT", f"output directory does not exist: {parent}")
+        resolved = os.path.realpath(absolute) if os.path.lexists(absolute) else os.path.join(os.path.realpath(parent), name)
+        if os.path.isdir(resolved):
+            raise TranscriptionError("INVALID_INPUT", f"output path is a directory: {raw}", {"reason": "not_regular_file"})
+        if self.roots and not any(is_within(root, resolved) for root in self.roots):
+            reason = "symlink_escape" if os.path.normcase(os.path.normpath(absolute)) != os.path.normcase(resolved) else "outside_allowed_roots"
+            raise TranscriptionError("INVALID_INPUT", f"output is outside the allowed roots: {name}", {"reason": reason})
+        for f in forbid or []:
+            if f and os.path.normcase(os.path.realpath(os.path.abspath(f))) == os.path.normcase(resolved):
+                raise TranscriptionError("INVALID_INPUT", f"refusing to overwrite {os.path.basename(f)}", {"reason": "would_overwrite_input"})
+        return resolved
+
+
 def resolve_workspace(workspace: str) -> str:
     """Absolute, symlink-resolved workspace directory (created on first use by the callers)."""
     if not isinstance(workspace, str) or not workspace.strip() or "\x00" in workspace:
@@ -114,4 +162,4 @@ def make_run_dir(workspace: str, name: str) -> str:
     return run_dir
 
 
-__all__ = ["MODE_ALLOWED_ROOTS", "MODE_UNRESTRICTED", "PathPolicy", "has_traversal", "is_within", "make_run_dir", "resolve_workspace"]
+__all__ = ["MODE_ALLOWED_ROOTS", "MODE_UNRESTRICTED", "OutputPolicy", "PathPolicy", "has_traversal", "is_within", "make_run_dir", "resolve_workspace"]

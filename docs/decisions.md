@@ -177,3 +177,12 @@
   media duration and records `seg_xxxx: end ... clamped to media duration ...` in `warnings`; word ends are clamped
   the same way. Overruns beyond that still fail validation: the engine's claim would then be materially wrong, and a
   transcript is never silently repaired past that point. The validator itself is unchanged.
+
+## ADR-029 Output roots complete the workspace-confinement rule; default stays unrestricted
+- `SKILL_SPEC.md` §3.3 requires outputs to be written only inside a declared workspace. `OutputPolicy`
+  (`paths.py`) applies the input rule to written files: resolved destination inside a resolved root by
+  components, `..` refused under a policy, symlinked directory / existing link escapes refused, never an
+  input, never a directory, parent must exist. Declared through `--allowed-output` (transcribe, segments,
+  export) and `allowed_output_roots` on the export tool, so `run -` and the CLI share it; `doctor` reports
+  it. Without roots the historic behaviour (write where asked, next to the input by default) is kept, for the
+  same reason as ADR-024. The transcript cache and per-run temp dirs were already confined to the workspace.

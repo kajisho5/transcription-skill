@@ -261,6 +261,10 @@ echo '{"tool":"transcription/transcribe","params":{"input":"lecture.mp4","allowe
 transcription doctor --allowed-input /jobs/123/media --json     # path policy, cache root, tmp root, model cache root
 ```
 
+Outputs get the same treatment: `--allowed-output DIR` (request key `allowed_output_roots` on
+`transcription/export`) confines the transcript JSON, SRT/VTT and events files this skill writes; with or
+without roots an output never overwrites an input or an existing directory.
+
 With roots declared: the input is resolved (symlinks followed) and must sit inside a resolved root by
 path components, never by string prefix (`/w/media` does not authorise `/w/media_evil`); any `..`
 component in the raw path is refused; a symlink or junction whose target leaves the root is refused;
@@ -271,7 +275,7 @@ with `details.reason` in `traversal` / `outside_allowed_roots` / `symlink_escape
 | term | meaning | where |
 |------|---------|-------|
 | input | the media the caller names (untrusted) | anywhere the policy allows |
-| allowed root | security boundary for inputs | `--allowed-input` / `allowed_input_roots` |
+| allowed root | security boundary for inputs and, separately, for written outputs | `--allowed-input` / `allowed_input_roots`, `--allowed-output` / `allowed_output_roots` |
 | workspace | operational directory: per-run `tmp/<id>/`, worker files | `--workspace` / `TRANSCRIPTION_WORKSPACE` |
 | cache | derived transcripts, addressed by content key only | `<workspace>/transcripts/<sha256>.json` |
 | model cache | the engine's models | `HF_HUB_CACHE` / `HF_HOME` only; never influenced by an input path |
@@ -305,7 +309,7 @@ These are enforced by code and tests, not by convention (details: [docs/security
 8. Engine availability and model availability are separate facts.
 9. The Agent does not import engine internals; it reads the JSON contract.
 10. An input path is untrusted; a string prefix never authorises it; the resolved path must be inside a resolved allowed root; symlink or junction escapes do not bypass the root.
-11. An input path never controls the model cache location or where temporary output is written.
+11. An input path never controls the model cache location or where temporary output is written; declared output roots confine what the skill writes for the caller.
 12. Path policy and cache identity are separate: identity stays content/engine/model/parameters.
 13. `run -` and the direct CLI share one validation boundary; an agent adapter cannot bypass it.
 
