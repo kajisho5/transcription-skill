@@ -116,7 +116,7 @@ Each repository answers one question and stops there.
 | [ffmpeg-skill](https://github.com/kajisho5/ffmpeg-skill) | **PROCESS** | how is the media transformed? | cuts, encodes, captions burnt in, delivery files |
 | [media-analysis-skill](https://github.com/kajisho5/media-analysis-skill) | **MEASURE** | what exists in the media? | Observations: duration, streams, silence, loudness |
 | **transcription-skill** | **TRANSCRIBE** | what is being said, and when? | Transcript, SpeechEvent candidates |
-| subtitle-skill | **PRESENT** | how is it shown on screen? | subtitle artifacts: line breaks, styling, timing rules |
+| [subtitle-skill](https://github.com/kajisho5/subtitle-skill) | **PRESENT** | how is it shown on screen? | subtitle files (SRT / WebVTT) from a typed request; burn-in delegated to ffmpeg-skill |
 | [video-production-agent](https://github.com/kajisho5/video-production-agent) | **DECIDE** | what should be done with it? | inference, decisions, production plans |
 
 A Transcript is a recognition result. It is **not an Event** (the agent lifts it into its timeline), **not a
@@ -300,7 +300,7 @@ These are enforced by code and tests, not by convention (details: [docs/security
 |------------|--------------------|---------|
 | **media-analysis-skill** | What exists in the media? (measurement) | `duration = 312.4`, `audio_channels = 2`, `silence = [...]` |
 | **transcription-skill** | What is being said, and when? (recognition) | `"本日の講演を始めます"  start 12.3  end 15.8` |
-| **subtitle-skill** | How is it shown on screen? (subtitle artifact) | line breaks, styling, timing rules, SRT/ASS rendering, burn-in |
+| [**subtitle-skill**](https://github.com/kajisho5/subtitle-skill) | How is it shown on screen? (subtitle artifact) | typed subtitle request → validated SRT / WebVTT; burn-in delegated to ffmpeg-skill |
 | **video-production-agent** | What should be done with it? (inference, decisions, planning) | "cut the pause", "switch to camera B while speaker A talks", chapters |
 
 transcription-skill produces plain SRT/VTT views of a transcript because they are useful for
