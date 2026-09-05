@@ -156,3 +156,16 @@
   - the same reasoning `thumbnail-skill` applied to its own `validate` tool - they are not published as a separate
   Capability. Additive: a new top-level `provides` key; `ContractDriftTests` makes no exact-equality assertion on
   the whole contract dict, so nothing there needed to change.
+
+## ADR-027 Contract fields for the OS registry: `skill_id`, `contract_version`, `dependencies`, `not_provided`
+- `kajisho5/AI-video-production-OS` (`docs/SPEC.md`, `registry/contract.py`) resolves a Skill's identity from
+  `skill_id` first and named this Skill as the only one publishing `id` alone. `skill_id` is added and `id`
+  kept, so no existing consumer breaks. `contract_version` ("1.0") versions the published shape independently
+  of the package version (`docs/VERSIONING.md` there); it moves only for a breaking change to tool inputs /
+  outputs, capability ids or schema ids. `dependencies` is `[]` (no Skill is invoked; ffmpeg and
+  faster-whisper are tools/providers reported by `doctor`). `not_provided` mirrors the README's list as data.
+- `tests/test_conformance.py` wires all eight `SKILL_SPEC.md` §8 checks to this Skill's process boundary,
+  including the five the OS registry marks as needing per-Skill wiring.
+- Known gap left explicit: `export --output` and `transcribe -o` may write outside the workspace (next to the
+  input, the same convention as ffmpeg-skill). Input confinement, tmp and cache confinement and no-clobber
+  are enforced; output-root confinement is not (see STATE.md).
