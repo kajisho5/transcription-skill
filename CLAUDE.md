@@ -1,7 +1,10 @@
 # transcription-skill — instructions for Claude Code sessions
 
-Read `STATE.md` first: it says what exists, what is incomplete, known limitations and the next tasks.
-Do not rely on conversation history; update `STATE.md` when the facts change.
+Read `STATE.md` first: it says what exists, what is incomplete, known limitations and the next tasks —
+including a "Pending human approval" section for the two actions blocked on an explicit human go-ahead
+(triggering CI once, the first tagged release). If a human has approved one of those, execute it as
+described there; otherwise leave it pending. Do not rely on conversation history; update `STATE.md` when
+the facts change.
 
 ## What this repository is
 The speech-recognition Skill of the `kajisho5/AI-video-production-OS` ecosystem: audio/video in, validated

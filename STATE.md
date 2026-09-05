@@ -52,8 +52,33 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 2. First tagged release (v0.2.x) once 1 is done; keep git-install as the distribution channel.
 3. Batch entry point (many inputs, one process) reusing PathPolicy/OutputPolicy per item — only if a consumer needs it.
 
+## Pending human approval
+
+These two items are blocked on an explicit human decision, not on missing implementation or open
+questions. A session (including one reached through `kajisho5/AI-video-production-OS`) may relay the
+human's go-ahead and execute them directly; do not re-litigate the reasoning below, just confirm the
+human actually said yes to *this* repo's version of the action before running it.
+
+1. **Trigger CI once.** `.github/workflows/tests.yml` is `workflow_dispatch`-only because the account's
+   Actions minutes are shared and limited across `ffmpeg-skill`, `video-production-agent` and this repo
+   (see the comment at the top of that file). Running it consumes minutes from that shared pool — that's
+   the only reason it hasn't been run automatically.
+   - **How, once approved:** GitHub Actions API/UI `workflow_dispatch` on `tests.yml`, ref `main` (repo
+     `kajisho5/transcription-skill`, workflow file `.github/workflows/tests.yml`). No inputs required.
+   - **After it runs:** record the run result (pass/fail per OS/Python cell) in this file's Version/release
+     section, replacing the "never executed from an automated session" note.
+2. **First tagged release (v0.2.x).** Blocked on (1) — see it run green at least once first. A tag/release
+   is an external, visible publication event (shows up for anyone watching the repo), which is why it
+   waits for a human go-ahead rather than being cut automatically once CI is green.
+   - **How, once approved:** tag the current `main` HEAD (check `git log --oneline -1 origin/main` for the
+     exact SHA at approval time) as `v0.2.0`, push the tag, and create a GitHub Release from it. Keep
+     git-install (`pip install "transcription-skill[...] @ git+...@v0.2.0"`) as the distribution channel;
+     no PyPI publication is planned as part of this.
+
 ## Change log (session-level)
 - 2026-09-04: 0.1.0 → 0.2.0 (engine ecosystem, agent readiness, input boundary) merged as PR #1
 - 2026-09-05: sponsors (#2), README landing page (#3), subtitle-skill link (#4), `provides` (#5),
   OS contract fields + conformance tests + CLAUDE.md/STATE.md (#6), real-media tests made robust with a derived
-  same-language fixture + end-overrun clamp (ADR-028) (#7), output-root policy (ADR-029) (this change)
+  same-language fixture + end-overrun clamp (ADR-028) (#7), output-root policy (ADR-029) (#8),
+  documented the two pending-human-approval items (CI trigger, first tagged release) so an OS-side
+  session can execute them once a human approves (this change)
