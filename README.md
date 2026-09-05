@@ -1,12 +1,37 @@
-# transcription-skill
+<p align="center">
+  <img src="assets/hero.jpg" alt="Transcription Skill: audio / video to timestamped transcript, local and offline" width="100%">
+</p>
 
-Speech recognition as an independent, reusable skill: **audio or video in, a validated Transcript out**.
-Segments with timestamps, optional word timestamps, language, confidence, provenance, a deterministic
-cache, and SpeechEvent-compatible candidates for a production agent to reason about later.
+<h1 align="center">transcription-skill</h1>
 
-**transcription-skill is not a video editing agent.** It does not decide what to cut, which camera to
-show, where chapters go, who is speaking, or how captions should look. It turns speech into
-timestamped text and stops there.
+<p align="center"><strong>Audio / Video → Transcript.</strong> The speech-recognition layer of the video-production toolchain.</p>
+
+<p align="center">
+  Local faster-whisper · Offline mode · Timestamped segments and words · Deterministic cache · JSON contract for agents
+</p>
+
+<p align="center">
+  <a href="https://github.com/kajisho5/transcription-skill/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/kajisho5/transcription-skill/actions/workflows/tests.yml/badge.svg"></a>
+  <img alt="python 3.9+" src="https://img.shields.io/badge/python-3.9%2B-blue">
+  <img alt="engine: faster-whisper (local)" src="https://img.shields.io/badge/engine-faster--whisper%20%28local%29-6f42c1">
+  <img alt="platforms" src="https://img.shields.io/badge/platforms-linux%20%7C%20macos%20%7C%20windows-informational">
+  <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-lightgrey"></a>
+  <a href="https://github.com/sponsors/kajisho5"><img alt="sponsor" src="https://img.shields.io/badge/sponsor-%E2%9D%A4-ff69b4"></a>
+</p>
+
+```bash
+pip install "transcription-skill[faster-whisper] @ git+https://github.com/kajisho5/transcription-skill"
+transcription transcribe lecture.mp4 --language ja
+```
+
+`transcription-skill` turns speech in an audio or video file into a **validated Transcript**: segments with
+timestamps, optional word timestamps, language, confidence and full provenance, plus SpeechEvent-compatible
+candidates for a production agent to reason about later. Recognition runs on this machine with
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper); nothing is uploaded, no API key exists.
+
+**transcription-skill is not a video editing agent.** It does not decide what to cut, which camera to show,
+where chapters go, who is speaking, or how captions should look. It turns speech into timestamped text and
+stops there.
 
 ```
 Audio / Video
@@ -18,21 +43,85 @@ Transcript / SpeechEvent candidates
 video-production-agent       (inference, decisions, planning: a separate repository)
 ```
 
-## Install
+---
+
+**Contents**
+[Quick start](#quick-start) · [Why](#why-a-transcription-skill) · [Ecosystem](#ecosystem-process--measure--transcribe--decide) · [Engine ecosystem](#engine-ecosystem) · [CLI](#cli) · [Library / tool contract](#as-a-library--tool-contract) · [Transcript](#transcript-summary) · [Input boundary](#input-boundary-allowed-roots) · [Security and offline guarantees](#security-and-offline-guarantees) · [Invariants](#invariants) · [Boundaries](#where-this-skill-ends-and-others-begin) · [Agent connection](#future-connection-to-video-production-agent) · [Documentation](#documentation) · [Support](#support)
+
+---
+
+## Quick start
+
+Requirements: Python 3.9+, FFmpeg (`ffmpeg` and `ffprobe` on PATH), and an ASR engine. The package core is
+standard library only; the current **Reference Local Engine**, faster-whisper, is an optional dependency that
+runs Whisper on this machine (CPU or GPU).
 
 ```bash
+# install (or, from a checkout: pip install -e ".[faster-whisper]")
 pip install "transcription-skill[faster-whisper] @ git+https://github.com/kajisho5/transcription-skill"
-# or from a checkout
-pip install -e ".[faster-whisper]"
+
+# check the machine: ffmpeg, engine, cached models, workspace, path policy
+transcription doctor
+
+# transcribe
+transcription transcribe lecture.mp4                       # auto language, writes lecture.transcript.json
+transcription transcribe lecture.mp4 --language ja         # Japanese, no detection
+transcription transcribe lecture.mp4 --word-timestamps     # per-word timing
+transcription transcribe lecture.mp4 --offline             # hard no-network constraint
+
+# hand off
+transcription export lecture.transcript.json --format srt -o lecture.srt
+transcription segments lecture.transcript.json --merge-gap 0.5 --json   # SpeechEvent candidates
 ```
 
-Requirements: Python 3.9+, FFmpeg (`ffmpeg` and `ffprobe` on PATH), and an ASR engine. The current
-**Reference Local Engine** is [faster-whisper](https://github.com/SYSTRAN/faster-whisper), an optional
-dependency that runs Whisper on this machine (CPU or GPU). Recognition never uses the network; the
-`base` model (~145 MB) is fetched into the Hugging Face cache once, on first use, or you place it there
-yourself for an air-gapped machine and run with `--offline`. No API keys, no cloud calls.
+Recognition never uses the network. The `base` model (~145 MB) is fetched into the Hugging Face cache once, on
+first use, or you place it there yourself for an air-gapped machine and run with `--offline`. Japanese and
+English are first-class in the tests and evals; the engine supports 100 languages.
 
-The package core is standard library only.
+Example output (real run on the committed fixture, faster-whisper `base`):
+
+```
+ja_short.wav: 9.61s, language ja (requested), 1 segment(s), engine faster_whisper 1.2.1 model base
+  00:00:00.000 --> 00:00:08.360  本日の公園を始めます 宜しくお願いします まず最初に会場の音教設備についてご説明します
+```
+
+The homophone errors (講演→公園, 音響→音教) are what a small Whisper model produces on synthetic speech.
+The skill records them as-is: an ASR result is evidence, not an edited script.
+
+## Why a transcription Skill
+
+An agent that calls "whisper" directly gets a text dump with no identity, no provenance and no boundary. This
+skill exists to make recognition a **reusable, verifiable data step**:
+
+- **A Transcript is a contract, not a print-out.** Segments, words, language and provenance are validated
+  before anything is returned; timestamps are checked against the media; a document that fails validation
+  is never produced.
+- **Engines are interchangeable, the contract is not.** faster-whisper is the implemented Reference Local
+  Engine; every engine is described by the same `EngineSpec` (where it runs, whether it needs the network,
+  which models are on disk) and picked by constraints, never by the skill's own opinion.
+- **Same input, same result, no second run.** The cache key is the content fingerprint plus engine, model and
+  parameters; a cached transcript is returned without starting an engine process.
+- **Offline is a constraint, not a hope.** `--offline` refuses remote engines and any model download before
+  anything runs.
+- **Built to be called from another program.** `transcription run -` takes one JSON request on stdin and
+  answers with exactly one JSON document; `transcription skill --json` publishes the tool and engine
+  contract; input paths can be confined to allowed roots.
+
+## Ecosystem: PROCESS · MEASURE · TRANSCRIBE · DECIDE
+
+Each repository answers one question and stops there.
+
+| repository | verb | question it answers | output |
+|------------|------|--------------------|--------|
+| [ffmpeg-skill](https://github.com/kajisho5/ffmpeg-skill) | **PROCESS** | how is the media transformed? | cuts, encodes, captions burnt in, delivery files |
+| [media-analysis-skill](https://github.com/kajisho5/media-analysis-skill) | **MEASURE** | what exists in the media? | Observations: duration, streams, silence, loudness |
+| **transcription-skill** | **TRANSCRIBE** | what is being said, and when? | Transcript, SpeechEvent candidates |
+| subtitle-skill | **PRESENT** | how is it shown on screen? | subtitle artifacts: line breaks, styling, timing rules |
+| [video-production-agent](https://github.com/kajisho5/video-production-agent) | **DECIDE** | what should be done with it? | inference, decisions, production plans |
+
+A Transcript is a recognition result. It is **not an Event** (the agent lifts it into its timeline), **not a
+Decision** (the agent makes those), and **not a Subtitle** (subtitle-skill renders those). The plain SRT/VTT
+this skill can write are inspection views of the data, not subtitle design.
 
 ## Engine ecosystem
 
@@ -94,16 +183,6 @@ transcription engines --offline --language ja          # which engines satisfy t
 
 Exit codes: 0 success, 1 failure (structured error), 2 invalid input or file not found. With `--json`,
 stdout carries exactly one JSON document, on success or on error; without it, errors go to stderr.
-
-Example output (real run on the committed fixture, faster-whisper `base`):
-
-```
-ja_short.wav: 9.61s, language ja (requested), 1 segment(s), engine faster_whisper 1.2.1 model base
-  00:00:00.000 --> 00:00:08.360  本日の公園を始めます 宜しくお願いします まず最初に会場の音教設備についてご説明します
-```
-
-The homophone errors (講演→公園, 音響→音教) are what a small Whisper model produces on synthetic speech.
-The skill records them as-is: an ASR result is evidence, not an edited script.
 
 ## As a library / tool contract
 
@@ -181,6 +260,23 @@ with `details.reason` in `traversal` / `outside_allowed_roots` / `symlink_escape
 | workspace | operational directory: per-run `tmp/<id>/`, worker files | `--workspace` / `TRANSCRIPTION_WORKSPACE` |
 | cache | derived transcripts, addressed by content key only | `<workspace>/transcripts/<sha256>.json` |
 | model cache | the engine's models | `HF_HUB_CACHE` / `HF_HOME` only; never influenced by an input path |
+
+## Security and offline guarantees
+
+These are enforced by code and tests, not by convention (details: [docs/security.md](docs/security.md)).
+
+| guarantee | how |
+|-----------|-----|
+| No shell, no command passthrough | every external call is a fixed argv list (`ffprobe`, `ffmpeg`, the engine worker); requests that carry `command`, `argv`, `shell` or a credential are refused; engine modules cannot spawn processes |
+| No credentials anywhere | no cloud engine exists, so none is read; child processes get a minimal environment (`OPENAI_API_KEY`, `HF_TOKEN` and the like are not forwarded); transcripts, contract and doctor output are scanned for credential-shaped strings |
+| Offline is a hard constraint | `--offline`: remote engines → `ENGINE_UNAVAILABLE`, a model not on disk → `MODEL_UNAVAILABLE` (`MODEL_MISSING`), the engine loads with `local_files_only`; nothing is downloaded |
+| Network for recognition vs. network for a model download | separate facts: `EngineSpec.requires_network` (false for faster-whisper) and per-model `ModelStatus.availability` |
+| Untrusted input paths | with allowed roots: resolved path must sit inside a resolved root by path components, `..` refused, symlink/junction escapes refused, special files refused; default behaviour unchanged |
+| Input never steers other locations | model cache comes from `HF_HUB_CACHE`/`HF_HOME` only; temporary files live in an exclusive `<workspace>/tmp/<uuid>/` verified inside the workspace; cache entries are addressed by content key only |
+| Cache identity is explicit | key = content fingerprint + engine id/version/execution mode + model/model version + parameters; corrupt or tampered entries are recomputed, never served |
+| Provenance is complete | engine, engine version, execution mode, model, model revision, parameters and their hash, cache key, skill and tool, created_at |
+| Timeouts kill for real | the engine runs in its own process group; `budget.timeout` ends it; `max_audio_seconds` refuses long media before extraction |
+| One JSON document on stdout | every `--json` command and `run -` print exactly one document, on success and on error; malformed stdin yields an error document, never a traceback |
 
 ## Invariants
 
