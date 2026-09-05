@@ -57,6 +57,26 @@ TOOLS: List[Dict[str, Any]] = [
 # tool - they are not published as a separate Capability.
 CAPABILITY_IDS: Dict[str, str] = {"transcription/transcribe": "transcribe.audio"}
 
+# Capability Contract version (kajisho5/AI-video-production-OS docs/VERSIONING.md): the version of the
+# *shape* this skill exposes (tool inputs/outputs, capability ids, schemas), independent of the package
+# release version. Bump only for a breaking shape change (removed capability id, narrowed input, changed
+# output type); additions do not bump it.
+CONTRACT_VERSION = "1.0"
+
+# Skill dependencies in the OS sense (other Skills this one invokes at runtime). None: recognition runs
+# in-process through the engine contract; ffmpeg/ffprobe are external tools reported by `doctor`, and
+# faster-whisper is an optional provider package, not a Skill.
+DEPENDENCIES: List[Dict[str, str]] = []
+
+# Self-declared non-responsibilities (SKILL_SPEC.md: a machine-readable `not_provided`), mirroring the
+# README's "what this repository deliberately does not contain".
+NOT_PROVIDED: List[str] = [
+    "AI provider", "prompts", "reasoning", "inference", "decisions", "approvals", "production planning",
+    "speaker diarization", "speaker identification", "semantic segmentation", "chapter generation",
+    "subtitle styling", "subtitle rendering", "video editing", "media measurement", "cloud ASR", "remote engine",
+    "HTTP client", "credentials", "best-engine selection", "plugin loading", "arbitrary command execution",
+]
+
 
 def capability_provides() -> List[Dict[str, str]]:
     return [{"id": CAPABILITY_IDS[name], "lifecycle": "EXPERIMENTAL", "tool_id": name}
@@ -68,7 +88,8 @@ def skill_contract(include_models: bool = True, offline: bool = False) -> Dict[s
     (execution mode, network requirement, capabilities, languages, models and their availability).
     This JSON, not the README, is the source of truth for consumers."""
     return {
-        "id": SKILL_ID, "name": "Transcription Skill", "version": __version__,
+        "id": SKILL_ID, "skill_id": SKILL_ID, "name": "Transcription Skill", "version": __version__,
+        "contract_version": CONTRACT_VERSION,
         "description": "Speech recognition: audio/video in, structured Transcript (segments, optional word timestamps, language, "
                        "provenance) and SpeechEvent candidates out. Not an agent, not a subtitle renderer, not a media analyzer.",
         "capabilities": list(CAPABILITIES),
@@ -77,6 +98,8 @@ def skill_contract(include_models: bool = True, offline: bool = False) -> Dict[s
         "engines": default_registry().to_dict(include_models=include_models, offline=offline),
         "tools": [dict(t) for t in TOOLS],
         "provides": capability_provides(),
+        "dependencies": list(DEPENDENCIES),
+        "not_provided": list(NOT_PROVIDED),
         "schemas": {"transcript": "transcription-skill/transcript/0.1", "speech_event": "transcription-skill/speech-event/0.1",
                     "engine_spec": "transcription-skill/engine-spec/0.1"},
     }

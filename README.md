@@ -203,6 +203,13 @@ registered engine's `EngineSpec` (schema `transcription-skill/engine-spec/0.1`);
 README, is what a consumer should read, and `tests/test_unit.py::ContractDriftTests` fails whenever
 the contract and the implementation diverge (tools, engines, capabilities, schema versions).
 
+`skill --json` also carries the fields the OS's `CapabilityContract` reads: `skill_id` (canonical identity;
+`id` is kept for 0.2.0 consumers), `contract_version` (the shape's own version, `1.0`, independent of the
+package version and bumped only for a breaking shape change), `dependencies` (empty: this Skill invokes no
+other Skill), `not_provided` (machine-readable list of what it deliberately does not do) and `provides`.
+`tests/test_conformance.py` runs all eight `SKILL_SPEC.md` conformance checks against this Skill's own
+process boundary.
+
 `skill --json` → `provides` publishes exactly one cross-repository Capability id:
 `transcription/transcribe` → `transcribe.audio`, matching the id assigned to this Skill in
 [`kajisho5/AI-video-production-OS`](https://github.com/kajisho5/AI-video-production-OS)'s
