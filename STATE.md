@@ -18,7 +18,11 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 - Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt), `check`; CLI: doctor, transcribe, segments,
   export, check, engines, skill, `run -` (one JSON request in, one JSON document out)
 - Input boundary: opt-in `allowed_input_roots` (resolved-path containment, traversal/symlink refusal); default unchanged
-- Provenance: engine, engine_version, execution_mode, model, model_version, parameters(+hash), cache_key, skill, tool, created_at
+- Multi-audio-track inputs: `audio_stream` request field selects which audio stream is decoded (explicit `-map 0:a:N`
+  in `media.py`, validated against the probed stream count); default (unset) is stream 0, recorded in
+  `provenance.audio_extraction.audio_stream_index`
+- Provenance: engine, engine_version, execution_mode, model, model_version, parameters(+hash), cache_key, skill, tool,
+  created_at, audio_extraction (recipe + actually-selected stream index)
 - OS contract fields: `skill_id`, `contract_version`, `provides` (`transcribe.audio`, EXPERIMENTAL), `dependencies` ([]), `not_provided`
 - Output boundary: opt-in `allowed_output_roots` / `--allowed-output` (transcribe, segments, export); inputs never overwritten
 - Tests: unit / security / paths / conformance (SKILL_SPEC §8, all eight checks) / integration (real engine) ; evals 29 cases
@@ -28,7 +32,10 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   listed as provider of `transcribe.audio` (CAPABILITY_MATRIX §7). Contract fields above satisfy `registry/contract.py`
   and the three document-level conformance checks; the five process-level checks are wired locally in
   `tests/test_conformance.py`.
-- No adapter exists in `video-production-agent` for this Skill (PLANNED on the agent side, not here).
+- An adapter exists in `video-production-agent`: `src/video_agent/tools/transcription/adapter.py` (31.7KB) —
+  contract-checking (`check_contract`: skill id, schema ids, engine contract, capabilities), typed request
+  building, and cache-hit handling. `SUPPORTED_SKILL_VERSIONS = ("0.2.",)` correctly matches this Skill's
+  real current version (0.2.0) — CURRENT, verified directly in that repository.
 - Richer per-capability shape in OS `SPEC.md` (`input_schema`, `output_schema`, artifact types, `security.forbidden_keys`)
   is VISION on the OS side; not published here until the OS registry validates it.
 
@@ -81,4 +88,7 @@ human actually said yes to *this* repo's version of the action before running it
   OS contract fields + conformance tests + CLAUDE.md/STATE.md (#6), real-media tests made robust with a derived
   same-language fixture + end-overrun clamp (ADR-028) (#7), output-root policy (ADR-029) (#8),
   documented the two pending-human-approval items (CI trigger, first tagged release) so an OS-side
-  session can execute them once a human approves (this change)
+  session can execute them once a human approves
+- 2026-09-08: `audio_stream` request field for explicit multi-audio-track selection (`-map 0:a:N`,
+  validated against the probed stream count, ADR-030); corrected the false "no adapter exists in
+  video-production-agent" claim in this file's OS integration status (#10, this change)

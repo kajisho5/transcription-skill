@@ -49,6 +49,10 @@ class TranscriptionService:
         path = policy.resolve_input(req.input)                       # resolved path is used for every later step
         display_name = os.path.basename(os.path.abspath(req.input))  # what the caller named, for source.filename
         meta = probe(path)
+        if req.audio_stream is not None and req.audio_stream >= meta["audio_stream_count"]:
+            raise TranscriptionError("INVALID_INPUT",
+                                     f"audio_stream {req.audio_stream} does not exist: {display_name} has {meta['audio_stream_count']} audio stream(s)",
+                                     {"audio_stream": req.audio_stream, "audio_stream_count": meta["audio_stream_count"]})
         if meta["duration"] > req.budget.max_audio_seconds:
             raise TranscriptionError("BUDGET_EXCEEDED", f"media is {meta['duration']:.1f}s, budget.max_audio_seconds is {req.budget.max_audio_seconds:g}s; transcription not started",
                                      {"duration": meta["duration"], "max_audio_seconds": req.budget.max_audio_seconds})
@@ -92,7 +96,8 @@ class TranscriptionService:
             "dry_run": True,
             "request": summarize_for_display(req),
             "input": {"filename": prep["display_name"], "fingerprint": prep["fingerprint"], "duration": prep["meta"]["duration"],
-                      "has_video": prep["meta"]["has_video"], "audio": prep["meta"]["audio"]},
+                      "has_video": prep["meta"]["has_video"], "audio": prep["meta"]["audio"], "audio_stream_count": prep["meta"]["audio_stream_count"]},
+            "audio_stream": req.audio_stream if req.audio_stream is not None else 0,
             "path_policy": prep["path_policy"],
             "engine": {"id": eng.id, "version": eng.version, "execution_mode": eng.execution_mode, "requires_network": eng.requires_network,
                        "capabilities": eng.capabilities(), "word_timestamps": eng.supports_word_timestamps(), "supported_languages": len(eng.supported_languages)},
@@ -131,7 +136,7 @@ class TranscriptionService:
         run_dir = make_run_dir(ws, uuid.uuid4().hex)
         try:
             wav = os.path.join(run_dir, "audio.wav")
-            extraction = extract_audio(prep["path"], wav)
+            extraction = extract_audio(prep["path"], wav, audio_stream=req.audio_stream if req.audio_stream is not None else 0)
             ereq = EngineRequest(audio_path=wav, language=req.language, model=req.model, word_timestamps=req.word_timestamps,
                                  temperature=req.temperature, initial_prompt=req.initial_prompt, beam_size=req.beam_size, offline=req.offline)
             t_engine = time.time()
