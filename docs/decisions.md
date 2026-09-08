@@ -19,10 +19,11 @@
   two workspace file paths vary.
 
 ## ADR-004 ffmpeg-skill is not a dependency; one fixed extraction recipe lives here
-- The skill needs exactly one media operation (first audio stream → mono 16 kHz PCM). Depending on
-  ffmpeg-skill for that would add a process hop and a version pin for no gain. The recipe is one
-  argv list in `media.py`, recorded in `provenance.audio_extraction`. Every other media operation
-  (cutting, silence, loudness) stays with ffmpeg-skill / media-analysis-skill.
+- The skill needs exactly one media operation (one audio stream, explicitly selected → mono 16 kHz PCM).
+  Depending on ffmpeg-skill for that would add a process hop and a version pin for no gain. The recipe is
+  one argv list in `media.py`, recorded in `provenance.audio_extraction`. Every other media operation
+  (cutting, silence, loudness) stays with ffmpeg-skill / media-analysis-skill. Which stream is selected is
+  ADR-030.
 
 ## ADR-005 Language is a fact only when stated or confidently detected
 - `language_source`: `requested` | `detected` (probability ≥ 0.5) | `unknown`. The detection candidate
@@ -177,6 +178,18 @@
   media duration and records `seg_xxxx: end ... clamped to media duration ...` in `warnings`; word ends are clamped
   the same way. Overruns beyond that still fail validation: the engine's claim would then be materially wrong, and a
   transcript is never silently repaired past that point. The validator itself is unchanged.
+
+## ADR-030 `audio_stream` selects the decoded stream explicitly; the default never depends on ffmpeg's heuristic
+- Without an explicit `-map`, ffmpeg's own "best stream" heuristic picked which audio stream `extraction_argv`
+  decoded on a multi-audio-track input (dubbed languages, multiple mic feeds, M&E stems) — undocumented and not
+  guaranteed to be index 0, even though the recorded provenance claimed "first audio stream" unconditionally.
+  `extraction_argv`/`extract_audio` now always pass `-map 0:a:N` (default `N=0`); the request field `audio_stream`
+  (0-based, optional) lets a caller name a different track. `probe()` now also counts audio streams
+  (`audio_stream_count`); `service._prepare` rejects an out-of-range index as `INVALID_INPUT` before anything
+  runs, mirroring how an unsupported `language` is rejected (ADR-023). `audio_stream` is folded into
+  `TranscribeRequest.parameters()` (normalized: `None` and `0` hash the same) so two different stream selections
+  of the same file bytes never share a cache entry, and `provenance.audio_extraction` records the actually-selected
+  index (`audio_stream_index`, `stream`) instead of the previous hardcoded, potentially-false string.
 
 ## ADR-029 Output roots complete the workspace-confinement rule; default stays unrestricted
 - `SKILL_SPEC.md` §3.3 requires outputs to be written only inside a declared workspace. `OutputPolicy`

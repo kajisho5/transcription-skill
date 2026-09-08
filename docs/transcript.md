@@ -57,13 +57,13 @@ never repaired or invented.
 | `engine`, `engine_version` | same as the top level |
 | `execution_mode` | `local` or `remote`: where recognition ran (from the engine's spec) |
 | `model`, `model_version` | model name; snapshot/commit id when the engine can report one, else `null` |
-| `parameters` | `language`, `word_timestamps`, `temperature`, `initial_prompt`, `beam_size` |
+| `parameters` | `language`, `word_timestamps`, `temperature`, `initial_prompt`, `beam_size`, `audio_stream` (0-based index actually used; `0` when the request left it unset) |
 | `parameters_hash` | sha256 of the canonical parameters JSON |
 | `cache_key` | sha256 identity of (fingerprint, {engine id, version, execution_mode}, {model, model_version}, parameters) |
 | `created_at`, `processing_seconds` | when, and total wall clock of the run (probe + extraction + engine) |
 | `skill`, `skill_version`, `tool` | which skill and tool produced the document (`transcription-skill`, `transcription/transcribe`) |
 | `language_detection` | `{candidate, probability, min_probability}` when auto-detect ran, else `null`; kept even when the result is `unknown` so the guess is visible but not stored as fact |
-| `audio_extraction` | the fixed recipe used (`mono`, `16000 Hz`, `pcm_s16le`) and `engine_seconds` |
+| `audio_extraction` | the fixed recipe used (`mono`, `16000 Hz`, `pcm_s16le`), the actually-selected `audio_stream_index` / `stream` (`0:a:N`, the ffmpeg `-map` spec), and `engine_seconds` |
 
 Credentials never appear anywhere; the validator rejects credential-looking values and keys such as
 `api_key`, `token`, `command`, `argv`.

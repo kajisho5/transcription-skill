@@ -68,6 +68,7 @@ transcription transcribe lecture.mp4                       # auto language, writ
 transcription transcribe lecture.mp4 --language ja         # Japanese, no detection
 transcription transcribe lecture.mp4 --word-timestamps     # per-word timing
 transcription transcribe lecture.mp4 --offline             # hard no-network constraint
+transcription transcribe dubbed.mkv --audio-stream 1       # multi-track input: decode the 2nd audio stream, not ffmpeg's default pick
 
 # hand off
 transcription export lecture.transcript.json --format srt -o lecture.srt
@@ -241,7 +242,7 @@ or non-JSON stdin still yields an error document (exit 2), never a traceback. Di
   "engine": "faster_whisper", "engine_version": "1.2.1",
   "created_at": "2026-09-04T18:09:36Z",
   "provenance": {"engine": "faster_whisper", "engine_version": "1.2.1", "execution_mode": "local", "model": "base", "model_version": "ebe41f70…",
-                 "parameters": {"language": "ja", "beam_size": 5, "temperature": 0.0, "word_timestamps": true, "initial_prompt": null},
+                 "parameters": {"language": "ja", "beam_size": 5, "temperature": 0.0, "word_timestamps": true, "initial_prompt": null, "audio_stream": 0},
                  "parameters_hash": "6edc…", "cache_key": "301d…", "processing_seconds": 3.3, "skill_version": "0.2.0"},
   "warnings": []
 }

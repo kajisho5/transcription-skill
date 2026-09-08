@@ -37,6 +37,8 @@ def _transcribe_params(args: argparse.Namespace) -> Dict[str, Any]:
                          "offline": bool(args.offline)}
     if args.language:
         p["language"] = args.language
+    if args.audio_stream is not None:
+        p["audio_stream"] = args.audio_stream
     if args.initial_prompt:
         p["initial_prompt"] = args.initial_prompt
     if args.asset_id:
@@ -64,7 +66,8 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
         else:
             i, e, m, c = res["input"], res["engine"], res["model"], res["cache"]
             print(f"[dry-run] {i['filename']}: {i['duration']:.2f}s, {'video+audio' if i['has_video'] else 'audio only'}, "
-                  f"{i['audio'].get('channels')}ch {i['audio'].get('sample_rate')}Hz")
+                  f"{i['audio'].get('channels')}ch {i['audio'].get('sample_rate')}Hz, {i['audio_stream_count']} audio stream(s), "
+                  f"decoding stream {res['audio_stream']}")
             print(f"  engine    {e['id']} {e['version']} ({e['execution_mode']}, network for recognition: {'yes' if e['requires_network'] else 'no'}, "
                   f"{e['supported_languages']} languages, word timestamps: {e['word_timestamps']})")
             print(f"  model     {m['model']}: {m['availability']} ({m['detail']})")
@@ -223,6 +226,7 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--word-timestamps", action="store_true", help="also record per-word timestamps")
     t.add_argument("--temperature", type=float, default=0.0)
     t.add_argument("--beam-size", type=int, default=5)
+    t.add_argument("--audio-stream", type=int, help="0-based index of the audio stream to decode on a multi-track input (default: 0, the first)")
     t.add_argument("--initial-prompt", help="vocabulary hint passed to the ASR decoder (names, terms); not an instruction")
     t.add_argument("--asset-id", help="asset identity to stamp on the transcript (default: derived from the file fingerprint)")
     t.add_argument("--timeout", type=float, help="budget: seconds the engine may run (default 1800)")

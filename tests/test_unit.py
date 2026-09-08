@@ -19,8 +19,11 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+FX = ROOT / "tests" / "fixtures"
 sys.path.insert(0, str(ROOT / "tests"))
+sys.path.insert(0, str(ROOT / "tests" / "fixtures"))
 
+from derived import multi_track  # noqa: E402
 from fake_engine import FakeEngine  # noqa: E402
 from transcription_skill import cli  # noqa: E402
 from transcription_skill.cache import TranscriptCache, cache_key  # noqa: E402
@@ -30,7 +33,7 @@ from transcription_skill.engines import (CAP_LANGUAGE_DETECTION, CAP_LOCAL_EXECU
 from transcription_skill.engines.base import EngineRequest, EngineResult, EngineSpec  # noqa: E402
 from transcription_skill.errors import ERROR_CODES, TranscriptionError  # noqa: E402
 from transcription_skill.export import render, to_srt, write  # noqa: E402
-from transcription_skill.media import child_env  # noqa: E402
+from transcription_skill.media import child_env, extraction_argv, probe  # noqa: E402
 from transcription_skill.models import Segment, Transcript, Word  # noqa: E402
 from transcription_skill.normalize import normalize_text  # noqa: E402
 from transcription_skill.request import parse_request  # noqa: E402
@@ -70,7 +73,9 @@ class RequestTests(unittest.TestCase):
     def test_rejects_bad_values(self):
         for bad in ({"input": ""}, {"input": "a.wav", "language": "japanese"}, {"input": "a.wav", "model": "../x"}, {"input": "a.wav", "model": "/abs"},
                     {"input": "a.wav", "temperature": 2}, {"input": "a.wav", "beam_size": 0}, {"input": "a.wav", "word_timestamps": "yes"},
-                    {"input": "a.wav", "budget": {"timeout": -1}}, {"input": "a.wav", "budget": {"max_calls": 3}}, {"input": "a\n.wav"}, "not an object"):
+                    {"input": "a.wav", "budget": {"timeout": -1}}, {"input": "a.wav", "budget": {"max_calls": 3}}, {"input": "a\n.wav"}, "not an object",
+                    {"input": "a.wav", "audio_stream": -1}, {"input": "a.wav", "audio_stream": "0"}, {"input": "a.wav", "audio_stream": True},
+                    {"input": "a.wav", "audio_stream": 1.5}):
             with self.assertRaises(TranscriptionError) as cm:
                 parse_request(bad)
             self.assertEqual(cm.exception.code, "INVALID_INPUT", bad)
@@ -80,6 +85,17 @@ class RequestTests(unittest.TestCase):
         b = parse_request({"input": "b.wav", "beam_size": 3, "language": "ja"})
         self.assertEqual(a.parameters_hash(), b.parameters_hash())
         self.assertNotEqual(a.parameters_hash(), parse_request({"input": "a.wav", "language": "en", "beam_size": 3}).parameters_hash())
+
+    def test_audio_stream_defaults_to_none_and_normalizes_to_zero_in_parameters(self):
+        r = parse_request({"input": "a.wav"})
+        self.assertIsNone(r.audio_stream)
+        self.assertEqual(r.parameters()["audio_stream"], 0)
+        r2 = parse_request({"input": "a.wav", "audio_stream": 2})
+        self.assertEqual(r2.audio_stream, 2)
+        self.assertEqual(r2.parameters()["audio_stream"], 2)
+        # unset and explicit 0 are the same computation: same parameters hash (and so the same cache key)
+        self.assertEqual(r.parameters_hash(), parse_request({"input": "a.wav", "audio_stream": 0}).parameters_hash())
+        self.assertNotEqual(r.parameters_hash(), r2.parameters_hash())
 
 
 def good_doc() -> dict:
@@ -209,6 +225,32 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(normalize_text("a​b"), "ab")
 
 
+class MediaTests(unittest.TestCase):
+    """extraction_argv/probe: no ffmpeg run needed for argv shape; real ffmpeg for stream counting."""
+
+    def test_extraction_argv_always_maps_an_explicit_audio_stream(self):
+        argv = extraction_argv("/usr/bin/ffmpeg", "in.mp4", "out.wav")
+        self.assertIn("-map", argv)
+        self.assertEqual(argv[argv.index("-map") + 1], "0:a:0")   # default: index 0, never ffmpeg's own heuristic
+        for n in (0, 1, 3):
+            argv = extraction_argv("/usr/bin/ffmpeg", "in.mp4", "out.wav", audio_stream=n)
+            self.assertEqual(argv[argv.index("-map") + 1], f"0:a:{n}")
+            self.assertEqual(argv[-1], "out.wav")
+            self.assertEqual(argv[argv.index("-i") + 1], "in.mp4")
+
+    @unittest.skipUnless(HAVE_FFMPEG, "needs ffmpeg/ffprobe")
+    def test_probe_counts_audio_streams_on_a_real_multi_track_file(self):
+        tmp = tempfile.mkdtemp(prefix="ts_media_")
+        try:
+            single = probe(str(FX / "ja_short.wav"))
+            self.assertEqual(single["audio_stream_count"], 1)
+            two_track = multi_track([str(FX / "ja_short.wav"), str(FX / "en_short.wav")], out_dir=tmp)
+            meta = probe(two_track)
+            self.assertEqual(meta["audio_stream_count"], 2)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class EngineContractTests(unittest.TestCase):
     def test_registry_lists_only_real_engines(self):
         self.assertEqual(engine_ids(), ["faster_whisper"])
@@ -327,6 +369,34 @@ class ServiceTests(unittest.TestCase):
         with self.assertRaises(TranscriptionError) as cm:
             nowords.transcribe(self.req(word_timestamps=True))
         self.assertEqual(cm.exception.code, "INVALID_INPUT")
+
+    @unittest.skipUnless(HAVE_FFMPEG, "needs ffmpeg/ffprobe")
+    def test_audio_stream_selection_is_mapped_explicit_validated_and_recorded(self):
+        # single-track input: any index but 0 is out of range
+        with self.assertRaises(TranscriptionError) as cm:
+            self.svc.transcribe(self.req(audio_stream=1))
+        self.assertEqual(cm.exception.code, "INVALID_INPUT")
+        self.assertEqual(cm.exception.details["audio_stream"], 1)
+        self.assertEqual(cm.exception.details["audio_stream_count"], 1)
+        # default (no audio_stream) and explicit index 0 both extract stream 0 and say so in provenance
+        doc = self.svc.transcribe(self.req())["transcript"]
+        self.assertEqual(doc["provenance"]["audio_extraction"]["audio_stream_index"], 0)
+        self.assertEqual(doc["provenance"]["audio_extraction"]["stream"], "0:a:0")
+        self.assertEqual(doc["provenance"]["parameters"]["audio_stream"], 0)
+        # a real two-audio-track input: index 1 is valid, extracts and is recorded distinctly from index 0
+        tmp = tempfile.mkdtemp(prefix="ts_unit_multi_")
+        try:
+            two_track = multi_track([self.wav, self.wav], out_dir=tmp)
+            r0 = self.svc.transcribe(self.req(input=two_track, audio_stream=0, cache=False))["transcript"]
+            r1 = self.svc.transcribe(self.req(input=two_track, audio_stream=1, cache=False))["transcript"]
+            self.assertEqual(r0["provenance"]["audio_extraction"]["audio_stream_index"], 0)
+            self.assertEqual(r1["provenance"]["audio_extraction"]["audio_stream_index"], 1)
+            self.assertNotEqual(r0["provenance"]["cache_key"], r1["provenance"]["cache_key"])
+            with self.assertRaises(TranscriptionError) as cm:
+                self.svc.transcribe(self.req(input=two_track, audio_stream=2))
+            self.assertEqual(cm.exception.details["audio_stream_count"], 2)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def test_file_errors(self):
         with self.assertRaises(TranscriptionError) as cm:

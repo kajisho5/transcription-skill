@@ -35,7 +35,7 @@ CAPABILITIES = [
 TOOLS: List[Dict[str, Any]] = [
     {"name": "transcription/transcribe", "description": "Transcribe an audio or video file into a validated Transcript.",
      "input": {"input": "path", "language": "iso639-1 | null", "engine": "engine id", "model": "model name", "word_timestamps": "bool",
-               "temperature": "0..1", "initial_prompt": "str | null", "beam_size": "1..10", "asset_id": "str | null",
+               "temperature": "0..1", "initial_prompt": "str | null", "beam_size": "1..10", "audio_stream": "int >= 0 | null", "asset_id": "str | null",
                "budget": {"timeout": "seconds", "max_audio_seconds": "seconds"}, "cache": "bool", "workspace": "path | null", "offline": "bool", "allowed_input_roots": "list[dir] | null", "dry_run": "bool"},
      "output": {"transcript": "Transcript", "cache_hit": "bool", "cache_key": "sha256 hex", "warnings": "list[str]"}, "deterministic": True,
      "side_effects": ["writes cache under workspace"]},

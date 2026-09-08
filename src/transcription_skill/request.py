@@ -18,7 +18,7 @@ DEFAULT_ENGINE = "faster_whisper"
 DEFAULT_MODEL = "base"
 MAX_INITIAL_PROMPT_CHARS = 500
 
-ALLOWED_KEYS = {"input", "language", "engine", "model", "word_timestamps", "temperature", "initial_prompt", "beam_size",
+ALLOWED_KEYS = {"input", "language", "engine", "model", "word_timestamps", "temperature", "initial_prompt", "beam_size", "audio_stream",
                 "asset_id", "budget", "cache", "workspace", "offline", "allowed_input_roots"}
 FORBIDDEN_KEYS = {"command", "argv", "cmd", "shell", "exec", "args", "script", "binary", "api_key", "apikey", "token",
                   "secret", "password", "credentials", "env"}
@@ -48,6 +48,7 @@ class TranscribeRequest:
     temperature: float = 0.0
     initial_prompt: Optional[str] = None  # decoding vocabulary hint passed to the ASR engine (not an LLM prompt)
     beam_size: int = 5
+    audio_stream: Optional[int] = None   # 0-based index of the input's audio streams to decode; None = first (index 0)
     asset_id: Optional[str] = None       # caller-supplied asset identity; default derived from the fingerprint
     budget: Budget = field(default_factory=Budget)
     cache: bool = True
@@ -56,9 +57,12 @@ class TranscribeRequest:
     allowed_input_roots: Optional[List[str]] = None   # when given, the input must resolve inside one of these directories
 
     def parameters(self) -> Dict[str, Any]:
-        """The parameters that shape the ASR output. Part of provenance and of the cache identity."""
+        """The parameters that shape the ASR output. Part of provenance and of the cache identity.
+        `audio_stream` is normalized to its effective index (None means the same stream as 0) so a
+        request that omits it and one that names index 0 explicitly share a cache entry."""
         return {"language": self.language, "word_timestamps": self.word_timestamps, "temperature": self.temperature,
-                "initial_prompt": self.initial_prompt, "beam_size": self.beam_size}
+                "initial_prompt": self.initial_prompt, "beam_size": self.beam_size,
+                "audio_stream": self.audio_stream if self.audio_stream is not None else 0}
 
     def parameters_hash(self) -> str:
         return hashlib.sha256(json.dumps(self.parameters(), sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
@@ -116,6 +120,9 @@ def parse_request(doc: Any) -> TranscribeRequest:
     beam = doc.get("beam_size", 5)
     if isinstance(beam, bool) or not isinstance(beam, int) or not (1 <= beam <= 10):
         raise _bad("'beam_size' must be an integer in [1, 10]")
+    audio_stream = doc.get("audio_stream")
+    if audio_stream is not None and (isinstance(audio_stream, bool) or not isinstance(audio_stream, int) or audio_stream < 0):
+        raise _bad("'audio_stream' must be a non-negative integer: the 0-based index of the input's audio streams to decode")
     prompt = doc.get("initial_prompt")
     if prompt is not None:
         if not isinstance(prompt, str):
@@ -159,7 +166,8 @@ def parse_request(doc: Any) -> TranscribeRequest:
             setattr(budget, k, float(v))
 
     return TranscribeRequest(input=inp, language=lang, engine=engine, model=model, word_timestamps=wt, temperature=float(temp),
-                             initial_prompt=prompt, beam_size=beam, asset_id=asset_id, budget=budget, cache=cache, workspace=ws, offline=offline, allowed_input_roots=roots)
+                             initial_prompt=prompt, beam_size=beam, audio_stream=audio_stream, asset_id=asset_id, budget=budget, cache=cache,
+                             workspace=ws, offline=offline, allowed_input_roots=roots)
 
 
 def default_workspace() -> str:

@@ -12,16 +12,18 @@ TranscribeRequest (typed JSON)         request.py     parse_request(): allow-lis
         ↓
 PathPolicy.resolve_input               paths.py       traversal (policy mode) → abspath → realpath → allowed-root containment → exists → regular → readable
         ↓
-probe                                  media.py       ffprobe on the resolved path: duration, audio stream, video presence
+probe                                  media.py       ffprobe on the resolved path: duration, audio stream count, video presence
+        ↓
+audio_stream range check               service.py     `audio_stream` (request) >= probed audio_stream_count → INVALID_INPUT before anything runs
         ↓
 Budget: max_audio_seconds              service.py     BUDGET_EXCEEDED before anything runs
         ↓
 engine lookup (registry) + offline     engines/       offline + requires_network → ENGINE_UNAVAILABLE; not installed → ENGINE_UNAVAILABLE
 model availability (no download)       engines/       MODEL_UNKNOWN / MODEL_MISSING → MODEL_UNAVAILABLE {availability}; DOWNLOAD_REQUIRED ok unless offline
         ↓
-fingerprint + cache key                cache.py       sha256(file) ; key = H(fingerprint, {engine id, version, execution_mode}, {model, version}, parameters)
+fingerprint + cache key                cache.py       sha256(file) ; key = H(fingerprint, {engine id, version, execution_mode}, {model, version}, parameters incl. audio_stream)
         ↓  hit → return cached Transcript (validated again; CACHE_INVALID → warning + recompute)
-make_run_dir + extract_audio           paths.py/media.py   exclusive <workspace>/tmp/<uuid>/ verified inside the workspace; fixed ffmpeg argv → mono 16 kHz PCM WAV
+make_run_dir + extract_audio           paths.py/media.py   exclusive <workspace>/tmp/<uuid>/ verified inside the workspace; fixed ffmpeg argv, explicit `-map 0:a:N` → mono 16 kHz PCM WAV
         ↓
 engine worker subprocess               engines/worker.py   python -m transcription_skill.engines.worker req.json result.json
         ↓  Budget: timeout → process group killed → TRANSCRIPTION_TIMEOUT
@@ -123,8 +125,9 @@ for one another (eval 18).
 
 ## Boundaries with the neighbours
 
-- **ffmpeg-skill**: not a dependency. This skill needs one deterministic media operation (decode the
-  first audio stream to 16 kHz mono PCM), implemented as one fixed argv in `media.py`. Its CLI
+- **ffmpeg-skill**: not a dependency. This skill needs one deterministic media operation (decode one
+  explicitly-selected audio stream — `audio_stream` request field, default the first — to 16 kHz mono
+  PCM), implemented as one fixed argv in `media.py`. Its CLI
   conventions (`--json`, `--dry-run`, exit codes, structured errors, `doctor`) are mirrored so an
   adapter written for ffmpeg-skill can drive this skill the same way.
 - **media-analysis-skill**: measures media. This skill only reads duration and stream presence to

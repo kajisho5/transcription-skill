@@ -25,7 +25,7 @@ from transcription_skill.speech_events import speech_events
 from transcription_skill.validate import validate_transcript
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "fixtures"))
-from derived import media_duration, second_onset, twice  # noqa: E402
+from derived import media_duration, multi_track, second_onset, twice  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 FX = ROOT / "tests" / "fixtures"
@@ -148,6 +148,24 @@ class RealMediaTests(unittest.TestCase):
         self.assertGreater(len(words), 10)
         events = speech_events(doc, merge_gap=0.5)
         self.assertEqual(len(events), len(doc["segments"]))
+
+    def test_audio_stream_selection_picks_the_right_track_end_to_end(self):
+        """A real multi-audio-track container (ja_short.wav on stream 0, en_short.wav on stream 1): the
+        engine's own language detection proves which stream ffmpeg actually decoded, closing the gap where
+        the un-mapped extraction previously left the choice to ffmpeg's own heuristic (issue #10)."""
+        wav = multi_track([str(FX / "ja_short.wav"), str(FX / "en_short.wav")], out_dir=self.tmp)
+        ja = self.svc.transcribe(self.req(os.path.basename(wav), input=wav, audio_stream=0, cache=False))["transcript"]
+        en = self.svc.transcribe(self.req(os.path.basename(wav), input=wav, audio_stream=1, cache=False))["transcript"]
+        self.assertTrue(validate_transcript(ja).ok)
+        self.assertTrue(validate_transcript(en).ok)
+        self.assertEqual(ja["provenance"]["audio_extraction"]["audio_stream_index"], 0)
+        self.assertEqual(en["provenance"]["audio_extraction"]["audio_stream_index"], 1)
+        self.assertEqual(ja["language"], "ja")
+        self.assertEqual(en["language"], "en")
+        with self.assertRaises(TranscriptionError) as cm:
+            self.svc.transcribe(self.req(os.path.basename(wav), input=wav, audio_stream=2))
+        self.assertEqual(cm.exception.code, "INVALID_INPUT")
+        self.assertEqual(cm.exception.details, {"audio_stream": 2, "audio_stream_count": 2})
 
     def test_cache_hit_does_not_rerun_engine(self):
         from unittest import mock

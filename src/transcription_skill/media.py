@@ -2,7 +2,9 @@
 
 This is the only module that runs external programs. Every invocation is a fixed argv list built
 from validated values; no user string is ever interpreted by a shell. The recipe (mono, 16 kHz,
-PCM 16-bit WAV) is what ASR engines consume; the skill does no other media processing.
+PCM 16-bit WAV) is what ASR engines consume; the skill does no other media processing. Which audio
+stream is decoded is always an explicit `-map 0:a:N` (default N=0, the first) so a multi-audio-track
+input never depends on ffmpeg's own "best stream" heuristic.
 """
 from __future__ import annotations
 
@@ -49,7 +51,8 @@ def fingerprint_file(path: str, chunk: int = 1 << 20) -> str:
 
 
 def probe(path: str) -> Dict[str, Any]:
-    """ffprobe summary: duration, audio stream facts, presence of video. Raises UNSUPPORTED_MEDIA."""
+    """ffprobe summary: duration, audio stream facts (of the first audio stream, plus how many exist),
+    presence of video. Raises UNSUPPORTED_MEDIA."""
     ffprobe = find_tool("ffprobe")
     if not ffprobe:
         raise TranscriptionError("ENGINE_UNAVAILABLE", "ffprobe not found on PATH (install FFmpeg)")
@@ -64,10 +67,11 @@ def probe(path: str) -> Dict[str, Any]:
         raise TranscriptionError("UNSUPPORTED_MEDIA", "ffprobe returned invalid JSON")
     fmt = raw.get("format") or {}
     streams = raw.get("streams") or []
-    audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
     video = next((s for s in streams if s.get("codec_type") == "video" and (s.get("disposition") or {}).get("attached_pic", 0) == 0), None)
-    if audio is None:
+    if not audio_streams:
         raise TranscriptionError("UNSUPPORTED_MEDIA", f"{os.path.basename(path)} has no audio stream")
+    audio = audio_streams[0]
     duration = _f(fmt.get("duration")) or _f(audio.get("duration"))
     if not duration or duration <= 0:
         raise TranscriptionError("UNSUPPORTED_MEDIA", f"{os.path.basename(path)}: duration unknown or zero")
@@ -76,24 +80,29 @@ def probe(path: str) -> Dict[str, Any]:
         "container": fmt.get("format_name"),
         "size_bytes": int(fmt.get("size") or os.path.getsize(path)),
         "audio": {"codec": audio.get("codec_name"), "channels": _i(audio.get("channels")), "sample_rate": _i(audio.get("sample_rate"))},
+        "audio_stream_count": len(audio_streams),
         "has_video": video is not None,
     }
 
 
-def extraction_argv(ffmpeg: str, src: str, dst: str) -> List[str]:
+def extraction_argv(ffmpeg: str, src: str, dst: str, audio_stream: int = 0) -> List[str]:
+    """Build the fixed extraction argv. `audio_stream` is always mapped explicitly (`-map 0:a:N`) so the
+    decoded stream is never left to ffmpeg's own implicit "best stream" heuristic on a multi-track input."""
     r = AUDIO_RECIPE
-    return [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", src, "-vn", "-sn", "-dn",
+    return [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", src,
+            "-map", f"0:a:{audio_stream}", "-vn", "-sn", "-dn",
             "-ac", str(r["channels"]), "-ar", str(r["sample_rate"]), "-c:a", r["codec"], "-f", r["container"], dst]
 
 
-def extract_audio(src: str, dst: str, timeout: float = 600.0) -> Dict[str, Any]:
-    """Decode the input's first audio stream to the fixed ASR recipe at dst. Returns a description."""
+def extract_audio(src: str, dst: str, audio_stream: int = 0, timeout: float = 600.0) -> Dict[str, Any]:
+    """Decode the input's audio stream at `audio_stream` (0-based; default 0, the first) to the fixed ASR
+    recipe at dst. Returns a description naming the actually-selected stream."""
     ffmpeg = find_tool("ffmpeg")
     if not ffmpeg:
         raise TranscriptionError("ENGINE_UNAVAILABLE", "ffmpeg not found on PATH (install FFmpeg)")
     if os.path.abspath(src) == os.path.abspath(dst):
         raise TranscriptionError("INVALID_INPUT", "audio extraction target equals the input")
-    argv = extraction_argv(ffmpeg, src, dst)
+    argv = extraction_argv(ffmpeg, src, dst, audio_stream)
     try:
         proc = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout, env=child_env())
     except subprocess.TimeoutExpired:
@@ -101,7 +110,7 @@ def extract_audio(src: str, dst: str, timeout: float = 600.0) -> Dict[str, Any]:
     if proc.returncode != 0 or not os.path.exists(dst):
         tail = "\n".join(proc.stderr.strip().splitlines()[-3:])
         raise TranscriptionError("TRANSCRIPTION_FAILED", f"audio extraction failed: {tail}")
-    return {"tool": "ffmpeg", "recipe": dict(AUDIO_RECIPE), "stream": "first audio stream"}
+    return {"tool": "ffmpeg", "recipe": dict(AUDIO_RECIPE), "audio_stream_index": audio_stream, "stream": f"0:a:{audio_stream}"}
 
 
 def _f(v: Any) -> Optional[float]:
