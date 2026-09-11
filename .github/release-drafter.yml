@@ -40,11 +40,15 @@ version-resolver:
 # so rules below match both that style (for any future PRs that do use it) and this repo's observed
 # keyword/file-based conventions. Anything that still matches nothing falls through to the
 # version-resolver's `default: patch` above, per the task brief's explicit allowance.
+#
+# Deliberately NO "major"/"breaking" autolabeler rule: a text-pattern match (e.g. a PR title or body
+# that happens to say "breaking change" while merely describing a bug, not declaring one) would
+# silently apply the "major" label and, through version-resolver above, trigger an unintended major
+# version bump the next time release.yml runs on push to main -- this is exactly what happened in
+# color-grading-skill, where a PR's body text containing "BREAKING CHANGE" (as part of a bug
+# description) got auto-labeled "major" with no human involved. A major/breaking version bump is a
+# deliberate, human decision: the "major" label must be applied by a person, never inferred from text.
 autolabeler:
-  - label: "major"
-    title:
-      - "/^[a-z]+(\\([\\w.-]+\\))?!:/" # Conventional Commits "!" breaking-change marker, e.g. "feat!: ..."
-      - "/breaking change/i"
   - label: "feature"
     title:
       - "/^feat(\\([\\w.-]+\\))?:/i"
