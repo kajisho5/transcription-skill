@@ -1,0 +1,28 @@
+# Auto-labels PRs (major/feature/fix/chore) from title/branch/changed-files patterns defined in
+# .github/release-drafter.yml's `autolabeler`, so release.yml's version-resolution step (which reads
+# these labels off merged PRs) doesn't default every release to "patch".
+#
+# pull_request_target (not pull_request) so labels get applied on PRs from forks too -- forked PRs
+# don't carry write-permission tokens under `pull_request`. This workflow does NOT check out the PR
+# head and runs no code from the PR; it only reads title/branch/file-list metadata via the GitHub API
+# and applies labels, which is safe under pull_request_target.
+name: "PR labeler"
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: release-drafter/release-drafter@v6
+        with:
+          config-name: release-drafter.yml
+          disable-releaser: true # this job only autolabels; release.yml owns actually publishing
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

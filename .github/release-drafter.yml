@@ -1,0 +1,81 @@
+# release-drafter config: https://github.com/release-drafter/release-drafter
+#
+# Used two ways in this repo:
+#   1. .github/workflows/pr-labeler.yml runs the release-drafter action's autolabeler
+#      (label-only, no release body) on every PR so `resolve-version` below has labels to read.
+#   2. .github/workflows/release.yml runs it in dry-run mode on push to main to resolve the next
+#      semantic version from the labels of PRs merged since the last tag. It does not generate the
+#      release body or CHANGELOG.md content itself -- release.yml builds those from `git log`
+#      (scripts/release/changelog.py) so untrusted PR titles never pass through a shell.
+
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+
+categories:
+  - title: "Breaking changes"
+    labels: ["major"]
+  - title: "Features"
+    labels: ["feature", "minor"]
+  - title: "Fixes"
+    labels: ["fix", "bug"]
+  - title: "Chores"
+    labels: ["chore"]
+
+# Unlabeled PRs (or PRs whose only label doesn't map to major/minor below) default to a patch bump,
+# per the task brief ("ラベル無しはpatchデフォルト").
+version-resolver:
+  major:
+    labels: ["major", "breaking"]
+  minor:
+    labels: ["minor", "feature"]
+  patch:
+    labels: ["patch", "fix", "bug", "chore"]
+  default: patch
+
+# This repo's actual merged-PR titles do not use Conventional Commits prefixes (e.g. "feat:", "fix:")
+# -- they are free-form descriptive titles, often ending in an ADR reference, e.g. "Output-root
+# policy: allowed_output_roots / --allowed-output for transcribe, segments, export (ADR-029)" or
+# "Robust real-media tests via derived same-language fixture; clamp small segment end overruns
+# (ADR-028)". Conventional-Commits-style rules alone would leave almost every real PR unlabeled here,
+# so rules below match both that style (for any future PRs that do use it) and this repo's observed
+# keyword/file-based conventions. Anything that still matches nothing falls through to the
+# version-resolver's `default: patch` above, per the task brief's explicit allowance.
+autolabeler:
+  - label: "major"
+    title:
+      - "/^[a-z]+(\\([\\w.-]+\\))?!:/" # Conventional Commits "!" breaking-change marker, e.g. "feat!: ..."
+      - "/breaking change/i"
+  - label: "feature"
+    title:
+      - "/^feat(\\([\\w.-]+\\))?:/i"
+      - "/^add(ed|s|ing)?\\b/i"
+      - "/\\bnew\\b/i"
+      - "/\\bintegration\\b/i"
+      - "/\\bsupport\\b/i"
+  - label: "fix"
+    title:
+      - "/^fix(\\([\\w.-]+\\))?:/i"
+      - "/^bugfix\\b/i"
+      - "/\\bfix(ed|es)?\\b/i"
+      - "/\\bclamp\\b/i"
+      - "/\\bcorrect(ion|ed|s)?\\b/i"
+      - "/\\bhardening\\b/i"
+    branch:
+      - "/^fix\\//"
+  - label: "chore"
+    title:
+      - "/^chore(\\([\\w.-]+\\))?:/i"
+      - "/^docs?(\\([\\w.-]+\\))?:/i"
+      - "/^ci(\\([\\w.-]+\\))?:/i"
+      - "/^refactor(\\([\\w.-]+\\))?:/i"
+      - "/^test(\\([\\w.-]+\\))?:/i"
+      - "/\\breadme\\b/i"
+      - "/\\bSTATE\\.md\\b/"
+    files:
+      - "**/*.md"
+      - ".github/**"
+
+template: |
+  ## What's changed
+
+  $CHANGES

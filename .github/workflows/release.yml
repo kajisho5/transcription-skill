@@ -1,0 +1,188 @@
+# Full release automation in a single job, triggered on every push to main.
+#
+# Deliberately NOT split into "bump/tag" + "tag-triggered publish" workflows: a tag or commit
+# pushed with the default GITHUB_TOKEN does not trigger other workflow runs (GitHub's built-in
+# anti-recursion rule -- see "Triggering a workflow from a workflow" in GitHub's Actions docs), so a
+# second workflow gated on `on: push: tags:` would simply never fire. Everything -- version
+# resolution, file bump, CHANGELOG.md, git tag, GitHub Release, package publish -- happens here, in
+# one run, using only the SHA/tag this run itself creates.
+#
+# Version resolution: if pyproject.toml's current version already differs from the latest `vX.Y.Z`
+# tag, a human already bumped it manually in the PR that produced this push -- that value is
+# respected as-is and no auto-bump happens (scripts/release/version_state.py). Only when the current
+# version still equals the latest tag does this workflow compute the next version itself, from the
+# labels release-drafter's autolabeler (.github/workflows/pr-labeler.yml) applied to PRs merged since
+# that tag; an unlabeled PR defaults to a patch bump (.github/release-drafter.yml).
+#
+# CHANGELOG.md is generated from `git log` output read via scripts/release/changelog.py
+# (subprocess.run with an argv list, never shell=True), not from PR titles interpolated into a
+# `${{ }}` expression inside a `run:` block -- that pattern lets a malicious PR title/commit subject
+# inject shell code into the runner, which is exactly what this design avoids.
+#
+# Publishing to PyPI is skipped (tag + GitHub Release still happen) when no PYPI_API_TOKEN secret is
+# configured, since this repository currently distributes via `pip install git+...` only.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  release:
+    # Defense-in-depth against ever reprocessing our own release-bump commit (this workflow already
+    # can't be re-triggered by a GITHUB_TOKEN push in the first place -- see header comment -- this
+    # guard only matters if the push token/actor setup ever changes).
+    if: "!contains(github.event.head_commit.message, '[skip release]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify release-tooling scripts (isolated unit tests, not this repo's state)
+        run: python3 -m unittest discover -s scripts/release/tests
+
+      - name: Determine version-bump mode
+        id: state
+        run: |
+          python3 scripts/release/version_state.py --pyproject pyproject.toml --repo . | tee state.json
+          python3 scripts/release/ci_write_state_outputs.py
+
+
+      - name: Resolve next version from merged-PR labels (auto mode only)
+        id: resolve
+        if: steps.state.outputs.mode == 'auto'
+        uses: release-drafter/release-drafter@v6
+        with:
+          config-name: release-drafter.yml
+          disable-autolabeler: true # labels were already applied by pr-labeler.yml at merge time
+          dry-run: true
+          # release-drafter needs *a* tag to diff from; if there is no latest_tag_version yet this
+          # is the repo's very first release and release-drafter naturally treats it as "everything".
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Decide final release version
+        id: version
+        env:
+          MODE: ${{ steps.state.outputs.mode }}
+          CURRENT_VERSION: ${{ steps.state.outputs.current_version }}
+          LATEST_TAG_VERSION: ${{ steps.state.outputs.latest_tag_version }}
+          RESOLVED_VERSION: ${{ steps.resolve.outputs.resolved-version }}
+        run: python3 scripts/release/ci_decide_version.py
+
+      - name: Check the target tag does not already exist
+        id: tagcheck
+        if: steps.version.outputs.already_released != 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Nothing new to release
+        if: steps.version.outputs.already_released == 'true' || steps.tagcheck.outputs.exists == 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: echo "::notice::$TAG already exists; nothing to release on this push."
+
+      - name: Bump pyproject.toml
+        if: steps.version.outputs.already_released != 'true' && steps.tagcheck.outputs.exists != 'true' && steps.version.outputs.bump_file == 'true'
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new_version }}
+        run: python3 scripts/release/bump_version.py --pyproject pyproject.toml --new-version "$NEW_VERSION"
+
+      - name: Generate CHANGELOG.md
+        if: steps.version.outputs.already_released != 'true' && steps.tagcheck.outputs.exists != 'true'
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new_version }}
+          LATEST_TAG_VERSION: ${{ steps.state.outputs.latest_tag_version }}
+        run: |
+          SINCE_ARGS=()
+          if [ -n "$LATEST_TAG_VERSION" ]; then
+            SINCE_ARGS=(--since "v$LATEST_TAG_VERSION")
+          fi
+          python3 scripts/release/changelog.py --repo . --version "$NEW_VERSION" \
+            "${SINCE_ARGS[@]}" --exclude-subject-prefix "chore(release):" --changelog CHANGELOG.md
+
+      - name: Commit release files
+        id: commit
+        if: steps.version.outputs.already_released != 'true' && steps.tagcheck.outputs.exists != 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "chore(release): $TAG [skip release]"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push release commit
+        if: steps.commit.outputs.changed == 'true'
+        run: git push origin HEAD:main
+
+      - name: Tag
+        if: steps.version.outputs.already_released != 'true' && steps.tagcheck.outputs.exists != 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "$TAG"
+
+      - name: Extract this release's CHANGELOG section for the GitHub Release body
+        if: steps.version.outputs.already_released != 'true' && steps.tagcheck.outputs.exists != 'true'
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new_version }}
+        run: python3 scripts/release/ci_extract_changelog_section.py
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.already_released != 'true' && steps.tagcheck.outputs.exists != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body_path: release_body.md
+
+      - name: Check for a package-registry token
+        id: registry
+        if: steps.version.outputs.already_released != 'true' && steps.tagcheck.outputs.exists != 'true'
+        env:
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          if [ -n "$PYPI_API_TOKEN" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::PYPI_API_TOKEN is not configured; tag and GitHub Release were created, publish step is skipped."
+          fi
+
+      - name: Build distribution
+        if: steps.registry.outputs.has_token == 'true'
+        run: |
+          python3 -m pip install --upgrade build
+          python3 -m build
+
+      - name: Publish to PyPI
+        if: steps.registry.outputs.has_token == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
