@@ -68,11 +68,17 @@ jobs:
         with:
           config-name: release-drafter.yml
           disable-autolabeler: true # labels were already applied by pr-labeler.yml at merge time
-          # release-drafter@v6 has no `dry-run` input (an earlier version of this workflow passed one;
-          # it was silently ignored, so this step actually created a real GitHub Release object each
-          # run instead of just resolving a version). `disable-releaser: true` is the correct way to
-          # skip creating/touching any Release while still computing the version.
-          disable-releaser: true
+          # `disable-releaser: true` looks like the right flag for "resolve the version but don't
+          # create/touch a Release" -- it is NOT. release-drafter's own source
+          # (https://github.com/release-drafter/release-drafter, index.js) does
+          # `if (!config || input.disableReleaser) return` *before* computing the version at all, so
+          # `resolved_version` is never set when disable-releaser is true, regardless of the output
+          # key name (this cost two earlier, wrong fixes: a `dry-run` input that doesn't exist, then
+          # `disable-releaser` on the mistaken assumption it only skipped release creation). The
+          # release-drafter default (`publish: false`, no disable-releaser) is the only way to get
+          # `resolved_version`: it creates a DRAFT release as a side effect of computing the version.
+          # That draft is deleted a few steps below, right after we've read the outputs we need from
+          # it, so it never lingers in this repo's Releases list.
           # release-drafter needs *a* tag to diff from; if there is no latest_tag_version yet this
           # is the repo's very first release and release-drafter naturally treats it as "everything".
         env:
@@ -90,6 +96,22 @@ jobs:
           # here was the real reason this always came back empty (both before and after the dry-run fix).
           RESOLVED_VERSION: ${{ steps.resolve.outputs.resolved_version }}
         run: python3 scripts/release/ci_decide_version.py
+
+      - name: Delete the draft release release-drafter created to compute the version
+        # release-drafter only runs (and only creates its draft) when mode == 'auto'; its `id` output
+        # is only non-empty when it actually created/updated a release. Deleting it here, right after
+        # we've read resolved_version out of it, is what keeps this workflow from leaving a stray
+        # draft release behind on every push (this repo's own release, built a few steps down from
+        # scripts/release/changelog.py + softprops/action-gh-release, is the one that's meant to stay).
+        if: steps.state.outputs.mode == 'auto' && steps.resolve.outputs.id != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.resolve.outputs.id }}
+        run: |
+          curl -sS -X DELETE \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID"
 
       - name: Check the target tag does not already exist
         id: tagcheck
