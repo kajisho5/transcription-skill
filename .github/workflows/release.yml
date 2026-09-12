@@ -68,7 +68,11 @@ jobs:
         with:
           config-name: release-drafter.yml
           disable-autolabeler: true # labels were already applied by pr-labeler.yml at merge time
-          dry-run: true
+          # release-drafter@v6 has no `dry-run` input (an earlier version of this workflow passed one;
+          # it was silently ignored, so this step actually created a real GitHub Release object each
+          # run instead of just resolving a version). `disable-releaser: true` is the correct way to
+          # get `resolved-version` without creating or touching any Release.
+          disable-releaser: true
           # release-drafter needs *a* tag to diff from; if there is no latest_tag_version yet this
           # is the repo's very first release and release-drafter naturally treats it as "everything".
         env:
