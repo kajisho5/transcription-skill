@@ -87,6 +87,21 @@ future session designs release automation like this again, gate the *first* tag/
 explicit check (e.g. a required manual `workflow_dispatch` input, or a repo variable) rather than
 relying on a separate human-approval step recorded only in prose.
 
+**Second bug found the same day, needs a human action:** the "Resolve next version from merged-PR
+labels" step in `release.yml` passed `dry-run: true` to `release-drafter/release-drafter@v6` — that
+input does not exist in this action version (confirmed from the run's own "Unexpected input(s)
+'dry-run'" warning) and was silently ignored, so the step was never actually a dry run. On the push
+that merged PR #18 (a docs-only `STATE.md` change, no version label), this ran in auto mode
+(`pyproject.toml`'s version still equaled the latest tag) and created a real, **draft**, tag-less
+GitHub Release (named `v0.2.1`, visible under this repo's Releases list) before failing at the next
+step on an empty `resolved-version`. `pyproject.toml` and `CHANGELOG.md` on `main` were **not**
+touched — the failure happened before the bump/commit/tag steps. Fixed in PR #19
+(`disable-releaser: true` replaces the nonexistent `dry-run: true`), but the **stray draft release
+itself needs a human (or a session with release-deletion access) to delete it manually** — no
+MCP/API tool was available in this session to do it. Find it at
+https://github.com/kajisho5/transcription-skill/releases (draft, tag `v0.2.1`) and delete via the
+GitHub UI ("..." menu → Delete) or `gh release delete v0.2.1` if using a tool with `gh` access.
+
 ## Change log (session-level)
 - 2026-09-04: 0.1.0 → 0.2.0 (engine ecosystem, agent readiness, input boundary) merged as PR #1
 - 2026-09-05: sponsors (#2), README landing page (#3), subtitle-skill link (#4), `provides` (#5),
