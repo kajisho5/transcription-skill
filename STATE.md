@@ -17,8 +17,11 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 - Engine ecosystem: `EngineSpec`, `ModelStatus`, `EngineRegistry`, constraint `Selector` (no ranking), `--offline`
 - Reference Local Engine: `faster_whisper` (the only implemented engine); worker subprocess with real timeout
 - Deterministic cache keyed by content fingerprint + engine id/version/execution_mode + model/model_version + parameters
-- Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt), `check`; CLI: doctor, transcribe, segments,
-  export, check, engines, skill, `run -` (one JSON request in, one JSON document out)
+- Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt), `check`, `batch` (many transcribe requests, one
+  process; one item's failure never aborts the rest); CLI: doctor, transcribe, segments, export, check, engines, skill,
+  batch, `run -` (one JSON request in, one JSON document out)
+- Explicit language selection: `--language` / request `language` (ISO 639-1) forces the engine to skip auto-detection
+  (`language_source: "requested"` on the transcript); default remains auto-detect from the first 30 s
 - Input boundary: opt-in `allowed_input_roots` (resolved-path containment, traversal/symlink refusal); default unchanged
 - Multi-audio-track inputs: `audio_stream` request field selects which audio stream is decoded (explicit `-map 0:a:N`
   in `media.py`, validated against the probed stream count); default (unset) is stream 0, recorded in
@@ -54,11 +57,15 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 - A segment/word end that overruns the media end by ≤ 2 s is clamped to the duration with a warning (ADR-028); larger
   overruns are `INVALID_RESULT`. Observed 0.69 s overrun on a 20.7 s file with `base` and no word timestamps.
 - Windows / macOS CI matrix exists but has not been run; junctions and symlink-less filesystems unverified.
-- No batch mode; one request per process through `run -`.
+- Long-recording stability (multi-hour conference/lecture captures) has not been specifically load-tested beyond the
+  existing `budget.max_audio_seconds` cap and engine timeout; behavior under real multi-hour files is UNKNOWN.
 
 ## Active work / next highest-value tasks (ordered)
 1. Trigger CI once (workflow_dispatch) and record the matrix result here.
-2. Batch entry point (many inputs, one process) reusing PathPolicy/OutputPolicy per item — only if a consumer needs it.
+2. Long-recording stability pass: exercise a genuinely multi-hour input, confirm memory/timeout behavior, adjust
+   defaults if needed.
+3. Additional export format(s) beyond json/srt/vtt if a consumer (e.g. subtitle-skill) needs one (ADR-029 still applies:
+   no styling/positioning logic here, plain timed-text renderings only).
 
 ## Pending human approval
 
@@ -101,3 +108,8 @@ relying on a separate human-approval step recorded only in prose.
   PR template, SECURITY.md; #12). Merging it to `main` caused `release.yml` to auto-cut `v0.2.0`
   (tag + GitHub Release) on its own merge commit — see "Pending human approval" above for why that
   wasn't the intended flow and why the resulting release was kept anyway.
+- 2026-09-12: fixed two more `release.yml` bugs found by letting it actually run (`dry-run` is not a
+  real release-drafter input, and its resolved-version output key is `resolved_version` not
+  `resolved-version`; PRs #19/#21). Added `transcription/batch` (many transcribe requests, one process,
+  per-item failure isolation; CLI `transcription batch`) as the first item of a v1 feature push;
+  confirmed `language` force-selection was already implemented end-to-end (CLI, request, engine).
