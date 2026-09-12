@@ -102,6 +102,18 @@ MCP/API tool was available in this session to do it. Find it at
 https://github.com/kajisho5/transcription-skill/releases (draft, tag `v0.2.1`) and delete via the
 GitHub UI ("..." menu → Delete) or `gh release delete v0.2.1` if using a tool with `gh` access.
 
+**Third bug, found by actually letting #19's fix run:** after #19 merged, the same step ran cleanly
+(no stray release — the `disable-releaser` fix works) but `ci_decide_version.py` still failed with
+`release-drafter returned an unusable resolved-version: ''`. Root cause: `release.yml` read
+`steps.resolve.outputs.resolved-version` (hyphen), but `release-drafter/release-drafter@v6`'s own
+`action.yml` defines the output key as `resolved_version` (underscore) — there never was a
+hyphenated `resolved-version` output, in any version of this step. Fixed in PR #21. Lesson for
+future sessions: when wiring a third-party GitHub Action's outputs, check its actual `action.yml`
+(or a live run's available-outputs listing) rather than assuming a naming convention — this bug
+existed silently through both the original `dry-run` version and the `disable-releaser` fix,
+because the failure mode (empty string, caught by our own semver validation) looked identical for
+a different underlying reason each time.
+
 ## Change log (session-level)
 - 2026-09-04: 0.1.0 → 0.2.0 (engine ecosystem, agent readiness, input boundary) merged as PR #1
 - 2026-09-05: sponsors (#2), README landing page (#3), subtitle-skill link (#4), `provides` (#5),
