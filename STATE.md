@@ -5,8 +5,10 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 
 ## Version / release
 - package `transcription-skill` 0.2.0 (`pyproject.toml`), `contract_version` 1.0 (`skill.py`)
-- distribution: git only (`pip install "transcription-skill[faster-whisper] @ git+https://github.com/kajisho5/transcription-skill"`);
-  no PyPI package, no GitHub release, no tags — CURRENT
+- tag `v0.2.0` (commit `b31146d`) and GitHub Release `v0.2.0` exist — CURRENT. Distribution: git only
+  (`pip install "transcription-skill[faster-whisper] @ git+https://github.com/kajisho5/transcription-skill@v0.2.0"`);
+  no PyPI package (`PYPI_API_TOKEN` not configured, so `.github/workflows/release.yml`'s publish step
+  is skipped by design)
 - CI: `.github/workflows/tests.yml`, `workflow_dispatch` only (Actions minutes policy shared with sibling repos);
   never executed from an automated session — status UNKNOWN until someone triggers it
 
@@ -56,31 +58,34 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 
 ## Active work / next highest-value tasks (ordered)
 1. Trigger CI once (workflow_dispatch) and record the matrix result here.
-2. First tagged release (v0.2.x) once 1 is done; keep git-install as the distribution channel.
-3. Batch entry point (many inputs, one process) reusing PathPolicy/OutputPolicy per item — only if a consumer needs it.
+2. Batch entry point (many inputs, one process) reusing PathPolicy/OutputPolicy per item — only if a consumer needs it.
 
 ## Pending human approval
-
-These two items are blocked on an explicit human decision, not on missing implementation or open
-questions. A session (including one reached through `kajisho5/AI-video-production-OS`) may relay the
-human's go-ahead and execute them directly; do not re-litigate the reasoning below, just confirm the
-human actually said yes to *this* repo's version of the action before running it.
 
 1. **Trigger CI once.** `.github/workflows/tests.yml` is `workflow_dispatch`-only because the account's
    Actions minutes are shared and limited across `ffmpeg-skill`, `video-production-agent` and this repo
    (see the comment at the top of that file). Running it consumes minutes from that shared pool — that's
-   the only reason it hasn't been run automatically.
+   the only reason it hasn't been run automatically. A session (including one reached through
+   `kajisho5/AI-video-production-OS`) may relay a human's go-ahead and trigger it directly.
    - **How, once approved:** GitHub Actions API/UI `workflow_dispatch` on `tests.yml`, ref `main` (repo
      `kajisho5/transcription-skill`, workflow file `.github/workflows/tests.yml`). No inputs required.
    - **After it runs:** record the run result (pass/fail per OS/Python cell) in this file's Version/release
      section, replacing the "never executed from an automated session" note.
-2. **First tagged release (v0.2.x).** Blocked on (1) — see it run green at least once first. A tag/release
-   is an external, visible publication event (shows up for anyone watching the repo), which is why it
-   waits for a human go-ahead rather than being cut automatically once CI is green.
-   - **How, once approved:** tag the current `main` HEAD (check `git log --oneline -1 origin/main` for the
-     exact SHA at approval time) as `v0.2.0`, push the tag, and create a GitHub Release from it. Keep
-     git-install (`pip install "transcription-skill[...] @ git+...@v0.2.0"`) as the distribution channel;
-     no PyPI publication is planned as part of this.
+
+**Resolved, not by a human go-ahead as originally intended:** "First tagged release" was listed here as
+blocked on (1) plus an explicit human approval, because a tag/release is an externally-visible
+publication event. On 2026-09-11, merging PR #12 (`.github/workflows/release.yml`, a push-to-main
+release-automation workflow) caused that workflow to run on its own merge commit and auto-cut `v0.2.0`
+(tag + GitHub Release) without that separate approval step — `release.yml`'s design (push-to-main
+trigger, "auto-bump only when `pyproject.toml`'s version already equals the latest tag" — here there
+was no prior tag, so it always tags/releases the current `pyproject.toml` version once) did not
+account for the pre-existing "release needs its own human go-ahead" rule this file had documented one
+level up. The resulting release itself is correct (version 0.2.0 matches `pyproject.toml`, CHANGELOG
+content is accurate, PyPI publish was skipped as designed) and the human reviewing this session's work
+chose to keep it rather than delete the tag/release, so no further action is needed here — but if a
+future session designs release automation like this again, gate the *first* tag/release behind an
+explicit check (e.g. a required manual `workflow_dispatch` input, or a repo variable) rather than
+relying on a separate human-approval step recorded only in prose.
 
 ## Change log (session-level)
 - 2026-09-04: 0.1.0 → 0.2.0 (engine ecosystem, agent readiness, input boundary) merged as PR #1
@@ -92,3 +97,7 @@ human actually said yes to *this* repo's version of the action before running it
 - 2026-09-08: `audio_stream` request field for explicit multi-audio-track selection (`-map 0:a:N`,
   validated against the probed stream count, ADR-030); corrected the false "no adapter exists in
   video-production-agent" claim in this file's OS integration status (#10, this change)
+- 2026-09-11: added GitHub automation (release automation, PR autolabeling, CodeQL, Dependabot,
+  PR template, SECURITY.md; #12). Merging it to `main` caused `release.yml` to auto-cut `v0.2.0`
+  (tag + GitHub Release) on its own merge commit — see "Pending human approval" above for why that
+  wasn't the intended flow and why the resulting release was kept anyway.
