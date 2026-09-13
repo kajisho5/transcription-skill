@@ -1082,6 +1082,8 @@ class JsonProtocolTests(unittest.TestCase):
                 (["skill", "--json"], 0), (["doctor", "--json", "--workspace", tmp], None), (["engines", "--json"], 0),
                 (["cache", "size", "--json", "--workspace", tmp], 0), (["cache", "list", "--json", "--workspace", tmp], 0),
                 (["cache", "clear", "--json", "--workspace", tmp], 0),
+                (["models", "list", "--json"], 0), (["models", "pull", "--json"], 2), (["models", "remove", "--json"], 2),
+                (["models", "list", "--json", "--engine", "nope"], 1),
                 (["engines", "--offline", "--language", "ja", "--json"], 0), (["engines", "--engine", "faster_whisper", "--json"], 0),
                 (["check", good, "--json"], 0), (["check", bad, "--json"], 1),
                 (["segments", good, "--json"], 0), (["segments", bad, "--json"], 1),
