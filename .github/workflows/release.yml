@@ -64,7 +64,7 @@ jobs:
       - name: Resolve next version from merged-PR labels (auto mode only)
         id: resolve
         if: steps.state.outputs.mode == 'auto'
-        uses: release-drafter/release-drafter@v6
+        uses: release-drafter/release-drafter@v7
         with:
           config-name: release-drafter.yml
           disable-autolabeler: true # labels were already applied by pr-labeler.yml at merge time
