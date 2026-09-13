@@ -4,9 +4,11 @@ Durable repository state for humans and future sessions. Facts only; update when
 Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move) · PLANNED · VISION · UNKNOWN.
 
 ## Version / release
-- package `transcription-skill` 0.2.0 (`pyproject.toml`), `contract_version` 1.0 (`skill.py`)
-- tag `v0.2.0` (commit `b31146d`) and GitHub Release `v0.2.0` exist — CURRENT. Distribution: git only
-  (`pip install "transcription-skill[faster-whisper] @ git+https://github.com/kajisho5/transcription-skill@v0.2.0"`);
+- package `transcription-skill` 0.3.0 (`pyproject.toml`), `contract_version` 1.0 (`skill.py`)
+- tags/GitHub Releases `v0.2.0`..`v0.3.0` exist — CURRENT, all non-draft, non-prerelease, auto-cut by
+  `.github/workflows/release.yml` on merges to `main` (`v0.2.1`/`v0.2.2` from doc-only merges, `v0.3.0`
+  from the batch-mode feature merge, PR #22). Distribution: git only
+  (`pip install "transcription-skill[faster-whisper] @ git+https://github.com/kajisho5/transcription-skill@v0.3.0"`);
   no PyPI package (`PYPI_API_TOKEN` not configured, so `.github/workflows/release.yml`'s publish step
   is skipped by design)
 - CI: `.github/workflows/tests.yml`, `workflow_dispatch` only (Actions minutes policy shared with sibling repos);
@@ -94,33 +96,20 @@ future session designs release automation like this again, gate the *first* tag/
 explicit check (e.g. a required manual `workflow_dispatch` input, or a repo variable) rather than
 relying on a separate human-approval step recorded only in prose.
 
-**Second bug found the same day, needs a human action:** the "Resolve next version from merged-PR
-labels" step in `release.yml` passed `dry-run: true` to `release-drafter/release-drafter@v6` — that
-input does not exist in this action version (confirmed from the run's own "Unexpected input(s)
-'dry-run'" warning) and was silently ignored, so the step was never actually a dry run. On the push
-that merged PR #18 (a docs-only `STATE.md` change, no version label), this ran in auto mode
-(`pyproject.toml`'s version still equaled the latest tag) and created a real, **draft**, tag-less
-GitHub Release (named `v0.2.1`, visible under this repo's Releases list) before failing at the next
-step on an empty `resolved-version`. `pyproject.toml` and `CHANGELOG.md` on `main` were **not**
-touched — the failure happened before the bump/commit/tag steps. Fixed in PR #19
-(`disable-releaser: true` replaces the nonexistent `dry-run: true`), which turned out to be its own
-bug (see "Fourth bug" below) — but that fix, and the true root-cause fix in PR #23, ended up
-resolving this stray draft automatically as a side effect: release-drafter matched and reused the
-existing `v0.2.1`-named draft on a later run rather than creating a new one, and PR #23's new
-cleanup step deleted it. Confirmed via `list_releases` after PR #23 merged: exactly two releases
-exist (`v0.2.0`, `v0.2.1`), both `draft: false` — no manual deletion was needed after all.
-
-**Third bug, found by actually letting #19's fix run:** after #19 merged, the same step ran cleanly
-(no stray release — the `disable-releaser` fix works) but `ci_decide_version.py` still failed with
-`release-drafter returned an unusable resolved-version: ''`. Root cause: `release.yml` read
-`steps.resolve.outputs.resolved-version` (hyphen), but `release-drafter/release-drafter@v6`'s own
-`action.yml` defines the output key as `resolved_version` (underscore) — there never was a
-hyphenated `resolved-version` output, in any version of this step. Fixed in PR #21. Lesson for
-future sessions: when wiring a third-party GitHub Action's outputs, check its actual `action.yml`
-(or a live run's available-outputs listing) rather than assuming a naming convention — this bug
-existed silently through both the original `dry-run` version and the `disable-releaser` fix,
-because the failure mode (empty string, caught by our own semver validation) looked identical for
-a different underlying reason each time.
+**Resolved: three more `release.yml` version-resolution bugs found by letting it actually run
+(2026-09-12).** (1) The "Resolve next version" step passed `dry-run: true` to
+`release-drafter/release-drafter@v6`, a nonexistent input silently ignored by GitHub Actions —
+the step was never really a dry run and created a stray **draft** GitHub Release (`v0.2.1`) as a
+side effect (PR #18's merge). (2) The follow-up fix (`disable-releaser: true`, PR #19) stopped the
+stray release but broke version resolution entirely, since release-drafter's own source returns
+before computing anything when `disable-releaser` is set. (3) A wrong output key
+(`resolved-version` instead of the action's real `resolved_version`, fixed in PR #21) had also been
+masking the real problem. Root-cause fix (PR #23): let release-drafter run normally (drop
+`disable-releaser`) and delete the draft release it creates as a side effect immediately after
+reading `resolved_version`/`id` from its outputs. Confirmed working on multiple live pushes since
+(PRs #20, #22): `release.yml` now always concludes `success`, and `list_releases` shows every
+release (`v0.2.0` through current) as `draft: false` with no stray drafts — no manual cleanup is
+ever needed.
 
 ## Change log (session-level)
 - 2026-09-04: 0.1.0 → 0.2.0 (engine ecosystem, agent readiness, input boundary) merged as PR #1
@@ -136,8 +125,10 @@ a different underlying reason each time.
   PR template, SECURITY.md; #12). Merging it to `main` caused `release.yml` to auto-cut `v0.2.0`
   (tag + GitHub Release) on its own merge commit — see "Pending human approval" above for why that
   wasn't the intended flow and why the resulting release was kept anyway.
-- 2026-09-12: fixed two more `release.yml` bugs found by letting it actually run (`dry-run` is not a
-  real release-drafter input, and its resolved-version output key is `resolved_version` not
-  `resolved-version`; PRs #19/#21). Added `transcription/batch` (many transcribe requests, one process,
-  per-item failure isolation; CLI `transcription batch`) as the first item of a v1 feature push;
-  confirmed `language` force-selection was already implemented end-to-end (CLI, request, engine).
+- 2026-09-12/13: fixed three `release.yml` version-resolution bugs found by letting it actually run
+  (PRs #19, #21, #23 — see "Resolved" note above for the full chain; #23 is the true root-cause fix).
+  Added `transcription/batch` (many transcribe requests, one process, per-item failure isolation; CLI
+  `transcription batch`; PR #22) as the first item of the v1 feature push; confirmed `language`
+  force-selection was already implemented end-to-end (CLI, request, engine). Documented and corrected
+  the stray-draft-release history (PR #20). `release.yml` auto-cut `v0.2.1`, `v0.2.2` and `v0.3.0`
+  along the way, all clean/non-draft.
