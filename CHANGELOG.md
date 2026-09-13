@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1 - 2026-09-13
+
+- STATE.md: update version/release history after PR #20, #22, #23 merges (#24) (0e691db)
+
 ## 0.3.0 - 2026-09-13
 
 - Add batch mode: many transcribe requests, one process (v1 roadmap item 1/N) (3c5df87)
