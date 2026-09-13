@@ -274,7 +274,7 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--audio-stream", type=int, help="0-based index of the audio stream to decode on a multi-track input (default: 0, the first)")
     t.add_argument("--initial-prompt", help="vocabulary hint passed to the ASR decoder (names, terms); not an instruction")
     t.add_argument("--asset-id", help="asset identity to stamp on the transcript (default: derived from the file fingerprint)")
-    t.add_argument("--timeout", type=float, help="budget: seconds the engine may run (default 1800)")
+    t.add_argument("--timeout", type=float, help="budget: seconds the engine may run (default 14400, same as --max-audio-seconds' default)")
     t.add_argument("--max-audio-seconds", type=float, help="budget: refuse media longer than this (default 14400)")
     t.add_argument("--no-cache", action="store_true", help="do not read or write the transcript cache")
     t.add_argument("--offline", action="store_true", help="hard constraint: no network at any step (remote engines refused, missing models are MODEL_UNAVAILABLE)")
