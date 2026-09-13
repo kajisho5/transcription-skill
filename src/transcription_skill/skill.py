@@ -26,6 +26,8 @@ CAPABILITIES = [
     "transcript_export:json",
     "transcript_export:srt",
     "transcript_export:vtt",
+    "transcript_export:tsv",
+    "transcript_export:txt",
     "deterministic_cache",
     "offline_mode",             # hard no-network constraint: local engines with a local model only
     "engine_registry",          # machine-readable engine specs (execution_mode, network, models, capabilities)
@@ -42,7 +44,7 @@ TOOLS: List[Dict[str, Any]] = [
      "side_effects": ["writes cache under workspace"]},
     {"name": "transcription/segments", "description": "Derive SpeechEvent-compatible candidates from a Transcript (one per segment, optional gap merge).",
      "input": {"transcript": "Transcript | path", "merge_gap": "seconds >= 0"}, "output": {"events": "list[SpeechEvent]"}, "deterministic": True, "side_effects": []},
-    {"name": "transcription/export", "description": "Render a Transcript as json, srt or vtt (plain timed text, no styling).",
+    {"name": "transcription/export", "description": "Render a Transcript as json, srt, vtt, tsv or txt (plain timed text, no styling).",
      "input": {"transcript": "Transcript | path", "format": "|".join(FORMATS), "output": "path", "allowed_output_roots": "list[dir] | null"},
      "output": {"output": "path", "format": "str"},
      "deterministic": True, "side_effects": ["writes output file"]},

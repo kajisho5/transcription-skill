@@ -72,6 +72,8 @@ transcription transcribe dubbed.mkv --audio-stream 1       # multi-track input: 
 
 # hand off
 transcription export lecture.transcript.json --format srt -o lecture.srt
+transcription export lecture.transcript.json --format tsv -o lecture.tsv  # start\tend\ttext per segment
+transcription export lecture.transcript.json --format txt -o lecture.txt  # plain reading text, no timestamps
 transcription segments lecture.transcript.json --merge-gap 0.5 --json   # SpeechEvent candidates
 ```
 
@@ -173,7 +175,7 @@ transcription transcribe lecture.mp4 --word-timestamps # per-word timing
 transcription transcribe lecture.mp4 --json            # one JSON document on stdout
 transcription transcribe lecture.mp4 --dry-run         # what would run; no ASR
 transcription check lecture.transcript.json            # validate against the contract
-transcription export lecture.transcript.json --format srt -o lecture.srt
+transcription export lecture.transcript.json --format srt -o lecture.srt   # or vtt, tsv, txt
 transcription segments lecture.transcript.json --merge-gap 0.5 --json   # SpeechEvent candidates
 transcription skill --json                             # the skill / tool / engine contract (source of truth)
 echo '{"tool":"transcription/transcribe","params":{"input":"lecture.mp4","language":"ja"}}' | transcription run -

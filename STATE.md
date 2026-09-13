@@ -19,9 +19,9 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 - Engine ecosystem: `EngineSpec`, `ModelStatus`, `EngineRegistry`, constraint `Selector` (no ranking), `--offline`
 - Reference Local Engine: `faster_whisper` (the only implemented engine); worker subprocess with real timeout
 - Deterministic cache keyed by content fingerprint + engine id/version/execution_mode + model/model_version + parameters
-- Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt), `check`, `batch` (many transcribe requests, one
-  process; one item's failure never aborts the rest); CLI: doctor, transcribe, segments, export, check, engines, skill,
-  batch, `run -` (one JSON request in, one JSON document out)
+- Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt/tsv/txt), `check`, `batch` (many transcribe
+  requests, one process; one item's failure never aborts the rest); CLI: doctor, transcribe, segments, export, check,
+  engines, skill, batch, `run -` (one JSON request in, one JSON document out)
 - Explicit language selection: `--language` / request `language` (ISO 639-1) forces the engine to skip auto-detection
   (`language_source: "requested"` on the transcript); default remains auto-detect from the first 30 s
 - Input boundary: opt-in `allowed_input_roots` (resolved-path containment, traversal/symlink refusal); default unchanged
@@ -32,7 +32,7 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   created_at, audio_extraction (recipe + actually-selected stream index)
 - OS contract fields: `skill_id`, `contract_version`, `provides` (`transcribe.audio`, EXPERIMENTAL), `dependencies` ([]), `not_provided`
 - Output boundary: opt-in `allowed_output_roots` / `--allowed-output` (transcribe, segments, export); inputs never overwritten
-- Tests: unit / security / paths / conformance (SKILL_SPEC §8, all eight checks) / integration (real engine) ; evals 29 cases
+- Tests: unit / security / paths / conformance (SKILL_SPEC §8, all eight checks) / integration (real engine) ; evals 30 cases
 
 ## OS integration status
 - `kajisho5/AI-video-production-OS` (branch `claude/ai-video-production-os-arch-fck6fy`, docs + `registry/`): this Skill is
@@ -72,9 +72,7 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 
 ## Active work / next highest-value tasks (ordered)
 1. Trigger CI once (workflow_dispatch) and record the matrix result here.
-2. Additional export format(s) beyond json/srt/vtt if a consumer (e.g. subtitle-skill) needs one (ADR-029 still applies:
-   no styling/positioning logic here, plain timed-text renderings only).
-3. If a real multi-hour source file becomes available, run it end-to-end once to confirm memory/wall-clock
+2. If a real multi-hour source file becomes available, run it end-to-end once to confirm memory/wall-clock
    behavior at the new default budget and record the result here.
 
 ## Pending human approval
@@ -145,3 +143,7 @@ ever needed.
   allowed could be killed by the timeout first. `DEFAULT_TIMEOUT` now equals `DEFAULT_MAX_AUDIO_SECONDS`
   (`request.py`). A genuine end-to-end multi-hour run was not performed (impractical in this session) —
   see "Known limitations" and "Active work" above.
+- 2026-09-13: added `tsv` and `txt` export formats (last v1 roadmap item): `tsv` is whisper's own
+  reference `start\tend\ttext` (ms) convention; `txt` is plain reading text, one line per segment, no
+  timestamps. Both additive (`export.FORMATS`, `CAPABILITIES`, `skill.py` tool description); no styling
+  or positioning logic, per the same constraint json/srt/vtt already follow.

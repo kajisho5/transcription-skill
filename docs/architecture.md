@@ -40,7 +40,7 @@ Downstream, independent of the run:
 
 ```
 Transcript ──► speech_events.py ──► SpeechEvent candidates   (transcription/segments)
-Transcript ──► export.py        ──► json | srt | vtt         (transcription/export)
+Transcript ──► export.py        ──► json | srt | vtt | tsv | txt (transcription/export)
 Transcript ──► validate.py      ──► ValidationReport         (transcription/check)
 ```
 
@@ -63,7 +63,7 @@ Transcript ──► validate.py      ──► ValidationReport         (transc
 | `normalize.py` | whitespace / control-character normalization only | no |
 | `models.py` | dataclasses: Transcript, Segment, Word, Source, Provenance, SpeechEvent | no |
 | `speech_events.py` | segments → SpeechEvent candidates (optional gap merge) | no |
-| `export.py` | json / srt / vtt renderings | no |
+| `export.py` | json / srt / vtt / tsv / txt renderings | no |
 | `doctor.py` | environment report | via `media.tool_version` |
 | `skill.py` | Skill contract, Tool contract, single `run_tool` dispatch | no |
 | `cli.py` | argparse front end over `run_tool`; `run -` = one JSON request on stdin → one JSON response (`skill.run_request`) | no |
