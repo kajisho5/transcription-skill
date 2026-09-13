@@ -1,4 +1,4 @@
-"""CLI: `transcription doctor | transcribe | segments | export | check | skill`.
+"""CLI: `transcription doctor | transcribe | segments | export | check | batch | cache | engines | skill | run`.
 
 stdout carries either human-readable text or, with --json, exactly one JSON document. Errors are
 structured: with --json they are the JSON document on stdout; otherwise one `error:` line on stderr.
@@ -18,6 +18,7 @@ from .engines import EngineRequirements, default_registry, select_engines
 from .errors import TranscriptionError
 from .export import FORMATS
 from .paths import OutputPolicy
+from .request import default_workspace
 from .skill import run_request, run_tool, skill_contract
 
 
@@ -221,6 +222,37 @@ def cmd_batch(args: argparse.Namespace) -> int:
     return 0 if ok_count == len(res["results"]) else 1
 
 
+def cmd_cache(args: argparse.Namespace) -> int:
+    """`transcription cache size|list|clear`: inspect or prune the transcript cache directly, without
+    poking at the workspace directory by hand (useful on a field machine where the cache accumulates
+    across many jobs and disk space is limited)."""
+    from .cache import TranscriptCache
+    cache = TranscriptCache(args.workspace or default_workspace())
+    if args.cache_action == "size":
+        size = cache.size_bytes()
+        count = cache.count()
+        if args.json:
+            _print_json({"entries": count, "size_bytes": size})
+        else:
+            print(f"{count} entries, {size} bytes ({size / (1024 * 1024):.1f} MiB)")
+        return 0
+    if args.cache_action == "list":
+        entries = cache.list_entries()
+        if args.json:
+            _print_json({"entries": entries})
+        else:
+            for e in entries:
+                print(f"  {e['key']}  {e['size_bytes']:>10} bytes  created_at {e['created_at'] or 'unknown'}")
+            print(f"{len(entries)} entries")
+        return 0
+    removed = cache.clear()
+    if args.json:
+        _print_json({"removed": removed})
+    else:
+        print(f"removed {removed} cache entries")
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """`transcription run -` : one JSON request on stdin -> exactly one JSON document on stdout.
     This is the process-boundary transport an external caller (an agent adapter) uses; invalid or
@@ -331,6 +363,12 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--allowed-output", action="append", metavar="DIR", help="only write transcript JSON files inside DIR (repeatable)")
     bt.add_argument("--json", action="store_true")
     bt.set_defaults(func=cmd_batch)
+
+    ch = sub.add_parser("cache", help="inspect or prune the transcript cache")
+    ch.add_argument("cache_action", choices=("size", "list", "clear"))
+    ch.add_argument("--workspace", help="cache/tmp directory (default $TRANSCRIPTION_WORKSPACE or ~/.cache/transcription-skill)")
+    ch.add_argument("--json", action="store_true")
+    ch.set_defaults(func=cmd_cache)
 
     r = sub.add_parser("run", help="read one JSON tool request ({\"tool\": ..., \"params\": {...}}) from stdin, print one JSON response")
     r.add_argument("request", help="'-' (stdin)")

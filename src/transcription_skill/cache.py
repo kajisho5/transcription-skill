@@ -15,7 +15,7 @@ import hashlib
 import json
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from .errors import TranscriptionError
 from .validate import validate_transcript
@@ -78,3 +78,47 @@ class TranscriptCache:
         if not os.path.isdir(self.root):
             return 0
         return sum(1 for n in os.listdir(self.root) if n.endswith(".json") and KEY_RE.match(n[:-5]))
+
+    def _entry_files(self) -> List[str]:
+        if not os.path.isdir(self.root):
+            return []
+        return [n for n in os.listdir(self.root) if n.endswith(".json") and KEY_RE.match(n[:-5])]
+
+    def size_bytes(self) -> int:
+        """Total size of every valid cache entry file, in bytes."""
+        total = 0
+        for n in self._entry_files():
+            try:
+                total += os.path.getsize(os.path.join(self.root, n))
+            except OSError:
+                pass
+        return total
+
+    def list_entries(self) -> List[Dict[str, Any]]:
+        """One row per cache entry: key, size in bytes, and created_at read from the entry's own
+        provenance when present (an unreadable/corrupt entry still gets a row, with created_at None)."""
+        entries = []
+        for n in sorted(self._entry_files()):
+            key = n[:-5]
+            p = os.path.join(self.root, n)
+            created_at = None
+            try:
+                size = os.path.getsize(p)
+                with open(p, encoding="utf-8") as fh:
+                    doc = json.load(fh)
+                created_at = (doc.get("provenance") or {}).get("created_at")
+            except (OSError, ValueError):
+                size = 0
+            entries.append({"key": key, "size_bytes": size, "created_at": created_at})
+        return entries
+
+    def clear(self) -> int:
+        """Remove every cache entry. Returns the number removed."""
+        removed = 0
+        for n in self._entry_files():
+            try:
+                os.remove(os.path.join(self.root, n))
+                removed += 1
+            except OSError:
+                pass
+        return removed
