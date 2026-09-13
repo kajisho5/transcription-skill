@@ -71,10 +71,37 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   execute (multi-hour real-time-scale run); true memory-under-load behavior on a multi-hour file is
   still UNKNOWN.
 
-## Active work / next highest-value tasks (ordered)
-1. Trigger CI once (workflow_dispatch) and record the matrix result here.
-2. If a real multi-hour source file becomes available, run it end-to-end once to confirm memory/wall-clock
-   behavior at the new default budget and record the result here.
+## Active work / next highest-value tasks (ordered) — v1.1 roadmap
+v1 (batch mode, language force-selection, long-recording timeout fix, tsv/txt export) shipped
+2026-09-13 (PRs #22, #25, #26). Next, in priority order:
+1. Trigger CI once (workflow_dispatch) and record the matrix result here (carried over, still blocked
+   on human approval — see "Pending human approval" below).
+2. **VAD (voice-activity-detection) pass-through.** `faster_whisper.py:138` hardcodes `vad_filter=False`
+   on every call to `WhisperModel.transcribe`, even though the installed `faster-whisper` package
+   already implements VAD filtering (skip non-speech before running the model) — this repo just never
+   exposes it. For long recordings with real silence (a conference room between sessions, a lecture
+   Q&A pause) this is a genuine accuracy/speed win: less time spent transcribing silence into spurious
+   segments. Plan: add `vad_filter: bool` (default `False`, unchanged behavior) and optionally
+   `vad_min_silence_ms` to the request/`Budget`-adjacent parameters, thread through
+   `EngineRequest`/`faster_whisper.py`, record the setting in `provenance.parameters`. No new engine,
+   no decision-making — it's parameter plumbing to a capability the dependency already has.
+3. **Cache management CLI.** `TranscriptCache` (`cache.py`) is only reachable through the Python API
+   today; there is no `transcription cache size|list|clear` command. On a field laptop where the cache
+   accumulates across many jobs (SEVENTHWELL's own use case: many events, one machine, limited disk),
+   the only way to inspect or prune it is to go poke at the workspace directory by hand. Add a `cache`
+   CLI subcommand: `size` (bytes used), `list` (cache keys + created_at), `clear` (empty it, respecting
+   `--allowed-output`-style confinement to the workspace).
+4. **Model management CLI.** Right now the Hugging Face model cache faster-whisper uses is only
+   populated by running a transcription once online; there's no `transcription models pull <name>` to
+   pre-fetch a model deliberately before going `--offline` at a venue with no network. Add `models
+   pull|list|remove`, reusing `EngineRegistry`'s existing `ModelStatus`/availability checks so it never
+   needs new engine code.
+5. If a real multi-hour source file becomes available, run it end-to-end once to confirm memory/wall-clock
+   behavior at the new default timeout default (PR #25) and record the result here.
+6. **PyPI distribution** (lower priority, needs a human decision, not just code): currently git-only
+   because `PYPI_API_TOKEN` isn't configured (`.github/workflows/release.yml`'s publish step is skipped
+   by design). Adding it is an operational/account decision (a PyPI project + token), not something a
+   session should do unprompted — listed here so it isn't forgotten, not as work to start on its own.
 
 ## Pending human approval
 
@@ -148,3 +175,8 @@ ever needed.
   reference `start\tend\ttext` (ms) convention; `txt` is plain reading text, one line per segment, no
   timestamps. Both additive (`export.FORMATS`, `CAPABILITIES`, `skill.py` tool description); no styling
   or positioning logic, per the same constraint json/srt/vtt already follow.
+- 2026-09-13: v1 done; drafted the v1.1 roadmap (see "Active work" above): VAD pass-through (a
+  faster-whisper capability this repo has never exposed, `vad_filter=False` hardcoded at
+  `faster_whisper.py:138`), a `cache` CLI subcommand, a `models` CLI subcommand, carrying over the
+  still-pending CI trigger and the still-outstanding real multi-hour validation, and noting PyPI
+  distribution as a human decision rather than open work.
