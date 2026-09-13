@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.0 - 2026-09-13
+
+- Add model management CLI (v1.1 roadmap item 3, last item) (04cba0c)
+
 ## 0.6.0 - 2026-09-13
 
 - Add cache management CLI (v1.1 roadmap item 2) (55acced)
