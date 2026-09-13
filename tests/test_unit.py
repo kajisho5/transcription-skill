@@ -61,7 +61,7 @@ class RequestTests(unittest.TestCase):
     def test_minimal_and_defaults(self):
         r = parse_request({"input": "lecture.mp4", "language": "ja", "word_timestamps": True})
         self.assertEqual((r.language, r.engine, r.model, r.word_timestamps, r.temperature, r.beam_size), ("ja", "faster_whisper", "base", True, 0.0, 5))
-        self.assertEqual(r.budget.timeout, 1800.0)
+        self.assertEqual(r.budget.timeout, 14400.0)
         self.assertIsNone(parse_request({"input": "a.wav", "language": "auto"}).language)
 
     def test_rejects_commands_and_credentials(self):

@@ -59,15 +59,23 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 - A segment/word end that overruns the media end by ≤ 2 s is clamped to the duration with a warning (ADR-028); larger
   overruns are `INVALID_RESULT`. Observed 0.69 s overrun on a 20.7 s file with `base` and no word timestamps.
 - Windows / macOS CI matrix exists but has not been run; junctions and symlink-less filesystems unverified.
-- Long-recording stability (multi-hour conference/lecture captures) has not been specifically load-tested beyond the
-  existing `budget.max_audio_seconds` cap and engine timeout; behavior under real multi-hour files is UNKNOWN.
+- Long-recording stability: a real concrete defect was found and fixed (2026-09-13) — `budget.timeout`
+  defaulted to 1800 s (30 min) while `budget.max_audio_seconds` defaults to 14400 s (4 h), so a
+  legitimate multi-hour recording that `max_audio_seconds` itself allowed could be killed by the
+  timeout before the engine finished, especially with a slower CPU or a larger model than `base`.
+  Fixed by making `DEFAULT_TIMEOUT == DEFAULT_MAX_AUDIO_SECONDS` (`request.py`), so the default
+  budget no longer times out a full-duration input at roughly real-time processing speed. **Not**
+  done: an actual end-to-end run against a genuine multi-hour audio file — generating or sourcing
+  one and running `faster_whisper` on it end-to-end was outside what this session could practically
+  execute (multi-hour real-time-scale run); true memory-under-load behavior on a multi-hour file is
+  still UNKNOWN.
 
 ## Active work / next highest-value tasks (ordered)
 1. Trigger CI once (workflow_dispatch) and record the matrix result here.
-2. Long-recording stability pass: exercise a genuinely multi-hour input, confirm memory/timeout behavior, adjust
-   defaults if needed.
-3. Additional export format(s) beyond json/srt/vtt if a consumer (e.g. subtitle-skill) needs one (ADR-029 still applies:
+2. Additional export format(s) beyond json/srt/vtt if a consumer (e.g. subtitle-skill) needs one (ADR-029 still applies:
    no styling/positioning logic here, plain timed-text renderings only).
+3. If a real multi-hour source file becomes available, run it end-to-end once to confirm memory/wall-clock
+   behavior at the new default budget and record the result here.
 
 ## Pending human approval
 
@@ -132,3 +140,8 @@ ever needed.
   force-selection was already implemented end-to-end (CLI, request, engine). Documented and corrected
   the stray-draft-release history (PR #20). `release.yml` auto-cut `v0.2.1`, `v0.2.2` and `v0.3.0`
   along the way, all clean/non-draft.
+- 2026-09-13: fixed a real long-recording-stability defect: `budget.timeout` defaulted to 1800 s while
+  `budget.max_audio_seconds` defaults to 14400 s, so a legitimate multi-hour input the budget itself
+  allowed could be killed by the timeout first. `DEFAULT_TIMEOUT` now equals `DEFAULT_MAX_AUDIO_SECONDS`
+  (`request.py`). A genuine end-to-end multi-hour run was not performed (impractical in this session) —
+  see "Known limitations" and "Active work" above.

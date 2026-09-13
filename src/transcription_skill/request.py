@@ -23,8 +23,12 @@ ALLOWED_KEYS = {"input", "language", "engine", "model", "word_timestamps", "temp
 FORBIDDEN_KEYS = {"command", "argv", "cmd", "shell", "exec", "args", "script", "binary", "api_key", "apikey", "token",
                   "secret", "password", "credentials", "env"}
 BUDGET_KEYS = {"timeout", "max_audio_seconds"}
-DEFAULT_TIMEOUT = 1800.0            # seconds of wall clock for the engine step
 DEFAULT_MAX_AUDIO_SECONDS = 4 * 3600.0
+# Must be >= DEFAULT_MAX_AUDIO_SECONDS: a request at the default duration cap that only just keeps up
+# with real time (a slower CPU, a larger model) must not be timed out before it can finish. A 30 min
+# default (the previous value) timed out legitimate multi-hour recordings that budget.max_audio_seconds
+# itself allowed.
+DEFAULT_TIMEOUT = DEFAULT_MAX_AUDIO_SECONDS
 
 
 @dataclass
