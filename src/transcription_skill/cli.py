@@ -1,4 +1,4 @@
-"""CLI: `transcription doctor | transcribe | segments | export | check | batch | cache | engines | skill | run`.
+"""CLI: `transcription doctor | transcribe | segments | export | check | batch | cache | models | engines | skill | run`.
 
 stdout carries either human-readable text or, with --json, exactly one JSON document. Errors are
 structured: with --json they are the JSON document on stdout; otherwise one `error:` line on stderr.
@@ -14,11 +14,11 @@ from typing import Any, Dict, List, Optional
 
 from . import __version__
 from .doctor import format_doctor, run_doctor
-from .engines import EngineRequirements, default_registry, select_engines
+from .engines import EngineRequirements, default_registry, get_engine, select_engines
 from .errors import TranscriptionError
 from .export import FORMATS
 from .paths import OutputPolicy
-from .request import default_workspace
+from .request import DEFAULT_ENGINE, default_workspace
 from .skill import run_request, run_tool, skill_contract
 
 
@@ -253,6 +253,44 @@ def cmd_cache(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_models(args: argparse.Namespace) -> int:
+    """`transcription models list|pull|remove [MODEL]`: manage the engine's local model cache
+    directly, so a model can be pre-fetched deliberately before going --offline at a venue with no
+    network, instead of only ever being populated as a side effect of running a transcription."""
+    engine = get_engine(args.engine)
+    if not engine.available():
+        raise TranscriptionError("ENGINE_UNAVAILABLE", engine.unavailable_reason() or f"engine {args.engine} unavailable")
+    if args.models_action == "list":
+        rows = [engine.model_status(m).to_dict() for m in engine.supported_models]
+        if args.json:
+            _print_json({"models": rows})
+        else:
+            for r in rows:
+                print(f"  {r['model']:<18} {r['availability']:<24} {r['detail']}")
+        return 0
+    if not args.model:
+        raise TranscriptionError("INVALID_INPUT", "a model name is required for 'pull' and 'remove'")
+    if args.models_action == "pull":
+        download = getattr(engine, "download_model", None)
+        if download is None:
+            raise TranscriptionError("ENGINE_UNAVAILABLE", f"engine {args.engine} does not support pre-fetching models")
+        status = download(args.model)
+        if args.json:
+            _print_json(status.to_dict())
+        else:
+            print(f"  {status.model:<18} {status.availability:<24} {status.detail}")
+        return 0
+    remove = getattr(engine, "remove_model", None)
+    if remove is None:
+        raise TranscriptionError("ENGINE_UNAVAILABLE", f"engine {args.engine} does not support removing models")
+    removed = remove(args.model)
+    if args.json:
+        _print_json({"model": args.model, "removed": removed})
+    else:
+        print(f"removed {args.model}" if removed else f"{args.model} was not cached")
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """`transcription run -` : one JSON request on stdin -> exactly one JSON document on stdout.
     This is the process-boundary transport an external caller (an agent adapter) uses; invalid or
@@ -369,6 +407,13 @@ def build_parser() -> argparse.ArgumentParser:
     ch.add_argument("--workspace", help="cache/tmp directory (default $TRANSCRIPTION_WORKSPACE or ~/.cache/transcription-skill)")
     ch.add_argument("--json", action="store_true")
     ch.set_defaults(func=cmd_cache)
+
+    md = sub.add_parser("models", help="list, pre-fetch or remove an engine's local models")
+    md.add_argument("models_action", choices=("list", "pull", "remove"))
+    md.add_argument("model", nargs="?", help="model name (required for pull/remove)")
+    md.add_argument("--engine", default=DEFAULT_ENGINE)
+    md.add_argument("--json", action="store_true")
+    md.set_defaults(func=cmd_models)
 
     r = sub.add_parser("run", help="read one JSON tool request ({\"tool\": ..., \"params\": {...}}) from stdin, print one JSON response")
     r.add_argument("request", help="'-' (stdin)")

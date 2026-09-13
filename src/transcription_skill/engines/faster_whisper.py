@@ -10,6 +10,7 @@ from __future__ import annotations
 import glob
 import math
 import os
+import shutil
 from typing import List, Optional
 
 from ..errors import TranscriptionError
@@ -113,6 +114,36 @@ class FasterWhisperEngine(TranscriptionEngine):
                                "not on this machine; fetched from the Hugging Face Hub on first use (network)", download_required=True)
         why = "offline" if offline else "downloads are disabled for this engine"
         return ModelStatus(model, "MISSING", MODEL_MISSING, None, None, f"not on this machine and cannot be fetched ({why})")
+
+    # ---- model management (deliberate, CLI-driven; never called from transcribe())
+    def download_model(self, model: str) -> ModelStatus:
+        """Fetch a model into the local Hugging Face cache without loading it or running any
+        recognition. For pre-fetching before going --offline at a venue with no network."""
+        if not self._mod:
+            raise TranscriptionError("ENGINE_UNAVAILABLE", self.unavailable_reason() or "engine unavailable")
+        if model not in MODEL_NAMES:
+            raise TranscriptionError("MODEL_UNAVAILABLE", f"unknown model {model!r}", {"known": list(MODEL_NAMES)})
+        try:
+            from faster_whisper.utils import download_model as _download  # type: ignore
+            _download(model, local_files_only=False)
+        except Exception as exc:
+            raise TranscriptionError("MODEL_UNAVAILABLE", f"failed to download model {model!r}: {type(exc).__name__}: {exc}")
+        return self.model_status(model)
+
+    def remove_model(self, model: str) -> bool:
+        """Delete a model's cached snapshot from the local Hugging Face cache. Returns whether
+        anything was actually removed (False when it was already absent)."""
+        if model not in MODEL_NAMES:
+            raise TranscriptionError("MODEL_UNAVAILABLE", f"unknown model {model!r}", {"known": list(MODEL_NAMES)})
+        repo = self._repo_id(model)
+        if not repo:
+            return False
+        hub = os.environ.get("HF_HUB_CACHE") or os.path.join(os.environ.get("HF_HOME", os.path.join(os.path.expanduser("~"), ".cache", "huggingface")), "hub")
+        model_dir = os.path.join(hub, "models--" + repo.replace("/", "--"))
+        if not os.path.isdir(model_dir):
+            return False
+        shutil.rmtree(model_dir)
+        return True
 
     # ---- recognition
     def transcribe(self, request: EngineRequest) -> EngineResult:

@@ -79,6 +79,9 @@ transcription segments lecture.transcript.json --merge-gap 0.5 --json   # Speech
 transcription cache size                                  # entries + bytes used in the transcript cache
 transcription cache list                                  # cache key, size, created_at per entry
 transcription cache clear                                 # remove every cached transcript
+transcription models pull base                             # pre-fetch a model before going --offline
+transcription models list                                  # every model's availability
+transcription models remove base                            # free disk by dropping a cached model
 ```
 
 Recognition never uses the network. The `base` model (~145 MB) is fetched into the Hugging Face cache once, on
@@ -182,6 +185,7 @@ transcription check lecture.transcript.json            # validate against the co
 transcription export lecture.transcript.json --format srt -o lecture.srt   # or vtt, tsv, txt
 transcription segments lecture.transcript.json --merge-gap 0.5 --json   # SpeechEvent candidates
 transcription cache size|list|clear                    # inspect or prune the transcript cache
+transcription models list|pull|remove [MODEL]          # inspect, pre-fetch, or drop a model in the engine's local cache
 transcription skill --json                             # the skill / tool / engine contract (source of truth)
 echo '{"tool":"transcription/transcribe","params":{"input":"lecture.mp4","language":"ja"}}' | transcription run -
                                                        # process-boundary transport: one JSON request in, one JSON response out

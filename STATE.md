@@ -22,7 +22,8 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 - Deterministic cache keyed by content fingerprint + engine id/version/execution_mode + model/model_version + parameters
 - Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt/tsv/txt), `check`, `batch` (many transcribe
   requests, one process; one item's failure never aborts the rest); CLI: doctor, transcribe, segments, export, check,
-  engines, batch, cache (size/list/clear), skill, `run -` (one JSON request in, one JSON document out)
+  engines, batch, cache (size/list/clear), models (list/pull/remove), skill, `run -` (one JSON request
+  in, one JSON document out)
 - `vad_filter` (opt-in, default off): request/tool/`--vad-filter` field passed straight through to
   faster-whisper's own voice-activity-detection filter (`WhisperModel.transcribe(vad_filter=...)`);
   part of `parameters()`/the cache key/provenance
@@ -89,11 +90,12 @@ v1 (batch mode, language force-selection, long-recording timeout fix, tsv/txt ex
    `cmd_cache`), backed by new `TranscriptCache.size_bytes()`/`list_entries()`/`clear()` methods
    (`cache.py`) so there's no need to poke at the workspace directory by hand on a field laptop where
    the cache accumulates across many jobs.
-4. **Model management CLI.** Right now the Hugging Face model cache faster-whisper uses is only
-   populated by running a transcription once online; there's no `transcription models pull <name>` to
-   pre-fetch a model deliberately before going `--offline` at a venue with no network. Add `models
-   pull|list|remove`, reusing `EngineRegistry`'s existing `ModelStatus`/availability checks so it never
-   needs new engine code.
+4. ~~**Model management CLI.**~~ Done 2026-09-13: `transcription models list|pull|remove [MODEL]`
+   (`cli.py` `cmd_models`), backed by new `FasterWhisperEngine.download_model()`/`remove_model()`
+   (`faster_whisper.py`, using `faster_whisper.utils.download_model` directly rather than loading a
+   `WhisperModel` just to trigger a fetch). Verified end-to-end for real: removed and re-pulled the
+   `base` model live via the CLI, and via a real-cache round-trip test
+   (`ModelManagementTests.test_remove_then_pull_round_trip`).
 5. If a real multi-hour source file becomes available, run it end-to-end once to confirm memory/wall-clock
    behavior at the new default timeout default (PR #25) and record the result here.
 6. **PyPI distribution** (lower priority, needs a human decision, not just code): currently git-only
@@ -184,3 +186,6 @@ ever needed.
   of the cache key and provenance. Verified end-to-end against the real engine, not just unit-tested.
 - 2026-09-13: shipped v1.1 roadmap item 2, cache management CLI: `transcription cache size|list|clear`,
   backed by new `TranscriptCache.size_bytes()`/`list_entries()`/`clear()` methods.
+- 2026-09-13: shipped v1.1 roadmap item 3, model management CLI: `transcription models list|pull|remove`,
+  backed by new `FasterWhisperEngine.download_model()`/`remove_model()`. Verified for real: removed and
+  re-fetched the `base` model live via the CLI and via an automated real-cache round-trip test.

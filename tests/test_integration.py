@@ -300,5 +300,33 @@ class RealMediaTests(unittest.TestCase):
         self.assertIn("ready to transcribe", p.stdout)
 
 
+@unittest.skipUnless(ENGINE_OK, "needs faster-whisper (pip install faster-whisper)")
+class ModelManagementTests(unittest.TestCase):
+    """download_model/remove_model against the real Hugging Face cache. Removes and re-fetches MODEL,
+    so it always restores it afterward -- other tests in this file depend on it being present."""
+
+    def setUp(self):
+        self.engine = get_engine("faster_whisper")
+
+    def tearDown(self):
+        self.engine.download_model(MODEL)   # restore for every other test in this file, whatever happened
+
+    def test_remove_then_pull_round_trip(self):
+        removed = self.engine.remove_model(MODEL)
+        self.assertTrue(removed)
+        self.assertEqual(self.engine.model_status(MODEL).availability, "MODEL_DOWNLOAD_REQUIRED")
+        self.assertFalse(self.engine.remove_model(MODEL))   # already gone: no-op, not an error
+        status = self.engine.download_model(MODEL)
+        self.assertEqual(status.availability, "MODEL_AVAILABLE")
+
+    def test_download_and_remove_reject_unknown_model_names(self):
+        with self.assertRaises(TranscriptionError) as cm:
+            self.engine.download_model("not-a-real-model")
+        self.assertEqual(cm.exception.code, "MODEL_UNAVAILABLE")
+        with self.assertRaises(TranscriptionError) as cm:
+            self.engine.remove_model("not-a-real-model")
+        self.assertEqual(cm.exception.code, "MODEL_UNAVAILABLE")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
