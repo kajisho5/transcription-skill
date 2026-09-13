@@ -76,15 +76,12 @@ v1 (batch mode, language force-selection, long-recording timeout fix, tsv/txt ex
 2026-09-13 (PRs #22, #25, #26). Next, in priority order:
 1. Trigger CI once (workflow_dispatch) and record the matrix result here (carried over, still blocked
    on human approval — see "Pending human approval" below).
-2. **VAD (voice-activity-detection) pass-through.** `faster_whisper.py:138` hardcodes `vad_filter=False`
-   on every call to `WhisperModel.transcribe`, even though the installed `faster-whisper` package
-   already implements VAD filtering (skip non-speech before running the model) — this repo just never
-   exposes it. For long recordings with real silence (a conference room between sessions, a lecture
-   Q&A pause) this is a genuine accuracy/speed win: less time spent transcribing silence into spurious
-   segments. Plan: add `vad_filter: bool` (default `False`, unchanged behavior) and optionally
-   `vad_min_silence_ms` to the request/`Budget`-adjacent parameters, thread through
-   `EngineRequest`/`faster_whisper.py`, record the setting in `provenance.parameters`. No new engine,
-   no decision-making — it's parameter plumbing to a capability the dependency already has.
+2. ~~**VAD (voice-activity-detection) pass-through.**~~ Done 2026-09-13: `vad_filter: bool` (default
+   `False`, unchanged behavior) on `TranscribeRequest`/the `transcription/transcribe` tool/CLI
+   (`--vad-filter`), threaded through `EngineRequest` into `faster_whisper.py`'s
+   `WhisperModel.transcribe(..., vad_filter=request.vad_filter)` (previously hardcoded `False`).
+   Included in `parameters()`/the cache key/provenance, so on/off runs never share a cache entry.
+   Verified end-to-end against the real engine (`test_vad_filter_runs_end_to_end_and_is_recorded_in_provenance`).
 3. **Cache management CLI.** `TranscriptCache` (`cache.py`) is only reachable through the Python API
    today; there is no `transcription cache size|list|clear` command. On a field laptop where the cache
    accumulates across many jobs (SEVENTHWELL's own use case: many events, one machine, limited disk),
@@ -180,3 +177,7 @@ ever needed.
   `faster_whisper.py:138`), a `cache` CLI subcommand, a `models` CLI subcommand, carrying over the
   still-pending CI trigger and the still-outstanding real multi-hour validation, and noting PyPI
   distribution as a human decision rather than open work.
+- 2026-09-13: shipped v1.1 roadmap item 1, VAD pass-through: `vad_filter: bool` (default `False`) on
+  the request/tool/CLI (`--vad-filter`), threaded through `EngineRequest` into `faster_whisper.py`
+  (previously hardcoded `vad_filter=False` unconditionally), included in `parameters()` so it's part
+  of the cache key and provenance. Verified end-to-end against the real engine, not just unit-tested.

@@ -135,7 +135,7 @@ class FasterWhisperEngine(TranscriptionEngine):
             segments, info = model.transcribe(
                 request.audio_path, language=request.language, task="transcribe", beam_size=request.beam_size,
                 temperature=request.temperature, initial_prompt=request.initial_prompt, word_timestamps=request.word_timestamps,
-                condition_on_previous_text=True, vad_filter=False)
+                condition_on_previous_text=True, vad_filter=request.vad_filter)
             out: List[EngineSegment] = []
             for s in segments:
                 words = None

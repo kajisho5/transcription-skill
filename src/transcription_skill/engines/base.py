@@ -85,6 +85,7 @@ class EngineRequest:
     initial_prompt: Optional[str]
     beam_size: int
     offline: bool = False                # hard constraint: the engine must not touch the network (no model download)
+    vad_filter: bool = False             # skip non-speech before decoding (engine capability pass-through; unchanged default)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

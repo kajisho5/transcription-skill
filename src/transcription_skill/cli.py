@@ -34,7 +34,7 @@ def _fmt_time(t: float) -> str:
 def _transcribe_params(args: argparse.Namespace) -> Dict[str, Any]:
     p: Dict[str, Any] = {"input": args.input, "engine": args.engine, "model": args.model, "word_timestamps": bool(args.word_timestamps),
                          "temperature": args.temperature, "beam_size": args.beam_size, "cache": not args.no_cache, "dry_run": bool(args.dry_run),
-                         "offline": bool(args.offline)}
+                         "offline": bool(args.offline), "vad_filter": bool(args.vad_filter)}
     if args.language:
         p["language"] = args.language
     if args.audio_stream is not None:
@@ -278,6 +278,7 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--max-audio-seconds", type=float, help="budget: refuse media longer than this (default 14400)")
     t.add_argument("--no-cache", action="store_true", help="do not read or write the transcript cache")
     t.add_argument("--offline", action="store_true", help="hard constraint: no network at any step (remote engines refused, missing models are MODEL_UNAVAILABLE)")
+    t.add_argument("--vad-filter", action="store_true", help="skip non-speech before decoding (faster-whisper's own voice-activity-detection filter); off by default")
     t.add_argument("--workspace", help="cache/tmp directory (default $TRANSCRIPTION_WORKSPACE or ~/.cache/transcription-skill)")
     t.add_argument("--allowed-input", action="append", metavar="DIR", help="only accept inputs that resolve inside DIR (repeatable); default: any readable file")
     t.add_argument("--allowed-output", action="append", metavar="DIR", help="only write the transcript JSON inside DIR (repeatable); default: anywhere writable")

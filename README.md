@@ -69,6 +69,7 @@ transcription transcribe lecture.mp4 --language ja         # Japanese, no detect
 transcription transcribe lecture.mp4 --word-timestamps     # per-word timing
 transcription transcribe lecture.mp4 --offline             # hard no-network constraint
 transcription transcribe dubbed.mkv --audio-stream 1       # multi-track input: decode the 2nd audio stream, not ffmpeg's default pick
+transcription transcribe meeting.wav --vad-filter           # skip non-speech before decoding (long recordings with real silence)
 
 # hand off
 transcription export lecture.transcript.json --format srt -o lecture.srt

@@ -97,6 +97,14 @@ class RealMediaTests(unittest.TestCase):
         self.assertIsNotNone(doc["provenance"]["model_version"])
         self.assertIsNone(doc["segments"][0]["speaker_id"])
 
+    def test_vad_filter_runs_end_to_end_and_is_recorded_in_provenance(self):
+        ref = REF["ja_short.wav"]
+        doc = self.svc.transcribe(self.req("ja_short.wav", language="ja", vad_filter=True))["transcript"]
+        self.assertTrue(validate_transcript(doc).ok)
+        self.assertTrue(doc["provenance"]["parameters"]["vad_filter"])
+        text = "".join(s["text"] for s in doc["segments"])
+        self.assertLessEqual(cer(ref["reference_text"], text), 0.25, text)
+
     def test_english_speech_language_detected(self):
         ref = REF["en_short.wav"]
         doc = self.svc.transcribe(self.req("en_short.wav"))["transcript"]

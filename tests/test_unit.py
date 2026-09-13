@@ -64,6 +64,18 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(r.budget.timeout, 14400.0)
         self.assertIsNone(parse_request({"input": "a.wav", "language": "auto"}).language)
 
+    def test_vad_filter_defaults_off_and_is_settable(self):
+        r = parse_request({"input": "a.wav"})
+        self.assertFalse(r.vad_filter)
+        self.assertTrue(parse_request({"input": "a.wav", "vad_filter": True}).vad_filter)
+        with self.assertRaises(TranscriptionError):
+            parse_request({"input": "a.wav", "vad_filter": "yes"})
+
+    def test_vad_filter_changes_the_cache_key(self):
+        off = parse_request({"input": "a.wav"}).parameters_hash()
+        on = parse_request({"input": "a.wav", "vad_filter": True}).parameters_hash()
+        self.assertNotEqual(off, on)
+
     def test_rejects_commands_and_credentials(self):
         for bad in ({"input": "a.wav", "command": "whisper a.wav"}, {"input": "a.wav", "argv": ["whisper"]}, {"input": "a.wav", "shell": "x"},
                     {"input": "a.wav", "api_key": "sk-x"}, {"input": "a.wav", "env": {"A": "b"}}, {"input": "a.wav", "unknown": 1},

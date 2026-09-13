@@ -19,7 +19,7 @@ DEFAULT_MODEL = "base"
 MAX_INITIAL_PROMPT_CHARS = 500
 
 ALLOWED_KEYS = {"input", "language", "engine", "model", "word_timestamps", "temperature", "initial_prompt", "beam_size", "audio_stream",
-                "asset_id", "budget", "cache", "workspace", "offline", "allowed_input_roots"}
+                "asset_id", "budget", "cache", "workspace", "offline", "allowed_input_roots", "vad_filter"}
 FORBIDDEN_KEYS = {"command", "argv", "cmd", "shell", "exec", "args", "script", "binary", "api_key", "apikey", "token",
                   "secret", "password", "credentials", "env"}
 BUDGET_KEYS = {"timeout", "max_audio_seconds"}
@@ -59,6 +59,7 @@ class TranscribeRequest:
     workspace: Optional[str] = None
     offline: bool = False                # hard constraint: no network at any step (no remote engine, no model download)
     allowed_input_roots: Optional[List[str]] = None   # when given, the input must resolve inside one of these directories
+    vad_filter: bool = False             # skip non-speech before decoding (faster-whisper's own VAD filter; opt-in, unchanged default)
 
     def parameters(self) -> Dict[str, Any]:
         """The parameters that shape the ASR output. Part of provenance and of the cache identity.
@@ -66,7 +67,7 @@ class TranscribeRequest:
         request that omits it and one that names index 0 explicitly share a cache entry."""
         return {"language": self.language, "word_timestamps": self.word_timestamps, "temperature": self.temperature,
                 "initial_prompt": self.initial_prompt, "beam_size": self.beam_size,
-                "audio_stream": self.audio_stream if self.audio_stream is not None else 0}
+                "audio_stream": self.audio_stream if self.audio_stream is not None else 0, "vad_filter": self.vad_filter}
 
     def parameters_hash(self) -> str:
         return hashlib.sha256(json.dumps(self.parameters(), sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
@@ -156,6 +157,9 @@ def parse_request(doc: Any) -> TranscribeRequest:
     ws = doc.get("workspace")
     if ws is not None and (not isinstance(ws, str) or not ws.strip()):
         raise _bad("'workspace' must be a path string")
+    vad_filter = doc.get("vad_filter", False)
+    if not isinstance(vad_filter, bool):
+        raise _bad("'vad_filter' must be a boolean")
 
     budget = Budget()
     b = doc.get("budget")
@@ -171,7 +175,7 @@ def parse_request(doc: Any) -> TranscribeRequest:
 
     return TranscribeRequest(input=inp, language=lang, engine=engine, model=model, word_timestamps=wt, temperature=float(temp),
                              initial_prompt=prompt, beam_size=beam, audio_stream=audio_stream, asset_id=asset_id, budget=budget, cache=cache,
-                             workspace=ws, offline=offline, allowed_input_roots=roots)
+                             workspace=ws, offline=offline, allowed_input_roots=roots, vad_filter=vad_filter)
 
 
 def default_workspace() -> str:
