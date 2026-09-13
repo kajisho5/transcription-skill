@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2 - 2026-09-13
+
+- Fix default budget.timeout being shorter than budget.max_audio_seconds allows (#25) (d499854)
+
 ## 0.3.1 - 2026-09-13
 
 - STATE.md: update version/release history after PR #20, #22, #23 merges (#24) (0e691db)
