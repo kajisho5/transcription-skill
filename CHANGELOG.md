@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2 - 2026-09-13
+
+- STATE.md: record the release-drafter dry-run bug and the stray draft release it left (#20) (e100276)
+
 ## 0.2.1 - 2026-09-12
 
 - Fix release.yml: disable-releaser skips version resolution entirely, not just release creation (#23) (6318f1c)
