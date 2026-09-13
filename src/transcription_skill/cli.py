@@ -176,6 +176,51 @@ def cmd_engines(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_batch(args: argparse.Namespace) -> int:
+    """`transcription batch MANIFEST.json`: many transcribe requests, one process. MANIFEST is
+    {"items": [<transcription/transcribe params>, ...]}; each item may carry an extra "output" key
+    (a CLI-only convenience, not part of the tool contract) naming where to write its transcript JSON
+    on success -- default <input>.transcript.json, same convention as `transcribe`. One item's failure
+    is reported alongside the others; it never stops the rest of the batch."""
+    with open(args.manifest, encoding="utf-8") as fh:
+        try:
+            manifest = json.load(fh)
+        except ValueError as exc:
+            raise TranscriptionError("INVALID_INPUT", f"manifest is not valid JSON: {exc}")
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("items"), list) or not manifest["items"]:
+        raise TranscriptionError("INVALID_INPUT", "manifest must be a JSON object with a non-empty 'items' list")
+    outputs: List[Optional[str]] = []
+    items: List[Dict[str, Any]] = []
+    for raw_item in manifest["items"]:
+        item = dict(raw_item) if isinstance(raw_item, dict) else raw_item
+        out = item.pop("output", None) if isinstance(item, dict) else None
+        outputs.append(out)
+        items.append(item)
+    res = run_tool("transcription/batch", {"items": items})
+    ok_count = 0
+    for item, out_path, entry in zip(items, outputs, res["results"]):
+        if entry["ok"] and not (isinstance(item, dict) and item.get("dry_run")):
+            doc = entry["result"]["transcript"]
+            dest = out_path or _default_output(item["input"])
+            written = OutputPolicy(args.allowed_output).resolve_output(dest, forbid=[item.get("input")])
+            with open(written, "w", encoding="utf-8") as fh:
+                json.dump(doc, fh, ensure_ascii=False, indent=2)
+            entry["output"] = written
+        if entry["ok"]:
+            ok_count += 1
+    if args.json:
+        _print_json({"ok": ok_count == len(res["results"]), "results": res["results"]})
+    else:
+        for item, entry in zip(items, res["results"]):
+            label = item.get("input", "?") if isinstance(item, dict) else "?"
+            if entry["ok"]:
+                print(f"  ok    {label}" + (f" -> {entry['output']}" if "output" in entry else ""))
+            else:
+                print(f"  error {label}: [{entry['error']['code']}] {entry['error']['message']}")
+        print(f"{ok_count}/{len(res['results'])} succeeded")
+    return 0 if ok_count == len(res["results"]) else 1
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """`transcription run -` : one JSON request on stdin -> exactly one JSON document on stdout.
     This is the process-boundary transport an external caller (an agent adapter) uses; invalid or
@@ -279,6 +324,12 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--offline", action="store_true", help="only engines usable with no network and a local model")
     g.add_argument("--json", action="store_true")
     g.set_defaults(func=cmd_engines)
+
+    bt = sub.add_parser("batch", help="run many transcribe requests from a manifest file in one process")
+    bt.add_argument("manifest", help="JSON file: {\"items\": [<transcribe params>, ...]}; each item may add an \"output\" path")
+    bt.add_argument("--allowed-output", action="append", metavar="DIR", help="only write transcript JSON files inside DIR (repeatable)")
+    bt.add_argument("--json", action="store_true")
+    bt.set_defaults(func=cmd_batch)
 
     r = sub.add_parser("run", help="read one JSON tool request ({\"tool\": ..., \"params\": {...}}) from stdin, print one JSON response")
     r.add_argument("request", help="'-' (stdin)")

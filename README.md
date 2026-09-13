@@ -180,7 +180,12 @@ echo '{"tool":"transcription/transcribe","params":{"input":"lecture.mp4","langua
                                                        # process-boundary transport: one JSON request in, one JSON response out
 transcription transcribe lecture.mp4 --offline         # hard no-network constraint (local engine + local model only)
 transcription engines --offline --language ja          # which engines satisfy these constraints
+transcription batch manifest.json                      # many requests, one process; one item's failure doesn't stop the rest
 ```
+
+`manifest.json` for `batch`: `{"items": [{"input": "a.mp4", "language": "ja"}, {"input": "b.mp4", "output": "b.transcript.json"}]}` --
+each item is the same shape as `transcribe`'s params (plus an optional CLI-only `"output"` path); results are reported
+per item in order, `{"ok": true, ...}` or `{"ok": false, "error": {...}}`, never aborting the batch on one failure.
 
 Exit codes: 0 success, 1 failure (structured error), 2 invalid input or file not found. With `--json`,
 stdout carries exactly one JSON document, on success or on error; without it, errors go to stderr.
@@ -197,7 +202,7 @@ run_tool("transcription/export", {"transcript": transcript, "format": "srt", "ou
 run_tool("transcription/check", {"transcript": "lecture.transcript.json"})
 ```
 
-Tools: `transcription/transcribe`, `transcription/segments`, `transcription/export`, `transcription/check`.
+Tools: `transcription/transcribe`, `transcription/segments`, `transcription/export`, `transcription/check`, `transcription/batch`.
 Every parameter is typed JSON. A request that contains `command`, `argv`, `shell` or a credential is
 refused with `INVALID_INPUT`. `transcription skill --json` returns the contract including every
 registered engine's `EngineSpec` (schema `transcription-skill/engine-spec/0.1`); that JSON, not this

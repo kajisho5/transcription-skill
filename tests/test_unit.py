@@ -14,6 +14,7 @@ import struct
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import wave
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -26,6 +27,7 @@ sys.path.insert(0, str(ROOT / "tests" / "fixtures"))
 from derived import multi_track  # noqa: E402
 from fake_engine import FakeEngine  # noqa: E402
 from transcription_skill import cli  # noqa: E402
+from transcription_skill.batch import run_batch  # noqa: E402
 from transcription_skill.cache import TranscriptCache, cache_key  # noqa: E402
 from transcription_skill.engines import (CAP_LANGUAGE_DETECTION, CAP_LOCAL_EXECUTION, CAP_NETWORK_REQUIRED, CAP_REMOTE_EXECUTION, CAP_WORD_TIMESTAMPS,  # noqa: E402
                                          EngineRegistry, EngineRequirements, default_registry, engine_ids, get_engine, require_engine,
@@ -280,7 +282,7 @@ class EngineContractTests(unittest.TestCase):
     def test_skill_contract_lists_only_implemented_tools(self):
         c = skill_contract()
         names = [t["name"] for t in c["tools"]]
-        self.assertEqual(names, ["transcription/transcribe", "transcription/segments", "transcription/export", "transcription/check"])
+        self.assertEqual(names, ["transcription/transcribe", "transcription/segments", "transcription/export", "transcription/check", "transcription/batch"])
         self.assertEqual((c["id"], c["version"]), ("transcription-skill", "0.2.0"))
         for t in TOOLS:
             self.assertTrue(t["description"] and t["input"] and t["output"])
@@ -602,6 +604,62 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(r2["cache_hit"])                         # same id, different execution mode: never shares a result
         self.assertNotEqual(local["provenance"]["cache_key"], r2["transcript"]["provenance"]["cache_key"])
         self.assertEqual(TranscriptCache(self.ws).count(), 3)
+
+
+class BatchTests(unittest.TestCase):
+    """transcription/batch: many items, one process, one item's failure never stops the rest."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ts_batch_")
+        self.wav = os.path.join(self.tmp, "talk.wav")
+        make_wav(self.wav, 6.0)
+        self.ws = os.path.join(self.tmp, "ws")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _fake_service(self, workspace=None):
+        return TranscriptionService(workspace=workspace, engine=FakeEngine())
+
+    def test_batch_isolates_one_items_failure_from_the_rest(self):
+        with unittest.mock.patch("transcription_skill.batch.TranscriptionService", side_effect=self._fake_service):
+            out = run_batch([
+                {"input": self.wav, "engine": "fake", "model": "fake-model", "language": "ja", "workspace": self.ws},
+                {"input": os.path.join(self.tmp, "missing.wav"), "workspace": self.ws},
+            ])
+        results = out["results"]
+        self.assertEqual(len(results), 2)
+        self.assertTrue(results[0]["ok"])
+        self.assertEqual(results[0]["result"]["transcript"]["language"], "ja")
+        self.assertFalse(results[1]["ok"])
+        self.assertEqual(results[1]["error"]["code"], "FILE_NOT_FOUND")
+
+    def test_batch_rejects_non_dict_item_without_aborting_others(self):
+        with unittest.mock.patch("transcription_skill.batch.TranscriptionService", side_effect=self._fake_service):
+            out = run_batch([
+                "not-a-dict",
+                {"input": self.wav, "engine": "fake", "model": "fake-model", "language": "ja", "workspace": self.ws},
+            ])
+        self.assertFalse(out["results"][0]["ok"])
+        self.assertEqual(out["results"][0]["error"]["code"], "INVALID_INPUT")
+        self.assertTrue(out["results"][1]["ok"])
+
+    def test_batch_dry_run_item_does_not_run_the_engine(self):
+        with unittest.mock.patch("transcription_skill.batch.TranscriptionService", side_effect=self._fake_service):
+            out = run_batch([{"input": self.wav, "engine": "fake", "model": "fake-model", "workspace": self.ws, "dry_run": True}])
+        self.assertTrue(out["results"][0]["ok"])
+        self.assertTrue(out["results"][0]["result"]["dry_run"])
+
+    def test_run_tool_batch_validates_items_key(self):
+        with self.assertRaises(TranscriptionError) as cm:
+            run_tool("transcription/batch", {})
+        self.assertEqual(cm.exception.code, "INVALID_INPUT")
+        with self.assertRaises(TranscriptionError) as cm:
+            run_tool("transcription/batch", {"items": []})
+        self.assertEqual(cm.exception.code, "INVALID_INPUT")
+        with self.assertRaises(TranscriptionError) as cm:
+            run_tool("transcription/batch", {"items": [], "extra": 1})
+        self.assertEqual(cm.exception.code, "INVALID_INPUT")
 
 
 class OutputTests(unittest.TestCase):

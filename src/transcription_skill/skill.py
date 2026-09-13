@@ -8,6 +8,7 @@ import os
 from typing import Any, Dict, List
 
 from . import SKILL_ID, __version__
+from .batch import run_batch
 from .engines import ENGINE_CAPABILITIES, EXECUTION_MODES, default_registry
 from .errors import TranscriptionError
 from .export import FORMATS, write
@@ -47,6 +48,11 @@ TOOLS: List[Dict[str, Any]] = [
      "deterministic": True, "side_effects": ["writes output file"]},
     {"name": "transcription/check", "description": "Validate a Transcript document against the contract.",
      "input": {"transcript": "Transcript | path"}, "output": {"ok": "bool", "errors": "list[str]", "warnings": "list[str]"}, "deterministic": True, "side_effects": []},
+    {"name": "transcription/batch", "description": "Run many transcription/transcribe requests in one process. One item's failure "
+     "does not abort the others; each result is reported independently in order.",
+     "input": {"items": "list[transcription/transcribe input]"},
+     "output": {"results": "list[{ok: bool, result: transcription/transcribe output} | {ok: bool, error: {code, message, details}}]"},
+     "deterministic": True, "side_effects": ["writes cache under workspace, once per item"]},
 ]
 
 
@@ -161,6 +167,14 @@ def run_tool(name: str, params: Dict[str, Any]) -> Dict[str, Any]:
             raise TranscriptionError("INVALID_INPUT", f"unknown keys {sorted(extra)}")
         doc = load_transcript(params.get("transcript"))
         return validate_transcript(doc).to_dict()
+    if name == "transcription/batch":
+        extra = set(params) - {"items"}
+        if extra:
+            raise TranscriptionError("INVALID_INPUT", f"unknown keys {sorted(extra)}")
+        items = params.get("items")
+        if not isinstance(items, list) or not items:
+            raise TranscriptionError("INVALID_INPUT", "'items' must be a non-empty list")
+        return run_batch(items)
     raise TranscriptionError("INVALID_INPUT", f"unknown tool {name!r}", {"tools": [t["name"] for t in TOOLS]})
 
 
