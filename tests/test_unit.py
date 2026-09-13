@@ -34,7 +34,7 @@ from transcription_skill.engines import (CAP_LANGUAGE_DETECTION, CAP_LOCAL_EXECU
                                          select_engines)
 from transcription_skill.engines.base import EngineRequest, EngineResult, EngineSpec  # noqa: E402
 from transcription_skill.errors import ERROR_CODES, TranscriptionError  # noqa: E402
-from transcription_skill.export import render, to_srt, write  # noqa: E402
+from transcription_skill.export import render, to_srt, to_tsv, to_txt, write  # noqa: E402
 from transcription_skill.media import child_env, extraction_argv, probe  # noqa: E402
 from transcription_skill.models import Segment, Transcript, Word  # noqa: E402
 from transcription_skill.normalize import normalize_text  # noqa: E402
@@ -684,6 +684,22 @@ class OutputTests(unittest.TestCase):
         with self.assertRaises(TranscriptionError) as cm:
             render(bad, "srt")
         self.assertEqual(cm.exception.code, "VERIFICATION_FAILED")
+
+    def test_tsv_output(self):
+        d = good_doc()
+        tsv = to_tsv(d)
+        lines = tsv.splitlines()
+        self.assertEqual(lines[0], "start\tend\ttext")
+        self.assertEqual(lines[1], "1000\t3000\t本日の講演を始めます。")
+        self.assertEqual(lines[2], "3500\t5000\tよろしくお願いします。")
+        self.assertTrue(tsv.endswith("\n"))
+        self.assertEqual(render(d, "tsv"), tsv)
+
+    def test_txt_output(self):
+        d = good_doc()
+        txt = to_txt(d)
+        self.assertEqual(txt, "本日の講演を始めます。\nよろしくお願いします。\n")
+        self.assertEqual(render(d, "txt"), txt)
 
     def test_export_never_overwrites_its_source(self):
         tmp = tempfile.mkdtemp(prefix="ts_exp_")

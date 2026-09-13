@@ -1,8 +1,8 @@
-"""Export a Transcript as JSON, SRT or WebVTT.
+"""Export a Transcript as JSON, SRT, WebVTT, TSV or plain text.
 
-SRT/VTT here are plain timed-text renderings of the segments: one cue per segment, the normalized
-text as-is. No line breaking, styling, positioning, reading-speed logic or burn-in: those belong to
-subtitle-skill. The transcript's data model is JSON; SRT/VTT are lossy views of it.
+SRT/VTT/TSV here are plain timed-text renderings of the segments: one cue/row per segment, the
+normalized text as-is. No line breaking, styling, positioning, reading-speed logic or burn-in: those
+belong to subtitle-skill. The transcript's data model is JSON; the other formats are lossy views of it.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any, Dict
 from .errors import TranscriptionError
 from .validate import validate_transcript
 
-FORMATS = ("json", "srt", "vtt")
+FORMATS = ("json", "srt", "vtt", "tsv", "txt")
 
 
 def _ts(seconds: float, sep: str) -> str:
@@ -41,13 +41,29 @@ def to_json(transcript: Dict[str, Any]) -> str:
     return json.dumps(transcript, ensure_ascii=False, indent=2) + "\n"
 
 
+def to_tsv(transcript: Dict[str, Any]) -> str:
+    """start\tend\ttext per segment, times in integer milliseconds (whisper's own reference tsv
+    convention) so this rendering can be dropped into the same tooling that convention already has."""
+    out = ["start\tend\ttext"]
+    for seg in transcript["segments"]:
+        start_ms = int(round(seg["start"] * 1000))
+        end_ms = int(round(seg["end"] * 1000))
+        out.append(f"{start_ms}\t{end_ms}\t{seg['text']}")
+    return "\n".join(out) + "\n"
+
+
+def to_txt(transcript: Dict[str, Any]) -> str:
+    """No timestamps, one line per segment: reading text, not a timed-text format."""
+    return "\n".join(seg["text"] for seg in transcript["segments"]) + "\n"
+
+
 def render(transcript: Dict[str, Any], fmt: str) -> str:
     if fmt not in FORMATS:
         raise TranscriptionError("INVALID_INPUT", f"format must be one of {FORMATS}, got {fmt!r}")
     rep = validate_transcript(transcript)
     if not rep.ok:
         raise TranscriptionError("VERIFICATION_FAILED", "transcript is not valid; refusing to export", {"errors": rep.errors[:10]})
-    return {"json": to_json, "srt": to_srt, "vtt": to_vtt}[fmt](transcript)
+    return {"json": to_json, "srt": to_srt, "vtt": to_vtt, "tsv": to_tsv, "txt": to_txt}[fmt](transcript)
 
 
 def write(transcript: Dict[str, Any], fmt: str, output: str, forbid: Any = None, allowed_output_roots: Any = None) -> str:
