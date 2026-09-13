@@ -4,11 +4,12 @@ Durable repository state for humans and future sessions. Facts only; update when
 Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move) · PLANNED · VISION · UNKNOWN.
 
 ## Version / release
-- package `transcription-skill` 0.3.0 (`pyproject.toml`), `contract_version` 1.0 (`skill.py`)
-- tags/GitHub Releases `v0.2.0`..`v0.3.0` exist — CURRENT, all non-draft, non-prerelease, auto-cut by
+- package `transcription-skill` 0.4.0 (`pyproject.toml`), `contract_version` 1.0 (`skill.py`)
+- tags/GitHub Releases `v0.2.0`..`v0.4.0` exist — CURRENT, all non-draft, non-prerelease, auto-cut by
   `.github/workflows/release.yml` on merges to `main` (`v0.2.1`/`v0.2.2` from doc-only merges, `v0.3.0`
-  from the batch-mode feature merge, PR #22). Distribution: git only
-  (`pip install "transcription-skill[faster-whisper] @ git+https://github.com/kajisho5/transcription-skill@v0.3.0"`);
+  from the batch-mode feature merge/PR #22, `v0.3.1` from the STATE.md cleanup/PR #24, `v0.3.2` from the
+  timeout-default fix/PR #25, `v0.4.0` from the tsv/txt export formats/PR #26). Distribution: git only
+  (`pip install "transcription-skill[faster-whisper] @ git+https://github.com/kajisho5/transcription-skill@v0.4.0"`);
   no PyPI package (`PYPI_API_TOKEN` not configured, so `.github/workflows/release.yml`'s publish step
   is skipped by design)
 - CI: `.github/workflows/tests.yml`, `workflow_dispatch` only (Actions minutes policy shared with sibling repos);
