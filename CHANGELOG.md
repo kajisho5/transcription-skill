@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2 - 2026-09-13
+
+- STATE.md: draft the v1.1 roadmap (#28) (dbdb36b)
+
 ## 0.4.1 - 2026-09-13
 
 - STATE.md: bump recorded version to 0.4.0 after PR #26's release (#27) (7778701)
