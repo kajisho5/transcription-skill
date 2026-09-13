@@ -617,6 +617,22 @@ class ServiceTests(unittest.TestCase):
         self.assertNotEqual(local["provenance"]["cache_key"], r2["transcript"]["provenance"]["cache_key"])
         self.assertEqual(TranscriptCache(self.ws).count(), 3)
 
+    def test_cache_size_list_and_clear(self):
+        cache = TranscriptCache(self.ws)
+        self.assertEqual(cache.size_bytes(), 0)
+        self.assertEqual(cache.list_entries(), [])
+        self.assertEqual(cache.clear(), 0)
+        doc = self.svc.transcribe(self.req(language="ja"))["transcript"]
+        self.assertGreater(cache.size_bytes(), 0)
+        entries = cache.list_entries()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["key"], doc["provenance"]["cache_key"])
+        self.assertGreater(entries[0]["size_bytes"], 0)
+        self.assertEqual(entries[0]["created_at"], doc["provenance"]["created_at"])
+        self.assertEqual(cache.clear(), 1)
+        self.assertEqual(cache.count(), 0)
+        self.assertEqual(cache.size_bytes(), 0)
+
 
 class BatchTests(unittest.TestCase):
     """transcription/batch: many items, one process, one item's failure never stops the rest."""
@@ -1064,6 +1080,8 @@ class JsonProtocolTests(unittest.TestCase):
             Path(good).write_text(json.dumps(good_doc()), encoding="utf-8")
             cases = [
                 (["skill", "--json"], 0), (["doctor", "--json", "--workspace", tmp], None), (["engines", "--json"], 0),
+                (["cache", "size", "--json", "--workspace", tmp], 0), (["cache", "list", "--json", "--workspace", tmp], 0),
+                (["cache", "clear", "--json", "--workspace", tmp], 0),
                 (["engines", "--offline", "--language", "ja", "--json"], 0), (["engines", "--engine", "faster_whisper", "--json"], 0),
                 (["check", good, "--json"], 0), (["check", bad, "--json"], 1),
                 (["segments", good, "--json"], 0), (["segments", bad, "--json"], 1),

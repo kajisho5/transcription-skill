@@ -22,7 +22,10 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 - Deterministic cache keyed by content fingerprint + engine id/version/execution_mode + model/model_version + parameters
 - Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt/tsv/txt), `check`, `batch` (many transcribe
   requests, one process; one item's failure never aborts the rest); CLI: doctor, transcribe, segments, export, check,
-  engines, skill, batch, `run -` (one JSON request in, one JSON document out)
+  engines, batch, cache (size/list/clear), skill, `run -` (one JSON request in, one JSON document out)
+- `vad_filter` (opt-in, default off): request/tool/`--vad-filter` field passed straight through to
+  faster-whisper's own voice-activity-detection filter (`WhisperModel.transcribe(vad_filter=...)`);
+  part of `parameters()`/the cache key/provenance
 - Explicit language selection: `--language` / request `language` (ISO 639-1) forces the engine to skip auto-detection
   (`language_source: "requested"` on the transcript); default remains auto-detect from the first 30 s
 - Input boundary: opt-in `allowed_input_roots` (resolved-path containment, traversal/symlink refusal); default unchanged
@@ -82,12 +85,10 @@ v1 (batch mode, language force-selection, long-recording timeout fix, tsv/txt ex
    `WhisperModel.transcribe(..., vad_filter=request.vad_filter)` (previously hardcoded `False`).
    Included in `parameters()`/the cache key/provenance, so on/off runs never share a cache entry.
    Verified end-to-end against the real engine (`test_vad_filter_runs_end_to_end_and_is_recorded_in_provenance`).
-3. **Cache management CLI.** `TranscriptCache` (`cache.py`) is only reachable through the Python API
-   today; there is no `transcription cache size|list|clear` command. On a field laptop where the cache
-   accumulates across many jobs (SEVENTHWELL's own use case: many events, one machine, limited disk),
-   the only way to inspect or prune it is to go poke at the workspace directory by hand. Add a `cache`
-   CLI subcommand: `size` (bytes used), `list` (cache keys + created_at), `clear` (empty it, respecting
-   `--allowed-output`-style confinement to the workspace).
+3. ~~**Cache management CLI.**~~ Done 2026-09-13: `transcription cache size|list|clear` (`cli.py`
+   `cmd_cache`), backed by new `TranscriptCache.size_bytes()`/`list_entries()`/`clear()` methods
+   (`cache.py`) so there's no need to poke at the workspace directory by hand on a field laptop where
+   the cache accumulates across many jobs.
 4. **Model management CLI.** Right now the Hugging Face model cache faster-whisper uses is only
    populated by running a transcription once online; there's no `transcription models pull <name>` to
    pre-fetch a model deliberately before going `--offline` at a venue with no network. Add `models
@@ -181,3 +182,5 @@ ever needed.
   the request/tool/CLI (`--vad-filter`), threaded through `EngineRequest` into `faster_whisper.py`
   (previously hardcoded `vad_filter=False` unconditionally), included in `parameters()` so it's part
   of the cache key and provenance. Verified end-to-end against the real engine, not just unit-tested.
+- 2026-09-13: shipped v1.1 roadmap item 2, cache management CLI: `transcription cache size|list|clear`,
+  backed by new `TranscriptCache.size_bytes()`/`list_entries()`/`clear()` methods.

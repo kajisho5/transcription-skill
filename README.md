@@ -76,6 +76,9 @@ transcription export lecture.transcript.json --format srt -o lecture.srt
 transcription export lecture.transcript.json --format tsv -o lecture.tsv  # start\tend\ttext per segment
 transcription export lecture.transcript.json --format txt -o lecture.txt  # plain reading text, no timestamps
 transcription segments lecture.transcript.json --merge-gap 0.5 --json   # SpeechEvent candidates
+transcription cache size                                  # entries + bytes used in the transcript cache
+transcription cache list                                  # cache key, size, created_at per entry
+transcription cache clear                                 # remove every cached transcript
 ```
 
 Recognition never uses the network. The `base` model (~145 MB) is fetched into the Hugging Face cache once, on
@@ -178,6 +181,7 @@ transcription transcribe lecture.mp4 --dry-run         # what would run; no ASR
 transcription check lecture.transcript.json            # validate against the contract
 transcription export lecture.transcript.json --format srt -o lecture.srt   # or vtt, tsv, txt
 transcription segments lecture.transcript.json --merge-gap 0.5 --json   # SpeechEvent candidates
+transcription cache size|list|clear                    # inspect or prune the transcript cache
 transcription skill --json                             # the skill / tool / engine contract (source of truth)
 echo '{"tool":"transcription/transcribe","params":{"input":"lecture.mp4","language":"ja"}}' | transcription run -
                                                        # process-boundary transport: one JSON request in, one JSON response out
