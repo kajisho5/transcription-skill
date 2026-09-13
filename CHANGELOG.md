@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0 - 2026-09-13
+
+- Add tsv and txt export formats (last v1 feature-roadmap item) (abbfe63)
+- Fix default budget.timeout being shorter than budget.max_audio_seconds allows (45b9434)
+
 ## 0.3.2 - 2026-09-13
 
 - Fix default budget.timeout being shorter than budget.max_audio_seconds allows (#25) (d499854)
