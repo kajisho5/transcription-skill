@@ -138,7 +138,8 @@ class TranscriptionService:
             wav = os.path.join(run_dir, "audio.wav")
             extraction = extract_audio(prep["path"], wav, audio_stream=req.audio_stream if req.audio_stream is not None else 0)
             ereq = EngineRequest(audio_path=wav, language=req.language, model=req.model, word_timestamps=req.word_timestamps,
-                                 temperature=req.temperature, initial_prompt=req.initial_prompt, beam_size=req.beam_size, offline=req.offline)
+                                 temperature=req.temperature, initial_prompt=req.initial_prompt, beam_size=req.beam_size, offline=req.offline,
+                                 vad_filter=req.vad_filter)
             t_engine = time.time()
             result = self._run_engine(engine, ereq, req.budget.timeout, run_dir)
             engine_seconds = time.time() - t_engine
