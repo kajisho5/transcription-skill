@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 - 2026-09-13
+
+- STATE.md: bump recorded version to 0.4.0 after PR #26's release (#27) (7778701)
+
 ## 0.4.0 - 2026-09-13
 
 - Add tsv and txt export formats (last v1 feature-roadmap item) (abbfe63)
