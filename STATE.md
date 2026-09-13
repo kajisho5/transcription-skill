@@ -96,11 +96,12 @@ that merged PR #18 (a docs-only `STATE.md` change, no version label), this ran i
 GitHub Release (named `v0.2.1`, visible under this repo's Releases list) before failing at the next
 step on an empty `resolved-version`. `pyproject.toml` and `CHANGELOG.md` on `main` were **not**
 touched — the failure happened before the bump/commit/tag steps. Fixed in PR #19
-(`disable-releaser: true` replaces the nonexistent `dry-run: true`), but the **stray draft release
-itself needs a human (or a session with release-deletion access) to delete it manually** — no
-MCP/API tool was available in this session to do it. Find it at
-https://github.com/kajisho5/transcription-skill/releases (draft, tag `v0.2.1`) and delete via the
-GitHub UI ("..." menu → Delete) or `gh release delete v0.2.1` if using a tool with `gh` access.
+(`disable-releaser: true` replaces the nonexistent `dry-run: true`), which turned out to be its own
+bug (see "Fourth bug" below) — but that fix, and the true root-cause fix in PR #23, ended up
+resolving this stray draft automatically as a side effect: release-drafter matched and reused the
+existing `v0.2.1`-named draft on a later run rather than creating a new one, and PR #23's new
+cleanup step deleted it. Confirmed via `list_releases` after PR #23 merged: exactly two releases
+exist (`v0.2.0`, `v0.2.1`), both `draft: false` — no manual deletion was needed after all.
 
 **Third bug, found by actually letting #19's fix run:** after #19 merged, the same step ran cleanly
 (no stray release — the `disable-releaser` fix works) but `ci_decide_version.py` still failed with
