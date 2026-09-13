@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 - 2026-09-12
+
+- Fix release.yml: disable-releaser skips version resolution entirely, not just release creation (#23) (6318f1c)
+- Fix release.yml: release-drafter@v6's output key is resolved_version, not resolved-version (#21) (d76af14)
+- Fix release.yml: release-drafter@v6 has no dry-run input, use disable-releaser (#19) (f440766)
+- STATE.md: record the v0.2.0 tag/release and how it actually happened (#18) (ec6e2b2)
+
 ## 0.2.0 - 2026-09-11
 
 - Add GitHub automation: release automation, PR labeling, CodeQL, Dependabot, SECURITY.md (#12) (8c919fb)
