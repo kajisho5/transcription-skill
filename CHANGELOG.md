@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0 - 2026-09-13
+
+- Add batch mode: many transcribe requests, one process (v1 roadmap item 1/N) (3c5df87)
+
 ## 0.2.2 - 2026-09-13
 
 - STATE.md: record the release-drafter dry-run bug and the stray draft release it left (#20) (e100276)
