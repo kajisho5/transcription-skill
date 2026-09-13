@@ -87,6 +87,34 @@ future session designs release automation like this again, gate the *first* tag/
 explicit check (e.g. a required manual `workflow_dispatch` input, or a repo variable) rather than
 relying on a separate human-approval step recorded only in prose.
 
+**Second bug found the same day, needs a human action:** the "Resolve next version from merged-PR
+labels" step in `release.yml` passed `dry-run: true` to `release-drafter/release-drafter@v6` — that
+input does not exist in this action version (confirmed from the run's own "Unexpected input(s)
+'dry-run'" warning) and was silently ignored, so the step was never actually a dry run. On the push
+that merged PR #18 (a docs-only `STATE.md` change, no version label), this ran in auto mode
+(`pyproject.toml`'s version still equaled the latest tag) and created a real, **draft**, tag-less
+GitHub Release (named `v0.2.1`, visible under this repo's Releases list) before failing at the next
+step on an empty `resolved-version`. `pyproject.toml` and `CHANGELOG.md` on `main` were **not**
+touched — the failure happened before the bump/commit/tag steps. Fixed in PR #19
+(`disable-releaser: true` replaces the nonexistent `dry-run: true`), which turned out to be its own
+bug (see "Fourth bug" below) — but that fix, and the true root-cause fix in PR #23, ended up
+resolving this stray draft automatically as a side effect: release-drafter matched and reused the
+existing `v0.2.1`-named draft on a later run rather than creating a new one, and PR #23's new
+cleanup step deleted it. Confirmed via `list_releases` after PR #23 merged: exactly two releases
+exist (`v0.2.0`, `v0.2.1`), both `draft: false` — no manual deletion was needed after all.
+
+**Third bug, found by actually letting #19's fix run:** after #19 merged, the same step ran cleanly
+(no stray release — the `disable-releaser` fix works) but `ci_decide_version.py` still failed with
+`release-drafter returned an unusable resolved-version: ''`. Root cause: `release.yml` read
+`steps.resolve.outputs.resolved-version` (hyphen), but `release-drafter/release-drafter@v6`'s own
+`action.yml` defines the output key as `resolved_version` (underscore) — there never was a
+hyphenated `resolved-version` output, in any version of this step. Fixed in PR #21. Lesson for
+future sessions: when wiring a third-party GitHub Action's outputs, check its actual `action.yml`
+(or a live run's available-outputs listing) rather than assuming a naming convention — this bug
+existed silently through both the original `dry-run` version and the `disable-releaser` fix,
+because the failure mode (empty string, caught by our own semver validation) looked identical for
+a different underlying reason each time.
+
 ## Change log (session-level)
 - 2026-09-04: 0.1.0 → 0.2.0 (engine ecosystem, agent readiness, input boundary) merged as PR #1
 - 2026-09-05: sponsors (#2), README landing page (#3), subtitle-skill link (#4), `provides` (#5),
