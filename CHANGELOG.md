@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0 - 2026-09-13
+
+- Add vad_filter pass-through (v1.1 roadmap item 1) (#29) (867dbcb)
+
 ## 0.4.2 - 2026-09-13
 
 - STATE.md: draft the v1.1 roadmap (#28) (dbdb36b)
