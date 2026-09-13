@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0 - 2026-09-13
+
+- Add cache management CLI (v1.1 roadmap item 2) (55acced)
+- Add vad_filter pass-through (v1.1 roadmap item 1) (c7f79d4)
+
 ## 0.5.0 - 2026-09-13
 
 - Add vad_filter pass-through (v1.1 roadmap item 1) (#29) (867dbcb)
