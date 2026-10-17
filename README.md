@@ -1,22 +1,33 @@
 <p align="center">
-  <img src="assets/hero.jpg" alt="Transcription Skill: audio / video to timestamped transcript, local and offline" width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/app-icon-dark.png">
+    <img src="brand/app-icon.png" width="128" alt="transcription-skill app icon">
+  </picture>
 </p>
 
-<h1 align="center">transcription-skill</h1>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/logo/transcription-skill-wordmark-white.svg">
+    <img src="brand/logo/transcription-skill-wordmark-black.svg" height="48" alt="transcription-skill">
+  </picture>
+</p>
 
-<p align="center"><strong>Audio / Video → Transcript.</strong> The speech-recognition layer of the video-production toolchain.</p>
+<p align="center"><b>Audio / Video → Transcript.</b><br>
+The speech-recognition layer of the video-production toolchain: local faster-whisper, offline mode,
+timestamped segments and words, deterministic cache, JSON contract for agents. Nothing is uploaded, no API key exists.</p>
 
 <p align="center">
-  Local faster-whisper · Offline mode · Timestamped segments and words · Deterministic cache · JSON contract for agents
+  <a href="#quick-start"><b>Quick start</b></a> ·
+  <a href="#cli">CLI</a> ·
+  <a href="#as-a-library--tool-contract">Library / tool contract</a> ·
+  <a href="#security-and-offline-guarantees">Security and offline guarantees</a> ·
+  <a href="#documentation">Documentation</a>
 </p>
 
 <p align="center">
   <a href="https://github.com/kajisho5/transcription-skill/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/kajisho5/transcription-skill/actions/workflows/tests.yml/badge.svg"></a>
   <img alt="python 3.9+" src="https://img.shields.io/badge/python-3.9%2B-blue">
-  <img alt="engine: faster-whisper (local)" src="https://img.shields.io/badge/engine-faster--whisper%20%28local%29-6f42c1">
-  <img alt="platforms" src="https://img.shields.io/badge/platforms-linux%20%7C%20macos%20%7C%20windows-informational">
   <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-lightgrey"></a>
-  <a href="https://github.com/sponsors/kajisho5"><img alt="sponsor" src="https://img.shields.io/badge/sponsor-%E2%9D%A4-ff69b4"></a>
 </p>
 
 ```bash
