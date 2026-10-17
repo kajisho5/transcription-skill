@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1 - 2026-10-17
+
+- docs(readme): fresnel-style header with a Liquid Glass app icon (#32) (0ca592f)
+
 ## 0.7.0 - 2026-09-13
 
 - Add model management CLI (v1.1 roadmap item 3, last item) (04cba0c)
