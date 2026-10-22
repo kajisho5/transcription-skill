@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.2 - 2026-10-22
+
+- ci: bump GitHub Actions (checkout v7, setup-python v7, codeql v4 and others) (#33) (990eb5f)
+
 ## 0.7.1 - 2026-10-17
 
 - docs(readme): fresnel-style header with a Liquid Glass app icon (#32) (0ca592f)
