@@ -1,4 +1,4 @@
-"""CLI: `transcription doctor | transcribe | segments | export | check | batch | cache | models | engines | skill | run`.
+"""CLI: `transcription doctor | transcribe | segments | export | check | batch | cache | models | engines | contract | skill | run`.
 
 stdout carries either human-readable text or, with --json, exactly one JSON document. Errors are
 structured: with --json they are the JSON document on stdout; otherwise one `error:` line on stderr.
@@ -258,6 +258,9 @@ def cmd_models(args: argparse.Namespace) -> int:
     directly, so a model can be pre-fetched deliberately before going --offline at a venue with no
     network, instead of only ever being populated as a side effect of running a transcription."""
     engine = get_engine(args.engine)
+    # a malformed command is INVALID_INPUT (exit 2) whether or not the engine is installed
+    if args.models_action != "list" and not args.model:
+        raise TranscriptionError("INVALID_INPUT", "a model name is required for 'pull' and 'remove'")
     if not engine.available():
         raise TranscriptionError("ENGINE_UNAVAILABLE", engine.unavailable_reason() or f"engine {args.engine} unavailable")
     if args.models_action == "list":
@@ -268,8 +271,6 @@ def cmd_models(args: argparse.Namespace) -> int:
             for r in rows:
                 print(f"  {r['model']:<18} {r['availability']:<24} {r['detail']}")
         return 0
-    if not args.model:
-        raise TranscriptionError("INVALID_INPUT", "a model name is required for 'pull' and 'remove'")
     if args.models_action == "pull":
         download = getattr(engine, "download_model", None)
         if download is None:
@@ -326,6 +327,13 @@ def cmd_skill(args: argparse.Namespace) -> int:
         for t in c["tools"]:
             print(f"  {t['name']}: {t['description']}")
     return 0
+
+
+def cmd_contract(args: argparse.Namespace) -> int:
+    """`transcription contract [--json]`: the command name every ecosystem skill uses for its machine-readable
+    contract (`qc contract --json`, `ingest contract --json`, ...). Always the JSON document, byte-identical to
+    `skill --json`, which stays as an alias (ADR-031)."""
+    return cmd_skill(argparse.Namespace(json=True))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -419,7 +427,11 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("request", help="'-' (stdin)")
     r.set_defaults(func=cmd_run, json=True)
 
-    k = sub.add_parser("skill", help="print the skill / tool contract")
+    ct = sub.add_parser("contract", help="print the skill / tool / engine contract as JSON (same document as `skill --json`)")
+    ct.add_argument("--json", action="store_true", help="accepted for the ecosystem's `contract --json` form; the output is always JSON")
+    ct.set_defaults(func=cmd_contract, json=True)
+
+    k = sub.add_parser("skill", help="print the skill / tool contract (`skill --json` is an alias of `contract`)")
     k.add_argument("--json", action="store_true")
     k.set_defaults(func=cmd_skill)
     return ap

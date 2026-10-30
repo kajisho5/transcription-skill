@@ -44,6 +44,7 @@ stdout) and `transcribe` accepts `--dry-run` (plan only, no ASR).
 | "don't reuse the old result" | `--no-cache` |
 | "no internet here", "air-gapped", "must not upload the audio" | `transcribe ... --offline` (refuses remote engines and any model download); `doctor --offline` first |
 | "which engines / models can I use here" | `engines` / `engines --engine faster_whisper` / `engines --offline --language ja` |
+| "what can this skill do" (machine-readable) | `contract --json` (same document as the older `skill --json`) |
 | calling from another program / an agent adapter | `run -` with `{"tool": ..., "params": {...}}` on stdin; read the one JSON document on stdout |
 | "only transcribe files from this folder", agent-supplied paths | `transcribe ... --allowed-input DIR` (or `allowed_input_roots` in `run -`); `doctor --allowed-input DIR` shows the policy |
 | "only write into the delivery folder" | `--allowed-output DIR` on `transcribe` / `segments` / `export` (or `allowed_output_roots` on the export tool) |

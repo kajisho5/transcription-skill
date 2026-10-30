@@ -340,7 +340,7 @@ def run_contract_case2(case: Dict[str, Any], check) -> None:
                 return p.returncode, json.loads(p.stdout), p.stderr
             except ValueError:
                 return p.returncode, None, p.stdout + p.stderr
-        for argv in (["skill", "--json"], ["doctor", "--json"], ["doctor", "--json", "--offline"], ["engines", "--json"], ["engines", "--offline", "--json"]):
+        for argv in (["skill", "--json"], ["contract", "--json"], ["doctor", "--json"], ["doctor", "--json", "--offline"], ["engines", "--json"], ["engines", "--offline", "--json"]):
             rc, doc, err = run(argv)
             check(" ".join(argv) + " -> one JSON", doc is not None and "Traceback" not in err, rc, "json")
         for stdin in ("", "{bad", "[]", '{"tool":"x","params":{}}'):

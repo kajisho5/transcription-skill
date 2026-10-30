@@ -110,7 +110,7 @@
   its own.
 
 ## ADR-020 The JSON contract is the source of truth, and drift is a test failure
-- `skill --json` must equal the live registry and engine objects; every tool in the contract must be
+- `contract --json` (alias `skill --json`, ADR-031) must equal the live registry and engine objects; every tool in the contract must be
   dispatched by `run_tool` and reachable from the CLI; schema ids in code, contract and schema files must
   agree. `ContractDriftTests` and evals 11–13 enforce it, so the README can never be the only place a
   fact lives.
@@ -199,3 +199,36 @@
   export) and `allowed_output_roots` on the export tool, so `run -` and the CLI share it; `doctor` reports
   it. Without roots the historic behaviour (write where asked, next to the input by default) is kept, for the
   same reason as ADR-024. The transcript cache and per-run temp dirs were already confined to the workspace.
+
+## ADR-031 `contract` is the contract command; `skill --json` stays as an alias with identical output
+- Every other skill in the ecosystem publishes its machine-readable contract as `<cli> contract --json`
+  (qc-skill, ingest-skill, ...); this one used `transcription skill --json`, so an orchestrator or registry
+  had to special-case the name. `transcription contract` now prints the contract document; `cmd_contract`
+  calls `cmd_skill` with `json=True`, so the two outputs are the same bytes by construction, and
+  `JsonProtocolTests.test_contract_is_an_alias_of_skill_json` compares the stdout of `skill --json`,
+  `contract --json` and bare `contract`.
+- `contract` always prints JSON and takes `--json` only so the ecosystem's `contract --json` form works,
+  the same as `ingest contract`. `skill` is not removed or deprecated: existing callers
+  (video-production-agent's adapter, the conformance tests, evals) keep working, and `skill` without
+  `--json` keeps its human-readable summary. The document itself is unchanged, so `CONTRACT_VERSION`
+  stays `1.0`.
+
+## ADR-032 A zero-length word is widened to 0.01 s instead of discarding the segment's words
+- Observed in CI on `test_ordering_and_timestamps_on_repeated_utterance` (PR #36): on some runners,
+  faster-whisper `base` (int8) returned a word with `start == end` (2.66 s, 13.76 s), because word times are
+  rounded to 0.01 s. `build_transcript` then set the whole segment's `words` to `null`, so the transcript had
+  no word timing at all. Whether it happens depends on the runner's CPU, so the same input passed on one
+  runner and failed on another.
+- Word timestamps feed subtitle timing and take selection downstream. Losing every word of a segment is a far
+  larger error than giving one word 10 ms, which is the engine's own timestamp resolution. So
+  `_widen_zero_length_words` (service.py) gives a word whose `end <= start` by less than `MIN_WORD_DURATION`
+  (0.01 s) exactly that duration. The word becomes `[t, t + 0.01]`; its end is pulled back to the next word's
+  start or the segment end when those come first, and its start then moves back into the gap before it.
+  Words are processed in order, so back-to-back zero-length words at the same instant get consecutive slots.
+  Each widening is a warning naming the segment, the time and the new span.
+- Bounded on purpose. A word with no 0.01 s of room between its neighbours, a word outside its segment, and
+  a real inversion (end before start by 0.01 s or more) are not touched; the existing rule still discards that
+  segment's words with a warning. The validator is unchanged and strict, so no output word has `end <= start`.
+  Like the end-overrun clamp (ADR-028), this is the one documented adjustment to word timing (ADR-010 is about
+  text). Cache keys do not change, so a transcript cached before this rule keeps its `null` words until it is
+  recomputed.

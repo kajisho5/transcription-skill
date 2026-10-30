@@ -22,7 +22,7 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 - Deterministic cache keyed by content fingerprint + engine id/version/execution_mode + model/model_version + parameters
 - Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt/tsv/txt), `check`, `batch` (many transcribe
   requests, one process; one item's failure never aborts the rest); CLI: doctor, transcribe, segments, export, check,
-  engines, batch, cache (size/list/clear), models (list/pull/remove), skill, `run -` (one JSON request
+  engines, batch, cache (size/list/clear), models (list/pull/remove), contract (alias `skill --json`, identical output), skill, `run -` (one JSON request
   in, one JSON document out)
 - `vad_filter` (opt-in, default off): request/tool/`--vad-filter` field passed straight through to
   faster-whisper's own voice-activity-detection filter (`WhisperModel.transcribe(vad_filter=...)`);

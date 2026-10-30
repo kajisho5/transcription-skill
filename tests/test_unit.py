@@ -275,7 +275,7 @@ class EngineContractTests(unittest.TestCase):
         d = eng.describe()
         self.assertEqual(d["id"], "faster_whisper")
         if not d["available"]:
-            self.assertIn("pip install", d["reason"])
+            self.assertIn("pip install", d["unavailable_reason"])   # EngineSpec field (engine_spec.schema.json)
             self.assertEqual(d["supported_languages"], [])
         else:
             self.assertIn("ja", d["supported_languages"])
@@ -441,6 +441,47 @@ class ServiceTests(unittest.TestCase):
         doc = TranscriptionService(workspace=self.ws, engine=badwords).transcribe(self.req(word_timestamps=True, cache=False))["transcript"]
         self.assertIsNone(doc["segments"][0]["words"])
         self.assertTrue(any("word timestamps discarded" in w for w in doc["warnings"]))
+
+    def test_zero_length_words_are_widened_not_discarded(self):
+        """ADR-032: faster-whisper rounds word times to 0.01 s, so a word can come back with end == start. It is
+        widened to 0.01 s (never overlapping its neighbours or leaving the segment), with a warning naming it."""
+        def run(words, start=1.0, end=3.0):
+            eng = FakeEngine(segments=[{"start": start, "end": end, "text": " ".join(w[2] for w in words), "words": words}])
+            doc = TranscriptionService(workspace=self.ws, engine=eng).transcribe(self.req(word_timestamps=True, cache=False))["transcript"]
+            self.assertTrue(V.validate_transcript(doc).ok, V.validate_transcript(doc).errors)
+            return doc
+        cases = {
+            "segment start": ([(1.0, 1.0, "a", 0.9), (1.2, 2.0, "b", 0.9), (2.0, 3.0, "c", 0.9)], [(1.0, 1.01), (1.2, 2.0), (2.0, 3.0)]),
+            "middle": ([(1.0, 1.5, "a", 0.9), (1.5, 1.5, "b", 0.9), (1.6, 3.0, "c", 0.9)], [(1.0, 1.5), (1.5, 1.51), (1.6, 3.0)]),
+            "segment end": ([(1.0, 2.0, "a", 0.9), (3.0, 3.0, "b", 0.9)], [(1.0, 2.0), (2.99, 3.0)]),
+            "back-to-back": ([(1.0, 1.5, "a", 0.9), (1.7, 1.7, "b", 0.9), (1.7, 1.7, "c", 0.9), (1.8, 3.0, "d", 0.9)],
+                             [(1.0, 1.5), (1.69, 1.7), (1.7, 1.71), (1.8, 3.0)]),
+            "rounding below start": ([(1.0, 1.5, "a", 0.9), (2.0, 1.995, "b", 0.9), (2.5, 3.0, "c", 0.9)], [(1.0, 1.5), (2.0, 2.01), (2.5, 3.0)]),
+        }
+        for name, (words, expected) in cases.items():
+            doc = run(words)
+            got = doc["segments"][0]["words"]
+            self.assertIsNotNone(got, (name, doc["warnings"]))
+            self.assertEqual([w["text"] for w in got], [w[2] for w in words], name)
+            for w, (es, ee) in zip(got, expected):
+                self.assertAlmostEqual(w["start"], es, places=6, msg=name)
+                self.assertAlmostEqual(w["end"], ee, places=6, msg=name)
+                self.assertGreater(w["end"], w["start"], name)
+            for a, b in zip(got, got[1:]):
+                self.assertLessEqual(a["end"], b["start"] + 1e-9, name)       # widening never overlaps a neighbour
+            zero = [w for w in words if w[1] <= w[0]]
+            notes = [x for x in doc["warnings"] if "zero-length word" in x]
+            self.assertEqual(len(notes), len(zero), (name, doc["warnings"]))
+            self.assertTrue(all(x.startswith("seg_0001: zero-length word at ") for x in notes), notes)
+            self.assertFalse(any("word timestamps discarded" in x for x in doc["warnings"]), name)
+        # no room: the next word starts at the same instant as the segment start -> discarded as before, never overlapped
+        doc = run([(1.0, 1.0, "a", 0.9), (1.0, 2.0, "b", 0.9)])
+        self.assertIsNone(doc["segments"][0]["words"])
+        self.assertTrue(any("word timestamps discarded (non-positive word duration at 1.00)" in x for x in doc["warnings"]), doc["warnings"])
+        # a real inversion (end well before start) is not a rounding artifact: still discarded
+        doc = run([(1.0, 1.5, "a", 0.9), (2.0, 1.8, "b", 0.9)])
+        self.assertIsNone(doc["segments"][0]["words"])
+        self.assertFalse(any("zero-length word" in x for x in doc["warnings"]))
 
     def test_small_end_overrun_is_clamped_with_warning_large_one_rejected(self):
         # media is 6.0 s (make_wav); an engine that overruns by 0.8 s
@@ -1064,13 +1105,26 @@ class JsonProtocolTests(unittest.TestCase):
 
     def run_cli(self, argv, stdin=""):
         env = dict(os.environ, PYTHONUTF8="1")
-        p = subprocess.run([sys.executable, "-m", "transcription_skill.cli"] + argv, input=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        # the child writes UTF-8 (PYTHONUTF8=1); decode it as such, not with the parent's locale codec (cp1252 on Windows)
+        p = subprocess.run([sys.executable, "-m", "transcription_skill.cli"] + argv, input=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           text=True, encoding="utf-8", env=env)
         return p.returncode, p.stdout, p.stderr
 
     def assertOneJson(self, out):
         doc = json.loads(out)                    # raises when more than one document / any noise
         self.assertTrue(out.endswith("\n"))
         return doc
+
+    def test_contract_is_an_alias_of_skill_json(self):
+        """`contract` / `contract --json` (the ecosystem's command name) print exactly what `skill --json` prints."""
+        rc, skill_out, err = self.run_cli(["skill", "--json"])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self.assertOneJson(skill_out)["skill_id"], "transcription-skill")
+        for argv in (["contract", "--json"], ["contract"]):
+            rc, out, err = self.run_cli(argv)
+            self.assertEqual(rc, 0, (argv, err))
+            self.assertEqual(out, skill_out, argv)
+            self.assertEqual(err, "", argv)
 
     def test_json_commands_emit_one_document_even_on_error(self):
         tmp = tempfile.mkdtemp(prefix="ts_json_")
@@ -1079,11 +1133,13 @@ class JsonProtocolTests(unittest.TestCase):
             Path(bad).write_text("{not json", encoding="utf-8")
             good = os.path.join(tmp, "good.json")
             Path(good).write_text(json.dumps(good_doc()), encoding="utf-8")
+            # `models list` needs the engine itself: without faster-whisper it is a structured ENGINE_UNAVAILABLE (exit 1)
+            fw_available = get_engine("faster_whisper").available()
             cases = [
-                (["skill", "--json"], 0), (["doctor", "--json", "--workspace", tmp], None), (["engines", "--json"], 0),
+                (["skill", "--json"], 0), (["contract", "--json"], 0), (["contract"], 0), (["doctor", "--json", "--workspace", tmp], None), (["engines", "--json"], 0),
                 (["cache", "size", "--json", "--workspace", tmp], 0), (["cache", "list", "--json", "--workspace", tmp], 0),
                 (["cache", "clear", "--json", "--workspace", tmp], 0),
-                (["models", "list", "--json"], 0), (["models", "pull", "--json"], 2), (["models", "remove", "--json"], 2),
+                (["models", "list", "--json"], 0 if fw_available else 1), (["models", "pull", "--json"], 2), (["models", "remove", "--json"], 2),
                 (["models", "list", "--json", "--engine", "nope"], 1),
                 (["engines", "--offline", "--language", "ja", "--json"], 0), (["engines", "--engine", "faster_whisper", "--json"], 0),
                 (["check", good, "--json"], 0), (["check", bad, "--json"], 1),

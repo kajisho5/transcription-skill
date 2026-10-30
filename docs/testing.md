@@ -59,7 +59,7 @@ is a borderline decision that has flipped between sessions (STATE.md). Generated
 | 17 cache corruption recovery | corrupt and tampered entries are never served (warning + recompute); the repaired cache hits again. |
 | 18 engine/model identity separation | transcript id, cache key, fingerprint, asset id, engine identity are distinct; id changes per computation, key does not. |
 | 19 selector no ranking | selection JSON has only candidates/rejected/requirements, no score/rank/best; selector source has no sort/score. |
-| 20 JSON protocol stability | `skill/doctor/engines --json` and `run -` print exactly one JSON document, on success and on invalid input. |
+| 20 JSON protocol stability | `skill/contract/doctor/engines --json` and `run -` print exactly one JSON document, on success and on invalid input. |
 
 | 21 allowed root inside | relative and absolute inputs inside a root are transcribed by the real engine and share one cache entry; outside is refused. |
 | 22 traversal rejected | five `..` forms refused with reason `traversal`; unrestricted mode still accepts `..`. |

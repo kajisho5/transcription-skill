@@ -34,6 +34,35 @@ WORKER_MODULE = "transcription_skill.engines.worker"
 # segment's end a little past the end of the audio. An overrun up to this many seconds is clamped to the
 # media duration and recorded as a warning; a larger one is left for the validator to reject (INVALID_RESULT).
 END_OVERRUN_CLAMP_SECONDS = 2.0
+# faster-whisper rounds word timestamps to 0.01 s, so a very short word can come back with end == start.
+# Such a word is widened to this duration (ADR-032) instead of discarding the segment's whole word list.
+MIN_WORD_DURATION = 0.01
+
+
+def _widen_zero_length_words(words: List[List[Any]], seg_start: float, seg_end: float) -> List[Tuple[float, float, float]]:
+    """In place on [start, end, text, confidence] rows: give a word whose end <= start by less than
+    MIN_WORD_DURATION (a rounding artifact) a duration of exactly MIN_WORD_DURATION. The word becomes
+    [t, t + 0.01], with its end pulled back to the next word's start or the segment end when those come
+    first, and its start then moved back into the gap before it. A word that cannot fit between the previous
+    word's (possibly widened) end and the next word's start, or that lies outside the segment, is left as it
+    is, and the caller's checks discard the segment's words as before. Returns (time, new_start, new_end) for
+    each widened word."""
+    widened: List[Tuple[float, float, float]] = []
+    for i, w in enumerate(words):
+        ws, we = w[0], w[1]
+        if we > ws or ws - we >= MIN_WORD_DURATION:
+            continue
+        if ws < seg_start - CONTAINMENT_TOLERANCE or ws > seg_end + CONTAINMENT_TOLERANCE:
+            continue
+        lo = max(seg_start, words[i - 1][1]) if i else seg_start
+        hi = min(seg_end, words[i + 1][0]) if i + 1 < len(words) else seg_end
+        new_end = round(min(ws + MIN_WORD_DURATION, hi), 6)
+        new_start = round(new_end - MIN_WORD_DURATION, 6)
+        if new_start < lo - 1e-9:
+            continue
+        w[0], w[1] = new_start, new_end
+        widened.append((ws, new_start, new_end))
+    return widened
 
 
 class TranscriptionService:
@@ -274,14 +303,19 @@ def build_transcript(req: TranscribeRequest, prep: Dict[str, Any], result: Engin
         if req.word_timestamps and s.words is not None:
             words, bad = [], None
             prev_end = None
+            rows: List[List[Any]] = []
             for w in s.words:
                 ws, we = float(w.start), float(w.end)
-                wt = normalize_text(str(w.text))
+                if ws < duration < we <= duration + END_OVERRUN_CLAMP_SECONDS:
+                    we = duration                                   # same clamp as the segment end
+                rows.append([ws, we, w.text, w.confidence])
+            for t, ws, we in _widen_zero_length_words(rows, start, end):
+                warnings.append(f"{seg_id}: zero-length word at {t:.2f} s widened to {MIN_WORD_DURATION} s ([{ws:.2f}, {we:.2f}])")
+            for ws, we, wtext, wconf in rows:
+                wt = normalize_text(str(wtext))
                 if not wt:
                     bad = f"empty word text at {ws:.2f}"
                     break
-                if ws < duration < we <= duration + END_OVERRUN_CLAMP_SECONDS:
-                    we = duration                                   # same clamp as the segment end
                 if we <= ws:
                     bad = f"non-positive word duration at {ws:.2f}"
                     break
@@ -292,7 +326,7 @@ def build_transcript(req: TranscribeRequest, prep: Dict[str, Any], result: Engin
                     bad = f"word timestamps out of order at {ws:.2f}"
                     break
                 prev_end = we
-                words.append(Word(start=ws, end=we, text=wt, confidence=None if w.confidence is None else float(w.confidence)).to_dict())
+                words.append(Word(start=ws, end=we, text=wt, confidence=None if wconf is None else float(wconf)).to_dict())
             if bad:
                 warnings.append(f"{seg_id}: word timestamps discarded ({bad})")
                 words = None
