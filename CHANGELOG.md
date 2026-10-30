@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.5 - 2026-10-30
+
+- Add `contract` alias of `skill --json` (roadmap step 2) (#36) (edcdaca)
+
 ## 0.7.4 - 2026-10-30
 
 - fix: report the release version, single-sourced from pyproject.toml (#35) (3ae2255)
