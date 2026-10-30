@@ -442,6 +442,47 @@ class ServiceTests(unittest.TestCase):
         self.assertIsNone(doc["segments"][0]["words"])
         self.assertTrue(any("word timestamps discarded" in w for w in doc["warnings"]))
 
+    def test_zero_length_words_are_widened_not_discarded(self):
+        """ADR-032: faster-whisper rounds word times to 0.01 s, so a word can come back with end == start. It is
+        widened to 0.01 s (never overlapping its neighbours or leaving the segment), with a warning naming it."""
+        def run(words, start=1.0, end=3.0):
+            eng = FakeEngine(segments=[{"start": start, "end": end, "text": " ".join(w[2] for w in words), "words": words}])
+            doc = TranscriptionService(workspace=self.ws, engine=eng).transcribe(self.req(word_timestamps=True, cache=False))["transcript"]
+            self.assertTrue(V.validate_transcript(doc).ok, V.validate_transcript(doc).errors)
+            return doc
+        cases = {
+            "segment start": ([(1.0, 1.0, "a", 0.9), (1.2, 2.0, "b", 0.9), (2.0, 3.0, "c", 0.9)], [(1.0, 1.01), (1.2, 2.0), (2.0, 3.0)]),
+            "middle": ([(1.0, 1.5, "a", 0.9), (1.5, 1.5, "b", 0.9), (1.6, 3.0, "c", 0.9)], [(1.0, 1.5), (1.5, 1.51), (1.6, 3.0)]),
+            "segment end": ([(1.0, 2.0, "a", 0.9), (3.0, 3.0, "b", 0.9)], [(1.0, 2.0), (2.99, 3.0)]),
+            "back-to-back": ([(1.0, 1.5, "a", 0.9), (1.7, 1.7, "b", 0.9), (1.7, 1.7, "c", 0.9), (1.8, 3.0, "d", 0.9)],
+                             [(1.0, 1.5), (1.69, 1.7), (1.7, 1.71), (1.8, 3.0)]),
+            "rounding below start": ([(1.0, 1.5, "a", 0.9), (2.0, 1.995, "b", 0.9), (2.5, 3.0, "c", 0.9)], [(1.0, 1.5), (2.0, 2.01), (2.5, 3.0)]),
+        }
+        for name, (words, expected) in cases.items():
+            doc = run(words)
+            got = doc["segments"][0]["words"]
+            self.assertIsNotNone(got, (name, doc["warnings"]))
+            self.assertEqual([w["text"] for w in got], [w[2] for w in words], name)
+            for w, (es, ee) in zip(got, expected):
+                self.assertAlmostEqual(w["start"], es, places=6, msg=name)
+                self.assertAlmostEqual(w["end"], ee, places=6, msg=name)
+                self.assertGreater(w["end"], w["start"], name)
+            for a, b in zip(got, got[1:]):
+                self.assertLessEqual(a["end"], b["start"] + 1e-9, name)       # widening never overlaps a neighbour
+            zero = [w for w in words if w[1] <= w[0]]
+            notes = [x for x in doc["warnings"] if "zero-length word" in x]
+            self.assertEqual(len(notes), len(zero), (name, doc["warnings"]))
+            self.assertTrue(all(x.startswith("seg_0001: zero-length word at ") for x in notes), notes)
+            self.assertFalse(any("word timestamps discarded" in x for x in doc["warnings"]), name)
+        # no room: the next word starts at the same instant as the segment start -> discarded as before, never overlapped
+        doc = run([(1.0, 1.0, "a", 0.9), (1.0, 2.0, "b", 0.9)])
+        self.assertIsNone(doc["segments"][0]["words"])
+        self.assertTrue(any("word timestamps discarded (non-positive word duration at 1.00)" in x for x in doc["warnings"]), doc["warnings"])
+        # a real inversion (end well before start) is not a rounding artifact: still discarded
+        doc = run([(1.0, 1.5, "a", 0.9), (2.0, 1.8, "b", 0.9)])
+        self.assertIsNone(doc["segments"][0]["words"])
+        self.assertFalse(any("zero-length word" in x for x in doc["warnings"]))
+
     def test_small_end_overrun_is_clamped_with_warning_large_one_rejected(self):
         # media is 6.0 s (make_wav); an engine that overruns by 0.8 s
         over = FakeEngine(segments=[{"start": 1.0, "end": 3.0, "text": "a"}, {"start": 3.5, "end": 6.8, "text": "b",

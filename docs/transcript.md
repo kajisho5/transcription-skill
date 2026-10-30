@@ -41,9 +41,18 @@ The validator in `validate.py` is the executable form of this document; `transcr
 | `text` | string | whitespace-trimmed token text |
 | `confidence` | number in [0,1] \| null | engine word probability when available |
 
-If any word in a segment violates the rules (non-positive duration, outside the segment, out of order,
-empty text), the whole segment's `words` becomes `null` and a warning names the segment. Word data is
-never repaired or invented.
+One exception (ADR-032) comes first. faster-whisper rounds word times to 0.01 s, so a very short word can
+come back with `end <= start` by less than 0.01 s. Such a word is widened to exactly 0.01 s. It becomes
+`[t, t + 0.01]`, with its end pulled back to the next word's start or the segment end when those come first,
+and its start then moved back into the gap before it. A widened word never overlaps its neighbours and never
+leaves its segment. Each widening adds a warning such as
+`seg_0002: zero-length word at 13.76 s widened to 0.01 s ([13.75, 13.76])`. A word that has no room for this
+(no 0.01 s gap between its neighbours), or that lies outside its segment, is not widened.
+
+If any word in a segment still violates the rules (non-positive duration, outside the segment, out of order,
+empty text), the whole segment's `words` becomes `null` and a warning names the segment. Apart from the
+0.01 s widening above, word data is never repaired or invented. The validator stays strict: no output word
+has `end <= start`.
 
 ## Source
 
