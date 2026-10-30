@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.6 - 2026-10-30
+
+- ci: pin third-party actions by commit SHA (#37) (57c47f0)
+
 ## 0.7.5 - 2026-10-30
 
 - Add `contract` alias of `skill --json` (roadmap step 2) (#36) (edcdaca)
