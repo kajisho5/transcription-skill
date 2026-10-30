@@ -295,7 +295,8 @@ class EngineContractTests(unittest.TestCase):
         c = skill_contract()
         names = [t["name"] for t in c["tools"]]
         self.assertEqual(names, ["transcription/transcribe", "transcription/segments", "transcription/export", "transcription/check", "transcription/batch"])
-        self.assertEqual((c["id"], c["version"]), ("transcription-skill", "0.2.0"))
+        from transcription_skill import __version__
+        self.assertEqual((c["id"], c["version"]), ("transcription-skill", __version__))
         for t in TOOLS:
             self.assertTrue(t["description"] and t["input"] and t["output"])
         with self.assertRaises(TranscriptionError):
