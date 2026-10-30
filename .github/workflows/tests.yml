@@ -3,6 +3,9 @@
 name: tests
 on:
   workflow_dispatch:
+permissions:
+  contents: read
+
 jobs:
   unit:
     strategy:
