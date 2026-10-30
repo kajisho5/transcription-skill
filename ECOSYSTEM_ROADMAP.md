@@ -23,7 +23,7 @@ Agent wires transcribe only (ADR-024); segments/export/check/batch unused. Extra
 
 - [ ] **1. Single-source the version** — coordinated with the agent's version gate
   - Done when: `skill --json` version == tag
-- [ ] **2. `contract` alias of `skill --json`** — same command name as the other skills
+- [x] **2. `contract` alias of `skill --json`** — same command name as the other skills — [#36](https://github.com/kajisho5/transcription-skill/pull/36)
   - Done when: outputs match
 - [ ] **3. Run CI on PRs** — needs an owner decision on Actions minutes
   - Done when: a green run recorded
