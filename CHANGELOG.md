@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.3 - 2026-10-30
+
+- Add ECOSYSTEM_ROADMAP.md: gaps, wiring and PR-sized steps from the 2026-10-30 ecosystem audit (#34) (fc2cedd)
+
 ## 0.7.2 - 2026-10-22
 
 - ci: bump GitHub Actions (checkout v7, setup-python v7, codeql v4 and others) (#33) (990eb5f)
