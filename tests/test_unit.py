@@ -1064,7 +1064,9 @@ class JsonProtocolTests(unittest.TestCase):
 
     def run_cli(self, argv, stdin=""):
         env = dict(os.environ, PYTHONUTF8="1")
-        p = subprocess.run([sys.executable, "-m", "transcription_skill.cli"] + argv, input=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        # the child writes UTF-8 (PYTHONUTF8=1); decode it as such, not with the parent's locale codec (cp1252 on Windows)
+        p = subprocess.run([sys.executable, "-m", "transcription_skill.cli"] + argv, input=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           text=True, encoding="utf-8", env=env)
         return p.returncode, p.stdout, p.stderr
 
     def assertOneJson(self, out):

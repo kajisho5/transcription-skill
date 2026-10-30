@@ -40,6 +40,16 @@ def has_traversal(raw: str) -> bool:
     return any(part == ".." for part in raw.replace("\\", "/").split("/"))
 
 
+def _realpath(path: str) -> str:
+    """`os.path.realpath`, non-strict on every supported Python. On Windows, Python 3.9 raises for a path on
+    an unreachable UNC share (WinError 53) where 3.10+ returns it unresolved; do the same here, so such an
+    input is judged by containment and existence like any other path instead of escaping as an OSError."""
+    try:
+        return os.path.realpath(path)
+    except OSError:
+        return os.path.normpath(path)
+
+
 def _resolve_roots(roots: Optional[List[str]], field: str) -> List[str]:
     out: List[str] = []
     for r in roots or []:
@@ -79,7 +89,7 @@ class PathPolicy:
         if self.roots and has_traversal(raw):
             raise TranscriptionError("INVALID_INPUT", "input path contains '..' and allowed roots are enforced", {"reason": "traversal"})
         absolute = os.path.abspath(raw)
-        resolved = os.path.realpath(absolute)
+        resolved = _realpath(absolute)
         if self.roots and not any(is_within(root, resolved) for root in self.roots):
             reason = "symlink_escape" if os.path.islink(absolute) or os.path.normcase(os.path.normpath(absolute)) != os.path.normcase(resolved) else "outside_allowed_roots"
             raise TranscriptionError("INVALID_INPUT", f"input is outside the allowed roots: {os.path.basename(raw) or raw}", {"reason": reason})
@@ -129,7 +139,7 @@ class OutputPolicy:
             raise TranscriptionError("INVALID_INPUT", "output path must name a file", {"reason": "not_regular_file"})
         if not os.path.isdir(parent):
             raise TranscriptionError("INVALID_INPUT", f"output directory does not exist: {parent}")
-        resolved = os.path.realpath(absolute) if os.path.lexists(absolute) else os.path.join(os.path.realpath(parent), name)
+        resolved = _realpath(absolute) if os.path.lexists(absolute) else os.path.join(_realpath(parent), name)
         if os.path.isdir(resolved):
             raise TranscriptionError("INVALID_INPUT", f"output path is a directory: {raw}", {"reason": "not_regular_file"})
         if self.roots and not any(is_within(root, resolved) for root in self.roots):

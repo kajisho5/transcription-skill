@@ -153,7 +153,7 @@ class RealMediaTests(unittest.TestCase):
         self.assertLess(abs(second[0]["start"] - onset2), 1.5)
         self.assertLessEqual(doc["segments"][-1]["end"], doc["duration"] + 0.5)
         words = [w for s in doc["segments"] for w in (s["words"] or [])]
-        self.assertGreater(len(words), 10)
+        self.assertGreater(len(words), 10, doc["warnings"])
         events = speech_events(doc, merge_gap=0.5)
         self.assertEqual(len(events), len(doc["segments"]))
 
