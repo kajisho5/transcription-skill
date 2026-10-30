@@ -110,7 +110,7 @@
   its own.
 
 ## ADR-020 The JSON contract is the source of truth, and drift is a test failure
-- `skill --json` must equal the live registry and engine objects; every tool in the contract must be
+- `contract --json` (alias `skill --json`, ADR-031) must equal the live registry and engine objects; every tool in the contract must be
   dispatched by `run_tool` and reachable from the CLI; schema ids in code, contract and schema files must
   agree. `ContractDriftTests` and evals 11–13 enforce it, so the README can never be the only place a
   fact lives.
@@ -199,3 +199,16 @@
   export) and `allowed_output_roots` on the export tool, so `run -` and the CLI share it; `doctor` reports
   it. Without roots the historic behaviour (write where asked, next to the input by default) is kept, for the
   same reason as ADR-024. The transcript cache and per-run temp dirs were already confined to the workspace.
+
+## ADR-031 `contract` is the contract command; `skill --json` stays as an alias with identical output
+- Every other skill in the ecosystem publishes its machine-readable contract as `<cli> contract --json`
+  (qc-skill, ingest-skill, ...); this one used `transcription skill --json`, so an orchestrator or registry
+  had to special-case the name. `transcription contract` now prints the contract document; `cmd_contract`
+  calls `cmd_skill` with `json=True`, so the two outputs are the same bytes by construction, and
+  `JsonProtocolTests.test_contract_is_an_alias_of_skill_json` compares the stdout of `skill --json`,
+  `contract --json` and bare `contract`.
+- `contract` always prints JSON and takes `--json` only so the ecosystem's `contract --json` form works,
+  the same as `ingest contract`. `skill` is not removed or deprecated: existing callers
+  (video-production-agent's adapter, the conformance tests, evals) keep working, and `skill` without
+  `--json` keeps its human-readable summary. The document itself is unchanged, so `CONTRACT_VERSION`
+  stays `1.0`.

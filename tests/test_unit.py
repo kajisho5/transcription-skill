@@ -1072,6 +1072,17 @@ class JsonProtocolTests(unittest.TestCase):
         self.assertTrue(out.endswith("\n"))
         return doc
 
+    def test_contract_is_an_alias_of_skill_json(self):
+        """`contract` / `contract --json` (the ecosystem's command name) print exactly what `skill --json` prints."""
+        rc, skill_out, err = self.run_cli(["skill", "--json"])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self.assertOneJson(skill_out)["skill_id"], "transcription-skill")
+        for argv in (["contract", "--json"], ["contract"]):
+            rc, out, err = self.run_cli(argv)
+            self.assertEqual(rc, 0, (argv, err))
+            self.assertEqual(out, skill_out, argv)
+            self.assertEqual(err, "", argv)
+
     def test_json_commands_emit_one_document_even_on_error(self):
         tmp = tempfile.mkdtemp(prefix="ts_json_")
         try:
@@ -1080,7 +1091,7 @@ class JsonProtocolTests(unittest.TestCase):
             good = os.path.join(tmp, "good.json")
             Path(good).write_text(json.dumps(good_doc()), encoding="utf-8")
             cases = [
-                (["skill", "--json"], 0), (["doctor", "--json", "--workspace", tmp], None), (["engines", "--json"], 0),
+                (["skill", "--json"], 0), (["contract", "--json"], 0), (["contract"], 0), (["doctor", "--json", "--workspace", tmp], None), (["engines", "--json"], 0),
                 (["cache", "size", "--json", "--workspace", tmp], 0), (["cache", "list", "--json", "--workspace", tmp], 0),
                 (["cache", "clear", "--json", "--workspace", tmp], 0),
                 (["models", "list", "--json"], 0), (["models", "pull", "--json"], 2), (["models", "remove", "--json"], 2),

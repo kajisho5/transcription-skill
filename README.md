@@ -125,8 +125,8 @@ skill exists to make recognition a **reusable, verifiable data step**:
 - **Offline is a constraint, not a hope.** `--offline` refuses remote engines and any model download before
   anything runs.
 - **Built to be called from another program.** `transcription run -` takes one JSON request on stdin and
-  answers with exactly one JSON document; `transcription skill --json` publishes the tool and engine
-  contract; input paths can be confined to allowed roots.
+  answers with exactly one JSON document; `transcription contract --json` (alias: `skill --json`)
+  publishes the tool and engine contract; input paths can be confined to allowed roots.
 
 ## Ecosystem: PROCESS · MEASURE · TRANSCRIBE · DECIDE
 
@@ -197,7 +197,8 @@ transcription export lecture.transcript.json --format srt -o lecture.srt   # or 
 transcription segments lecture.transcript.json --merge-gap 0.5 --json   # SpeechEvent candidates
 transcription cache size|list|clear                    # inspect or prune the transcript cache
 transcription models list|pull|remove [MODEL]          # inspect, pre-fetch, or drop a model in the engine's local cache
-transcription skill --json                             # the skill / tool / engine contract (source of truth)
+transcription contract --json                          # the skill / tool / engine contract (source of truth)
+transcription skill --json                             # alias: byte-for-byte the same document as `contract`
 echo '{"tool":"transcription/transcribe","params":{"input":"lecture.mp4","language":"ja"}}' | transcription run -
                                                        # process-boundary transport: one JSON request in, one JSON response out
 transcription transcribe lecture.mp4 --offline         # hard no-network constraint (local engine + local model only)
@@ -226,10 +227,14 @@ run_tool("transcription/check", {"transcript": "lecture.transcript.json"})
 
 Tools: `transcription/transcribe`, `transcription/segments`, `transcription/export`, `transcription/check`, `transcription/batch`.
 Every parameter is typed JSON. A request that contains `command`, `argv`, `shell` or a credential is
-refused with `INVALID_INPUT`. `transcription skill --json` returns the contract including every
+refused with `INVALID_INPUT`. `transcription contract --json` returns the contract including every
 registered engine's `EngineSpec` (schema `transcription-skill/engine-spec/0.1`); that JSON, not this
 README, is what a consumer should read, and `tests/test_unit.py::ContractDriftTests` fails whenever
 the contract and the implementation diverge (tools, engines, capabilities, schema versions).
+`contract` is the command name every skill in the ecosystem uses (`qc contract --json`, `ingest contract --json`);
+`transcription skill --json` is kept as an alias that prints the identical document, and `transcription contract`
+prints that JSON with or without `--json` (ADR-031). Without `--json`, `transcription skill` still prints a short
+human-readable summary.
 
 `skill --json` also carries the fields the OS's `CapabilityContract` reads: `skill_id` (canonical identity;
 `id` is kept for 0.2.0 consumers), `contract_version` (the shape's own version, `1.0`, independent of the

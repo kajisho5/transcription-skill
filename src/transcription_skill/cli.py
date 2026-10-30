@@ -1,4 +1,4 @@
-"""CLI: `transcription doctor | transcribe | segments | export | check | batch | cache | models | engines | skill | run`.
+"""CLI: `transcription doctor | transcribe | segments | export | check | batch | cache | models | engines | contract | skill | run`.
 
 stdout carries either human-readable text or, with --json, exactly one JSON document. Errors are
 structured: with --json they are the JSON document on stdout; otherwise one `error:` line on stderr.
@@ -328,6 +328,13 @@ def cmd_skill(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_contract(args: argparse.Namespace) -> int:
+    """`transcription contract [--json]`: the command name every ecosystem skill uses for its machine-readable
+    contract (`qc contract --json`, `ingest contract --json`, ...). Always the JSON document, byte-identical to
+    `skill --json`, which stays as an alias (ADR-031)."""
+    return cmd_skill(argparse.Namespace(json=True))
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="transcription", description="Speech recognition skill: audio/video -> Transcript. Not an editor, not an agent.")
     ap.add_argument("--version", action="version", version=f"transcription-skill {__version__}")
@@ -419,7 +426,11 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("request", help="'-' (stdin)")
     r.set_defaults(func=cmd_run, json=True)
 
-    k = sub.add_parser("skill", help="print the skill / tool contract")
+    ct = sub.add_parser("contract", help="print the skill / tool / engine contract as JSON (same document as `skill --json`)")
+    ct.add_argument("--json", action="store_true", help="accepted for the ecosystem's `contract --json` form; the output is always JSON")
+    ct.set_defaults(func=cmd_contract, json=True)
+
+    k = sub.add_parser("skill", help="print the skill / tool contract (`skill --json` is an alias of `contract`)")
     k.add_argument("--json", action="store_true")
     k.set_defaults(func=cmd_skill)
     return ap
