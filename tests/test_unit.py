@@ -275,7 +275,7 @@ class EngineContractTests(unittest.TestCase):
         d = eng.describe()
         self.assertEqual(d["id"], "faster_whisper")
         if not d["available"]:
-            self.assertIn("pip install", d["reason"])
+            self.assertIn("pip install", d["unavailable_reason"])   # EngineSpec field (engine_spec.schema.json)
             self.assertEqual(d["supported_languages"], [])
         else:
             self.assertIn("ja", d["supported_languages"])
@@ -1090,11 +1090,13 @@ class JsonProtocolTests(unittest.TestCase):
             Path(bad).write_text("{not json", encoding="utf-8")
             good = os.path.join(tmp, "good.json")
             Path(good).write_text(json.dumps(good_doc()), encoding="utf-8")
+            # `models list` needs the engine itself: without faster-whisper it is a structured ENGINE_UNAVAILABLE (exit 1)
+            fw_available = get_engine("faster_whisper").available()
             cases = [
                 (["skill", "--json"], 0), (["contract", "--json"], 0), (["contract"], 0), (["doctor", "--json", "--workspace", tmp], None), (["engines", "--json"], 0),
                 (["cache", "size", "--json", "--workspace", tmp], 0), (["cache", "list", "--json", "--workspace", tmp], 0),
                 (["cache", "clear", "--json", "--workspace", tmp], 0),
-                (["models", "list", "--json"], 0), (["models", "pull", "--json"], 2), (["models", "remove", "--json"], 2),
+                (["models", "list", "--json"], 0 if fw_available else 1), (["models", "pull", "--json"], 2), (["models", "remove", "--json"], 2),
                 (["models", "list", "--json", "--engine", "nope"], 1),
                 (["engines", "--offline", "--language", "ja", "--json"], 0), (["engines", "--engine", "faster_whisper", "--json"], 0),
                 (["check", good, "--json"], 0), (["check", bad, "--json"], 1),

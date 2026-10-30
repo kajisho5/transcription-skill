@@ -258,6 +258,9 @@ def cmd_models(args: argparse.Namespace) -> int:
     directly, so a model can be pre-fetched deliberately before going --offline at a venue with no
     network, instead of only ever being populated as a side effect of running a transcription."""
     engine = get_engine(args.engine)
+    # a malformed command is INVALID_INPUT (exit 2) whether or not the engine is installed
+    if args.models_action != "list" and not args.model:
+        raise TranscriptionError("INVALID_INPUT", "a model name is required for 'pull' and 'remove'")
     if not engine.available():
         raise TranscriptionError("ENGINE_UNAVAILABLE", engine.unavailable_reason() or f"engine {args.engine} unavailable")
     if args.models_action == "list":
@@ -268,8 +271,6 @@ def cmd_models(args: argparse.Namespace) -> int:
             for r in rows:
                 print(f"  {r['model']:<18} {r['availability']:<24} {r['detail']}")
         return 0
-    if not args.model:
-        raise TranscriptionError("INVALID_INPUT", "a model name is required for 'pull' and 'remove'")
     if args.models_action == "pull":
         download = getattr(engine, "download_model", None)
         if download is None:
