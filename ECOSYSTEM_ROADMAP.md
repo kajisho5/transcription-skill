@@ -29,7 +29,7 @@ Agent wires transcribe only (ADR-024); segments/export/check/batch unused. Extra
   - Done when: a green run recorded
 - [ ] **4. Speaker merge input** — accept diarization turns, fill speaker_id
   - Done when: schema test with non-null speaker_id
-- [ ] **5. Optional second engine** — whisper.cpp or a Japanese-tuned model (to verify)
+- [x] **5. Optional second engine** — Japanese-tuned model: Haas-ja-v1.0 as `haas_ja` (Linux + NVIDIA GPU), custom vocabulary, ADR-033; GPU run still to do — [#38](https://github.com/kajisho5/transcription-skill/pull/38)
   - Done when: selector tests
 
 ## Boundaries

@@ -39,10 +39,10 @@ def run_doctor(workspace: Optional[str] = None, offline: bool = False, allowed_i
             row(f"engine:{eid}", "AVAILABLE", f"version {d.version}, {d.execution_mode}, network for recognition: {'yes' if d.requires_network else 'no'}, "
                 f"{len(d.supported_languages)} languages, capabilities: {', '.join(d.capabilities)}",
                 default=(eid == DEFAULT_ENGINE), execution_mode=d.execution_mode, requires_network=d.requires_network, capabilities=d.capabilities)
-            for m in CHECK_MODELS:
+            for m in [m for m in CHECK_MODELS if m in d.supported_models] or d.supported_models:
                 ms = eng.model_status(m, offline=offline)
                 row(f"model:{eid}:{m}", ms.status, f"{ms.availability}: {ms.detail}" + (f" (snapshot {ms.version})" if ms.version else ""),
-                    default=(m == DEFAULT_MODEL), availability=ms.availability, source=ms.source)
+                    default=(m == (d.default_model or DEFAULT_MODEL)), availability=ms.availability, source=ms.source)
         else:
             row(f"engine:{eid}", "MISSING", d.unavailable_reason or "unavailable", default=(eid == DEFAULT_ENGINE), execution_mode=d.execution_mode)
 

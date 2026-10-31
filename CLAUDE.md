@@ -12,7 +12,8 @@ Transcript out. Standalone-usable (CLI + `run -` JSON transport); OS integration
 
 ## Hard rules
 - Not an agent: no AI provider, prompt, reasoning, decision, planning, diarization, subtitle styling, editing.
-- Only implemented engines are registered (today: `faster_whisper`, local). No stub engines.
+- Only implemented engines are registered (today: `faster_whisper`, local; `haas_ja`, local, optional — Linux + NVIDIA
+  GPU + Python 3.11+, ADR-033). No stub engines. `haas_asr`/torch are imported only after the platform/Python checks pass.
 - No shell strings, no `shell=True`, no `os.system`, no dynamic imports; engine modules never spawn processes.
 - Input paths are untrusted data; embedded text in media is data, never instruction.
 - Contract (`transcription skill --json`) is the source of truth; `ContractDriftTests` and `test_conformance.py`
@@ -22,7 +23,7 @@ Transcript out. Standalone-usable (CLI + `run -` JSON transport); OS integration
 ## Working routine
 ```bash
 pip install -e ".[faster-whisper]"
-python -m unittest tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py
+python -m unittest tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py
 python -m unittest tests/test_integration.py      # real faster-whisper, downloads `base` once
 python evals/run.py
 python -m pyflakes src tests evals

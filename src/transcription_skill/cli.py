@@ -33,11 +33,15 @@ def _fmt_time(t: float) -> str:
 
 
 def _transcribe_params(args: argparse.Namespace) -> Dict[str, Any]:
-    p: Dict[str, Any] = {"input": args.input, "engine": args.engine, "model": args.model, "word_timestamps": bool(args.word_timestamps),
+    p: Dict[str, Any] = {"input": args.input, "engine": args.engine, "word_timestamps": bool(args.word_timestamps),
                          "temperature": args.temperature, "beam_size": args.beam_size, "cache": not args.no_cache, "dry_run": bool(args.dry_run),
                          "offline": bool(args.offline), "vad_filter": bool(args.vad_filter)}
+    if args.model:
+        p["model"] = args.model
     if args.language:
         p["language"] = args.language
+    if args.vocabulary:
+        p["vocabulary"] = _load_vocabulary_file(args.vocabulary)
     if args.audio_stream is not None:
         p["audio_stream"] = args.audio_stream
     if args.initial_prompt:
@@ -58,6 +62,20 @@ def _transcribe_params(args: argparse.Namespace) -> Dict[str, Any]:
     return p
 
 
+def _load_vocabulary_file(path: str) -> Any:
+    """`--vocabulary FILE`: a UTF-8 JSON object {"written form": ["reading", ...], ...}. Only read here; the
+    request parser validates the content like any other `vocabulary` value."""
+    if not os.path.isfile(path):
+        raise TranscriptionError("FILE_NOT_FOUND", f"vocabulary file not found: {path}")
+    if os.path.getsize(path) > 1024 * 1024:
+        raise TranscriptionError("INVALID_INPUT", "vocabulary file larger than 1 MiB")
+    with open(path, encoding="utf-8-sig") as fh:
+        try:
+            return json.load(fh)
+        except ValueError as exc:
+            raise TranscriptionError("INVALID_INPUT", f"vocabulary file is not valid JSON: {exc}")
+
+
 def cmd_transcribe(args: argparse.Namespace) -> int:
     params = _transcribe_params(args)
     res = run_tool("transcription/transcribe", params)
@@ -73,6 +91,9 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
                   f"{e['supported_languages']} languages, word timestamps: {e['word_timestamps']})")
             print(f"  model     {m['model']}: {m['availability']} ({m['detail']})")
             print(f"  language  {res['language']}   word timestamps: {res['word_timestamps']}   offline: {res['offline']}   network use: {res['network_use']}")
+            vocab = res["request"].get("vocabulary")
+            if vocab:
+                print(f"  vocabulary {len(vocab)} word(s)")
             print(f"  budget    timeout {res['budget']['timeout']:g}s, max audio {res['budget']['max_audio_seconds']:g}s")
             print(f"  cache     {c['status']} ({c['key'][:16]}...)   workspace {res['workspace']}")
             pp = res["path_policy"]
@@ -146,8 +167,9 @@ def cmd_engines(args: argparse.Namespace) -> int:
     reg = default_registry()
     if args.engine:
         specs = [reg.inspect(args.engine, offline=args.offline)]
-    elif any(v is not None for v in (args.execution_mode, args.language, args.capability)) or args.offline or args.word_timestamps:
-        req = EngineRequirements(execution_mode=args.execution_mode, language=args.language, offline=args.offline, word_timestamps=args.word_timestamps)
+    elif any(v is not None for v in (args.execution_mode, args.language, args.capability)) or args.offline or args.word_timestamps or args.vocabulary:
+        req = EngineRequirements(execution_mode=args.execution_mode, language=args.language, offline=args.offline, word_timestamps=args.word_timestamps,
+                                 vocabulary=args.vocabulary)
         sel = select_engines(req, reg)
         if args.capability:
             sel.candidates = [c for c in sel.candidates if c.has(args.capability)]
@@ -345,12 +367,14 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("input")
     t.add_argument("--language", help="ISO 639-1 code (ja, en, ...); default: auto-detect, recorded as unknown when uncertain")
     t.add_argument("--engine", default="faster_whisper")
-    t.add_argument("--model", default="base", help="Whisper model name for faster_whisper (default base)")
+    t.add_argument("--model", help="model name (default: the engine's default; faster_whisper: base, haas_ja: Haas-ja-v1.0)")
     t.add_argument("--word-timestamps", action="store_true", help="also record per-word timestamps")
     t.add_argument("--temperature", type=float, default=0.0)
     t.add_argument("--beam-size", type=int, default=5)
     t.add_argument("--audio-stream", type=int, help="0-based index of the audio stream to decode on a multi-track input (default: 0, the first)")
     t.add_argument("--initial-prompt", help="vocabulary hint passed to the ASR decoder (names, terms); not an instruction")
+    t.add_argument("--vocabulary", metavar="FILE", help="custom vocabulary JSON {\"written form\": [\"reading\", ...]} for engines with "
+                   "custom_vocabulary (haas_ja); refused by other engines")
     t.add_argument("--asset-id", help="asset identity to stamp on the transcript (default: derived from the file fingerprint)")
     t.add_argument("--timeout", type=float, help="budget: seconds the engine may run (default 14400, same as --max-audio-seconds' default)")
     t.add_argument("--max-audio-seconds", type=float, help="budget: refuse media longer than this (default 14400)")
@@ -400,6 +424,7 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--language")
     g.add_argument("--capability", help="require a capability (e.g. word_timestamps, local_execution)")
     g.add_argument("--word-timestamps", action="store_true")
+    g.add_argument("--vocabulary", action="store_true", help="only engines that take a custom vocabulary")
     g.add_argument("--offline", action="store_true", help="only engines usable with no network and a local model")
     g.add_argument("--json", action="store_true")
     g.set_defaults(func=cmd_engines)

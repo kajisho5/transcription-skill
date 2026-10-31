@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
 from ..errors import TranscriptionError
-from .base import (CAP_LANGUAGE_DETECTION, CAP_WORD_TIMESTAMPS, EXECUTION_MODES, MODEL_AVAILABLE, EngineSpec,
+from .base import (CAP_CUSTOM_VOCABULARY, CAP_LANGUAGE_DETECTION, CAP_WORD_TIMESTAMPS, EXECUTION_MODES, MODEL_AVAILABLE, EngineSpec,
                    TranscriptionEngine)
 from .registry import EngineRegistry, default_registry
 
@@ -26,6 +26,7 @@ class EngineRequirements:
     offline: bool = False                      # network forbidden AND the model must already be on this machine
     word_timestamps: bool = False
     language_detection: bool = False
+    vocabulary: bool = False                   # the engine must take a custom vocabulary
     model: Optional[str] = None                # when given, the engine must know the model (and, offline, have it)
     engine_id: Optional[str] = None            # restrict to one engine
 
@@ -68,6 +69,7 @@ R_NETWORK_REQUIRED = "network_required"
 R_LANGUAGE = "language_unsupported"
 R_WORD_TIMESTAMPS = "word_timestamps_unsupported"
 R_LANGUAGE_DETECTION = "language_detection_unsupported"
+R_VOCABULARY = "custom_vocabulary_unsupported"
 R_MODEL_UNKNOWN = "model_unknown"
 R_MODEL_NOT_LOCAL = "model_not_available_offline"
 R_ENGINE_ID = "engine_id_mismatch"
@@ -90,6 +92,8 @@ def reject_reasons(engine: TranscriptionEngine, spec: EngineSpec, req: EngineReq
         reasons.append(R_WORD_TIMESTAMPS)
     if req.language_detection and not spec.has(CAP_LANGUAGE_DETECTION):
         reasons.append(R_LANGUAGE_DETECTION)
+    if req.vocabulary and not spec.has(CAP_CUSTOM_VOCABULARY):
+        reasons.append(R_VOCABULARY)
     model = req.model or spec.default_model
     if model is not None:
         ms = engine.model_status(model, offline=req.offline)

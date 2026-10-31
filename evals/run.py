@@ -276,9 +276,15 @@ def run_contract_case2(case: Dict[str, Any], check) -> None:
             check(f"{e['id']}: contract == spec(include_models)", e == engine.spec(include_models=True).to_dict(), True, True)
             check(f"{e['id']}: contract == inspect()", e == reg.inspect(e["id"]).to_dict(), True, True)
             check(f"{e['id']}: execution_mode/network from class", (e["execution_mode"], e["requires_network"]) == (type(engine).execution_mode, type(engine).requires_network), True, True)
-            check(f"{e['id']}: capabilities from methods", ("word_timestamps" in e["capabilities"]) == engine.supports_word_timestamps()
-                  and ("language_detection" in e["capabilities"]) == engine.supports_language_detection(), e["capabilities"], "derived")
-        check("contract lists exactly the registry", [e["id"] for e in c["engines"]] == reg.ids() == ["faster_whisper"], [e["id"] for e in c["engines"]], ["faster_whisper"])
+            if e["available"]:   # an unavailable engine publishes only its execution capabilities (base.capabilities)
+                check(f"{e['id']}: capabilities from methods", ("word_timestamps" in e["capabilities"]) == engine.supports_word_timestamps()
+                      and ("language_detection" in e["capabilities"]) == engine.supports_language_detection()
+                      and ("custom_vocabulary" in e["capabilities"]) == engine.supports_vocabulary(), e["capabilities"], "derived")
+            else:
+                check(f"{e['id']}: unavailable engine publishes execution capabilities only", e["capabilities"] == engine.capabilities() == ["local_execution"],
+                      e["capabilities"], ["local_execution"])
+        check("contract lists exactly the registry", [e["id"] for e in c["engines"]] == reg.ids() == ["faster_whisper", "haas_ja"], [e["id"] for e in c["engines"]],
+              ["faster_whisper", "haas_ja"])
     elif m == "model_status":
         eng = reg.get("faster_whisper")
         bad = []

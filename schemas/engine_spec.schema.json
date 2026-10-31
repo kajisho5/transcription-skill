@@ -14,7 +14,7 @@
     "unavailable_reason": {"type": ["string", "null"]},
     "requires_network": {"type": "boolean", "description": "recognition itself needs the network (true for every remote engine); a one-time model download is reported per model instead"},
     "deterministic": {"type": "boolean"},
-    "capabilities": {"type": "array", "items": {"enum": ["local_execution", "remote_execution", "network_required", "local_model", "model_download", "word_timestamps", "language_detection"]}},
+    "capabilities": {"type": "array", "items": {"enum": ["local_execution", "remote_execution", "network_required", "local_model", "model_download", "word_timestamps", "language_detection", "custom_vocabulary"]}},
     "supported_languages": {"type": "array", "items": {"type": "string"}},
     "supported_models": {"type": "array", "items": {"type": "string"}},
     "default_model": {"type": ["string", "null"]},
