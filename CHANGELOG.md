@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.7 - 2026-10-31
+
+- Haas-ja-v1.0 as an optional Japanese engine haas_ja with custom vocabulary (ADR-033) (#38) (bf75420)
+
 ## 0.7.6 - 2026-10-30
 
 - ci: pin third-party actions by commit SHA (#37) (57c47f0)
