@@ -1,4 +1,4 @@
-"""CLI: `transcription doctor | transcribe | segments | export | check | batch | cache | models | engines | contract | skill | run`.
+"""CLI: `transcription doctor | transcribe | segments | export | speakers | check | batch | cache | models | engines | contract | skill | run`.
 
 stdout carries either human-readable text or, with --json, exactly one JSON document. Errors are
 structured: with --json they are the JSON document on stdout; otherwise one `error:` line on stderr.
@@ -52,6 +52,8 @@ def _transcribe_params(args: argparse.Namespace) -> Dict[str, Any]:
         p["workspace"] = args.workspace
     if args.allowed_input:
         p["allowed_input_roots"] = list(args.allowed_input)
+    if args.speaker_turns:
+        p["speaker_turns"] = args.speaker_turns
     budget: Dict[str, Any] = {}
     if args.timeout is not None:
         budget["timeout"] = args.timeout
@@ -148,6 +150,32 @@ def cmd_export(args: argparse.Namespace) -> int:
     else:
         print(f"wrote {res['output']} ({res['format']})")
     return 0
+
+
+def cmd_speakers(args: argparse.Namespace) -> int:
+    res = run_tool("transcription/speakers", {"transcript": args.transcript, "turns": args.turns,
+                                              "allow_source_mismatch": bool(args.allow_source_mismatch), "replace": bool(args.replace)})
+    doc = res["transcript"]
+    out = OutputPolicy(args.allowed_output).resolve_output(args.output or _default_speakers_output(args.transcript),
+                                                           forbid=[args.transcript, args.turns])
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, ensure_ascii=False, indent=2)
+    if args.json:
+        _print_json({"ok": True, "output": os.path.abspath(out), "warnings": res["warnings"], "transcript": doc})
+        return 0
+    c = doc["speaker_assignment"]["counts"]
+    print(f"{c['assigned']} of {c['segments']} segment(s) got a speaker_id from {len(doc['speaker_assignment']['speakers'])} speaker(s)")
+    for seg in doc["segments"]:
+        print(f"  {_fmt_time(seg['start'])} --> {_fmt_time(seg['end'])}  [{seg['speaker_id'] or '-'}] {seg['text']}")
+    for w in res["warnings"]:
+        sys.stderr.write(f"warning: {w}\n")
+    print(f"wrote {out}")
+    return 0
+
+
+def _default_speakers_output(transcript: str) -> str:
+    base = transcript[:-len(".json")] if transcript.endswith(".json") else transcript
+    return base + ".speakers.json"
 
 
 def cmd_check(args: argparse.Namespace) -> int:
@@ -384,6 +412,8 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--workspace", help="cache/tmp directory (default $TRANSCRIPTION_WORKSPACE or ~/.cache/transcription-skill)")
     t.add_argument("--allowed-input", action="append", metavar="DIR", help="only accept inputs that resolve inside DIR (repeatable); default: any readable file")
     t.add_argument("--allowed-output", action="append", metavar="DIR", help="only write the transcript JSON inside DIR (repeatable); default: anywhere writable")
+    t.add_argument("--speaker-turns", metavar="FILE", help="diarization-skill turns JSON (diarization-skill/turns@1) of the same file: fill "
+                   "speaker_id after recognition (ADR-037); not part of the cache key")
     t.add_argument("-o", "--output", help="transcript JSON path (default <input>.transcript.json)")
     t.add_argument("--dry-run", action="store_true", help="show what would run (engine, model, language, budget, cache status) without running ASR")
     t.add_argument("--json", action="store_true", help="print one JSON document on stdout")
@@ -404,6 +434,17 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--allowed-output", action="append", metavar="DIR", help="only write inside DIR (repeatable)")
     e.add_argument("--json", action="store_true")
     e.set_defaults(func=cmd_export)
+
+    sp = sub.add_parser("speakers", help="fill speaker_id in a transcript from diarization-skill speaker turns (no diarization here)")
+    sp.add_argument("transcript")
+    sp.add_argument("--turns", required=True, metavar="FILE", help="diarization-skill turns JSON (diarization-skill/turns@1)")
+    sp.add_argument("--allow-source-mismatch", action="store_true", help="merge even when the two documents come from different files "
+                    "(only if both share one timeline)")
+    sp.add_argument("--replace", action="store_true", help="recompute speaker_id values that are already set")
+    sp.add_argument("-o", "--output", help="output transcript JSON (default <transcript>.speakers.json)")
+    sp.add_argument("--allowed-output", action="append", metavar="DIR", help="only write inside DIR (repeatable)")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_speakers)
 
     c = sub.add_parser("check", help="validate a transcript JSON against the contract")
     c.add_argument("transcript")

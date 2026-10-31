@@ -8,12 +8,11 @@ import os
 from typing import Any, Dict, List
 
 from . import SKILL_ID, __version__
-from .batch import run_batch
+from .batch import run_batch, transcribe_tool
 from .engines import ENGINE_CAPABILITIES, EXECUTION_MODES, default_registry
 from .errors import TranscriptionError
 from .export import FORMATS, write
-from .request import parse_request
-from .service import TranscriptionService
+from .speakers import load_json_document, merge_speakers
 from .speech_events import speech_events
 from .validate import validate_transcript
 
@@ -34,6 +33,7 @@ CAPABILITIES = [
     "input_path_policy",        # allowed_input_roots: resolved-path containment, traversal and symlink escape refused
     "output_path_policy",       # allowed_output_roots: outputs confined the same way; inputs are never overwritten
     "custom_vocabulary",        # request `vocabulary` for engines declaring the custom_vocabulary engine capability (haas_ja)
+    "speaker_merge",            # speaker_id filled from diarization-skill turns (`transcription/speakers`, transcribe `speaker_turns`); ADR-037
 ]
 
 TOOLS: List[Dict[str, Any]] = [
@@ -42,7 +42,8 @@ TOOLS: List[Dict[str, Any]] = [
                "temperature": "0..1", "initial_prompt": "str | null", "beam_size": "1..10", "audio_stream": "int >= 0 | null", "asset_id": "str | null",
                "budget": {"timeout": "seconds", "max_audio_seconds": "seconds"}, "cache": "bool", "workspace": "path | null", "offline": "bool",
                "allowed_input_roots": "list[dir] | null", "dry_run": "bool", "vad_filter": "bool",
-               "vocabulary": "{written form: list[reading]} | null"},
+               "vocabulary": "{written form: list[reading]} | null",
+               "speaker_turns": "diarization-skill/turns@1 document | path | null (merged after recognition, never cached)"},
      "output": {"transcript": "Transcript", "cache_hit": "bool", "cache_key": "sha256 hex", "warnings": "list[str]"}, "deterministic": True,
      "side_effects": ["writes cache under workspace"]},
     {"name": "transcription/segments", "description": "Derive SpeechEvent-compatible candidates from a Transcript (one per segment, optional gap merge).",
@@ -51,6 +52,12 @@ TOOLS: List[Dict[str, Any]] = [
      "input": {"transcript": "Transcript | path", "format": "|".join(FORMATS), "output": "path", "allowed_output_roots": "list[dir] | null"},
      "output": {"output": "path", "format": "str"},
      "deterministic": True, "side_effects": ["writes output file"]},
+    {"name": "transcription/speakers", "description": "Fill segments[].speaker_id (and words[].speaker_id) of a Transcript from "
+     "diarization-skill speaker turns (diarization-skill/turns@1), with diarization-skill's own ASSIGN rule. No diarization here.",
+     "input": {"transcript": "Transcript | path", "turns": "diarization-skill/turns@1 document | path", "allow_source_mismatch": "bool",
+               "replace": "bool"},
+     "output": {"transcript": "Transcript (speaker_id filled, speaker_assignment recorded)", "warnings": "list[str]"},
+     "deterministic": True, "side_effects": []},
     {"name": "transcription/check", "description": "Validate a Transcript document against the contract.",
      "input": {"transcript": "Transcript | path"}, "output": {"ok": "bool", "errors": "list[str]", "warnings": "list[str]"}, "deterministic": True, "side_effects": []},
     {"name": "transcription/batch", "description": "Run many transcription/transcribe requests in one process. One item's failure "
@@ -139,13 +146,7 @@ def run_tool(name: str, params: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(params, dict):
         raise TranscriptionError("INVALID_INPUT", "tool parameters must be a JSON object")
     if name == "transcription/transcribe":
-        p = dict(params)
-        dry = p.pop("dry_run", False)
-        if not isinstance(dry, bool):
-            raise TranscriptionError("INVALID_INPUT", "'dry_run' must be a boolean")
-        req = parse_request(p)
-        svc = TranscriptionService(workspace=req.workspace)
-        return svc.dry_run(req) if dry else svc.transcribe(req)
+        return transcribe_tool(params)
     if name == "transcription/segments":
         extra = set(params) - {"transcript", "merge_gap"}
         if extra:
@@ -166,6 +167,15 @@ def run_tool(name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         src = params.get("transcript") if isinstance(params.get("transcript"), str) else None
         path = write(doc, params.get("format", "json"), out, forbid=[src], allowed_output_roots=roots)
         return {"output": path, "format": params.get("format", "json")}
+    if name == "transcription/speakers":
+        extra = set(params) - {"transcript", "turns", "allow_source_mismatch", "replace"}
+        if extra:
+            raise TranscriptionError("INVALID_INPUT", f"unknown keys {sorted(extra)}")
+        doc = load_transcript(params.get("transcript"))
+        turns = load_json_document(params.get("turns"), "turns")
+        merged = merge_speakers(doc, turns, allow_source_mismatch=params.get("allow_source_mismatch", False),
+                                replace=params.get("replace", False))
+        return {"transcript": merged, "warnings": [w for w in merged["warnings"] if w.startswith("speaker_id:")]}
     if name == "transcription/check":
         extra = set(params) - {"transcript"}
         if extra:

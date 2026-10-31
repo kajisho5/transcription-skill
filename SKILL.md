@@ -72,7 +72,10 @@ never "fix" the transcript text yourself when the user asked for the transcript.
   first 30 s); segments in the other language are still transcribed.
 - `confidence` on segments is `exp(avg_logprob)` from the engine and is shared by segments in the same
   30 s decoding window; use it to compare, not as a calibrated probability.
-- `speaker_id` is always `null`. This skill does no diarization; do not tell the user who is speaking.
+- `speaker_id` is `null` unless the transcript went through a speaker merge (`transcription speakers --turns
+  turns.json`, or `transcribe --speaker-turns turns.json`) with turns from diarization-skill (`diarization diarize`).
+  This skill does no diarization itself. Merged ids are anonymous (`SPEAKER_00`, ...): they say which voice, never
+  who the person is; a `null` left after a merge means no turn covered the segment or two speakers tied.
 - `MODEL_UNAVAILABLE` with `availability: MODEL_MISSING` under `--offline` means the model is not on
   this machine; either run once online (`MODEL_DOWNLOAD_REQUIRED` shows a download will happen) or pick
   a model that `engines --engine faster_whisper --offline` lists as `MODEL_AVAILABLE`.

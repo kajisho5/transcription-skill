@@ -31,7 +31,7 @@ The validator in `validate.py` is the executable form of this document; `transcr
 | `raw_text` | string | engine text verbatim |
 | `confidence` | number in [0,1] \| null | engine metric (faster-whisper: `exp(avg_logprob)`); `null` when the engine gives none |
 | `words` | Word[] \| null | `null` when word timestamps were not requested or the engine could not provide consistent ones |
-| `speaker_id` | string \| null | **reserved.** Always `null` in this skill (no diarization). A future diarization skill may fill it. |
+| `speaker_id` | string \| null | `null` from recognition (this skill does no diarization). Filled only by a speaker merge (ADR-037): `transcription/speakers`, or `speaker_turns` on `transcription/transcribe`, copies an anonymous `SPEAKER_nn` id from diarization-skill turns; `null` where no turn overlaps or two speakers tie. Never an empty string. |
 
 ## Word
 
@@ -40,6 +40,7 @@ The validator in `validate.py` is the executable form of this document; `transcr
 | `start`, `end` | seconds | `start < end`, contained in the segment (±0.01 s), ordered |
 | `text` | string | whitespace-trimmed token text |
 | `confidence` | number in [0,1] \| null | engine word probability when available |
+| `speaker_id` | string \| null, optional | present only after a speaker merge (ADR-037): the word's own speaker or `null` |
 
 One exception (ADR-032) comes first. faster-whisper rounds word times to 0.01 s, so a very short word can
 come back with `end <= start` by less than 0.01 s. Such a word is widened to exactly 0.01 s. It becomes
@@ -151,3 +152,25 @@ them is at most that many seconds form one event. `confidence` is the minimum ov
 importance is inferred. The shape mirrors a timeline event (type, start/end, source, confidence,
 metadata with evidence ids) so a consumer's adapter can lift it into its own Event model; this
 repository imports no such model.
+
+## Speaker merge (ADR-037)
+
+Input: a Transcript and a diarization-skill speaker-turns document (`diarization-skill/turns@1`, written by
+`diarization diarize` from the same media file; `source.fingerprint` must match unless `allow_source_mismatch`).
+Output: the same Transcript, unchanged except for:
+
+- `segments[].speaker_id` and, on segments with words, `segments[].words[].speaker_id`;
+- `warnings`: appended `speaker_id: ...` notes (segments left null, segments touching overlapping speech, a source
+  mismatch, replaced values);
+- `speaker_assignment`: `skill`, `skill_version`, `tool` (`transcription/speakers`), `created_at`, `method`
+  (`max_overlap_with_exclusive_turns`), `rule`, `speaker_ids`, `turns_schema`, `turns_created_at`,
+  `source_fingerprint`, `source_match`, `engine` (diarization engine, model, revision, licence, attribution),
+  `parameters`, `speakers`, `segments_per_speaker`, `counts`, `overlap_available`, `overlap_segment_ids`.
+  The same keys diarization-skill's `assign` writes.
+
+Rule (diarization-skill's ASSIGN rule, so both give the same ids): a word, or a segment without words, gets the
+speaker whose exclusive turns overlap it longest; zero overlap or a tie leaves `null`. A segment with words gets
+the speaker with the largest total duration of its assigned words; a tie or no assigned word leaves `null`.
+Nothing is inferred from neighbours. A transcript that already has speaker ids is refused unless `replace`.
+The merged document is validated again before it is returned. Through `transcribe`, the merge runs after
+recognition on the validated (possibly cached) Transcript and is never cached itself.

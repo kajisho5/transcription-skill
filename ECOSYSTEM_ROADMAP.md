@@ -13,7 +13,7 @@ pyproject/tag 0.7.2 but `__version__` 0.2.0 (contract says 0.2.0). faster-whispe
 
 | Owned job | Status | Note |
 |---|---|---|
-| 文字起こし | done | one engine; one language per transcript; speaker_id always null (reserved for diarization) |
+| 文字起こし | done | one engine; one language per transcript; speaker_id null from recognition, filled from diarization-skill turns by a speaker merge (step 4) |
 
 ## Wiring
 
@@ -27,7 +27,7 @@ Agent wires transcribe only (ADR-024); segments/export/check/batch unused. Extra
   - Done when: outputs match
 - [x] **3. Run CI on PRs** — owner decision on Actions minutes: every PR (and push to `main`) runs the `unit` matrix only; the heavy `integration`/`engines` jobs stay manual in `heavy-tests.yml`. Made safe first: CI-, docs-, test-only merges no longer cut a release, so they never drift video-production-agent's version pin (ADR-036) — [#41](https://github.com/kajisho5/transcription-skill/pull/41)
   - Done when: a green run recorded
-- [ ] **4. Speaker merge input** — accept diarization turns, fill speaker_id
+- [x] **4. Speaker merge input** — accept diarization turns, fill speaker_id — `transcription/speakers` (CLI `speakers --turns`) and `speaker_turns` on transcribe read diarization-skill's `diarization-skill/turns@1` and apply its ASSIGN rule; never cached, ADR-037 — [#42](https://github.com/kajisho5/transcription-skill/pull/42)
   - Done when: schema test with non-null speaker_id
 - [x] **5. Optional second engine** — Japanese-tuned model: Haas-ja-v1.0 as `haas_ja` (Linux + NVIDIA GPU), custom vocabulary, ADR-033; GPU run still to do — [#38](https://github.com/kajisho5/transcription-skill/pull/38)
   - Done when: selector tests

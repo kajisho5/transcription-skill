@@ -33,6 +33,7 @@
 ## ADR-006 `speaker_id` present and always null
 - The field exists on every Segment so consumers can rely on the key, and it is `null` because this
   skill does no diarization. Filling it is a separate skill's job; this skill never sets it.
+- Amended by ADR-037: recognition still never sets it; a speaker merge with diarization-skill turns can.
 
 ## ADR-007 Cache key excludes `model_version`, includes engine version and parameters
 - `model_version` (Hugging Face snapshot) is unknown before the first download, so putting it in the
@@ -443,3 +444,46 @@
   + releasable → release-drafter's patch/minor, manual → the explicit version).
 - The PR introducing this is itself merged with `[skip release]`: the new rule takes effect only after it is on
   `main`.
+
+## ADR-037 Speaker merge input: diarization-skill turns fill `speaker_id`, with diarization-skill's own ASSIGN rule
+- Need: roadmap step 4, "accept diarization turns, fill speaker_id". diarization-skill (0.1.0) writes anonymous
+  speaker turns (`diarization-skill/turns@1`, its `docs/turns.md` / `schemas/turns.schema.json`) and already has an
+  `assign` op that fills `speaker_id` in a transcript of ours. What was missing is the input on this side: the
+  agent wires `transcription/transcribe` only (ADR-024) and has nowhere to hand turns to this skill, and a
+  transcript consumer had to install diarization-skill just to merge two JSON documents it already holds.
+- Decision: `speakers.py` merges a turns document into a Transcript, exposed two ways: the tool
+  `transcription/speakers` (`transcript`, `turns`, `allow_source_mismatch`, `replace`; CLI `transcription speakers
+  T --turns F`), and an optional `speaker_turns` input on `transcription/transcribe` (and each `batch` item; CLI
+  `--speaker-turns`). This skill still does no diarization: who spoke when is read from diarization-skill's
+  document as data, so `not_provided` keeps "speaker diarization" and "speaker identification", and the
+  ecosystem's owner of 話者識別 stays diarization-skill.
+- Rule: diarization-skill's ASSIGN rule, copied, not re-designed (its `assign.py`): exclusive turns only; a word
+  (or a segment without words) gets the speaker with the longest overlap, zero overlap or a tie → `null`; a
+  segment with words gets the speaker with the largest total duration of its assigned words, tie → `null`; no
+  neighbour fill. The record goes under the top-level `speaker_assignment` with the same keys diarization-skill
+  writes (only `skill` / `skill_version` / `tool` name this skill), and the same `speaker_id: ...` warnings. So
+  `transcription speakers` and `diarization assign` on the same pair give the same document apart from those
+  three fields and `created_at`: checked on 490 random exclusive-turn layouts against diarization-skill `main`
+  (`speaker_id`s per segment and word, `counts`, `overlap_segment_ids` all equal; a manual cross-check, since this
+  repository does not depend on diarization-skill and its tests do not import it).
+  - Not chosen: a different rule (e.g. majority by segment midpoint, or filling gaps from the nearest turn). Two
+    skills producing different speakers for the same inputs would make the transcript depend on which tool ran.
+- Input checks (without importing diarization-skill; `diarization check` is the full validator): `schema` is
+  `diarization-skill/turns@1`, `source.fingerprint` is `sha256:<hex>`, `speakers` are `SPEAKER_nn`, every turn
+  has finite `start < end`, `start >= 0`, a listed speaker, and starts no earlier than the previous turn's end
+  (10 ms tolerance, diarization-skill's own). A transcript and turns from different files (fingerprints differ)
+  are refused unless `allow_source_mismatch`; a transcript that already has speaker ids is refused unless
+  `replace`. All of these are `INVALID_INPUT` with `details.reason` (`TURNS_SCHEMA`, `TURNS_INVALID`,
+  `SOURCE_MISMATCH`, `SPEAKERS_ALREADY_SET`); no new error code, so consumers' error mapping is unchanged. An
+  invalid input transcript is `VERIFICATION_FAILED`; a merged document that fails validation is `INVALID_RESULT`.
+- Cache: `speaker_turns` is not a recognition parameter. It is checked before recognition (a bad turns document
+  fails fast, before ASR), merged after it, and never enters `parameters()` or the cache key; the cache keeps
+  the speaker-less recognition result, so the same audio with and without turns shares one cache entry.
+- Schema (additive, `transcript/0.1` and `CONTRACT_VERSION` unchanged): `segment.speaker_id` gains
+  `minLength: 1` (the validator already refused `""`), `word.speaker_id` is documented as an optional
+  string-or-null (the validator now checks it the same way). The contract adds the tool, the transcribe input
+  `speaker_turns` and the capability `speaker_merge`; `provides` is unchanged (ADR-026: like `segments`,
+  `speakers` works on a Transcript someone already has).
+- Release (ADR-036): this changes `src/`, `schemas/` and `SKILL.md`, so the merge releases (a patch unless the PR
+  is labelled `feature`). video-production-agent pins this skill's exact version and contract, so it needs a
+  re-pin to see `transcription/speakers` / `speaker_turns`; its `check_contract` accepts the new contract as is.
