@@ -549,11 +549,6 @@ class RealSpeechCppTests(unittest.TestCase):
     def test_real_timed_model_transcribes_japanese_with_word_timestamps(self):
         self.need(REAL_TIMED)
         t = self.transcribe(REAL_TIMED)
-        vad = self.engine._file(S.VAD_MODEL)[0]["path"]
-        regions = subprocess.run(S.vad_argv([REAL], vad, str(FX / "ja_short.wav")), stdout=subprocess.PIPE, text=True, env=S.speech_env()).stdout
-        print(f"\n  regions {regions.strip()}")
-        for s in t["segments"]:
-            print(f"  {s['start']:.3f}-{s['end']:.3f} {s['text']} {[(w['start'], w['end'], w['text']) for w in s['words'] or []][:6]}")
         self.assertTrue(validate_transcript(t).ok, validate_transcript(t).errors)
         ref = REF["ja_short.wav"]
         text = "".join(s["text"] for s in t["segments"])
@@ -566,7 +561,6 @@ class RealSpeechCppTests(unittest.TestCase):
         words = [w for s in t["segments"] for w in s["words"]]
         self.assertLess(abs(words[0]["start"] - onset), 0.25, (onset, words[0]))
         self.assertLess(abs(words[-1]["end"] - offset), 0.4, (offset, words[-1]))
-        print(f"\n  {REAL_TIMED}: {text!r}; {[(s['start'], s['end']) for s in t['segments']]}; warnings {t['warnings']}")
 
     def test_real_untimed_model_gives_region_segments_with_null_words(self):
         self.need(REAL_UNTIMED)
@@ -576,7 +570,6 @@ class RealSpeechCppTests(unittest.TestCase):
         self.assertLessEqual(_cer(REF["ja_short.wav"]["reference_text"], text), 0.3, text)
         self.assertTrue(all(s["words"] is None for s in t["segments"]))
         self.assertTrue(any("no word timestamps" in w for w in t["warnings"]))
-        print(f"\n  {REAL_UNTIMED}: {text!r}; {[(s['start'], s['end']) for s in t['segments']]}")
 
     def test_real_doctor_reports_binary_backend_and_models(self):
         rows = {r["check"]: r for r in run_doctor(workspace=os.path.join(self.tmp, "doc"))["checks"]}
@@ -584,7 +577,6 @@ class RealSpeechCppTests(unittest.TestCase):
         self.assertEqual(rows["speechcpp:backend"]["status"], "AVAILABLE")
         self.assertIn(rows["speechcpp:backend"]["backend"], ("CPU", "Vulkan", "Metal"))
         self.assertEqual(rows["model:speechcpp:silero-vad"]["status"], "AVAILABLE")
-        print(f"\n  {rows['speechcpp:binary']['detail']}; {rows['speechcpp:backend']['detail']}")
 
 
 if __name__ == "__main__":
