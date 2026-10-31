@@ -18,7 +18,12 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 ## What exists (CURRENT)
 - Transcript / Segment / Word model, validator, JSON Schemas (`transcript/0.1`, `speech-event/0.1`, `engine-spec/0.1`)
 - Engine ecosystem: `EngineSpec`, `ModelStatus`, `EngineRegistry`, constraint `Selector` (no ranking), `--offline`
-- Reference Local Engine: `faster_whisper` (the only implemented engine); worker subprocess with real timeout
+- Reference Local Engine: `faster_whisper`; worker subprocess with real timeout
+- Optional engine `haas_ja` (Haas-ja-v1.0 via `haas-asr`, ADR-033) — EXPERIMENTAL: Japanese only, Linux + NVIDIA GPU +
+  Python 3.11+ (unavailable elsewhere with a reason), token-timed segments/words, custom `vocabulary`
+  (`--vocabulary FILE`, capability `custom_vocabulary`; refused by other engines). Unit-tested against a fake
+  `haas_asr` (`tests/test_haas.py`); **never run on a GPU yet** — recognition, timing accuracy, memory, speed and the
+  vocabulary effect are UNKNOWN until someone runs the comparison below on a GPU machine
 - Deterministic cache keyed by content fingerprint + engine id/version/execution_mode + model/model_version + parameters
 - Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt/tsv/txt), `check`, `batch` (many transcribe
   requests, one process; one item's failure never aborts the rest); CLI: doctor, transcribe, segments, export, check,
@@ -98,7 +103,11 @@ v1 (batch mode, language force-selection, long-recording timeout fix, tsv/txt ex
    (`ModelManagementTests.test_remove_then_pull_round_trip`).
 5. If a real multi-hour source file becomes available, run it end-to-end once to confirm memory/wall-clock
    behavior at the new default timeout default (PR #25) and record the result here.
-6. **PyPI distribution** (lower priority, needs a human decision, not just code): currently git-only
+6. **Run `haas_ja` on a GPU machine** (ADR-033): install haas-asr there, run the faster-whisper vs haas_ja comparison
+   on real Japanese conference audio (commands in docs/engines.md / the PR), record: whether it runs at all, timing
+   quality of segments/word groups against the audio, CER feel on names/jargon with and without `--vocabulary`, speed,
+   GPU memory at `BATCH_SIZE` 16, and whether two runs are identical (then flip `deterministic`).
+7. **PyPI distribution** (lower priority, needs a human decision, not just code): currently git-only
    because `PYPI_API_TOKEN` isn't configured (`.github/workflows/release.yml`'s publish step is skipped
    by design). Adding it is an operational/account decision (a PyPI project + token), not something a
    session should do unprompted — listed here so it isn't forgotten, not as work to start on its own.
@@ -189,3 +198,6 @@ ever needed.
 - 2026-09-13: shipped v1.1 roadmap item 3, model management CLI: `transcription models list|pull|remove`,
   backed by new `FasterWhisperEngine.download_model()`/`remove_model()`. Verified for real: removed and
   re-fetched the `base` model live via the CLI and via an automated real-cache round-trip test.
+- 2026-10-31: roadmap step 5, optional second engine: `haas_ja` (Haas-ja-v1.0 via haas-asr, ADR-033) with request
+  `vocabulary` / `--vocabulary`, engine capability `custom_vocabulary`, `unsupported_parameters` refusal hook,
+  per-engine default model. Unit tests with a fake `haas_asr` (`tests/test_haas.py`); not run on a GPU.

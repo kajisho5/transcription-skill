@@ -33,6 +33,7 @@ CAPABILITIES = [
     "engine_registry",          # machine-readable engine specs (execution_mode, network, models, capabilities)
     "input_path_policy",        # allowed_input_roots: resolved-path containment, traversal and symlink escape refused
     "output_path_policy",       # allowed_output_roots: outputs confined the same way; inputs are never overwritten
+    "custom_vocabulary",        # request `vocabulary` for engines declaring the custom_vocabulary engine capability (haas_ja)
 ]
 
 TOOLS: List[Dict[str, Any]] = [
@@ -40,7 +41,8 @@ TOOLS: List[Dict[str, Any]] = [
      "input": {"input": "path", "language": "iso639-1 | null", "engine": "engine id", "model": "model name", "word_timestamps": "bool",
                "temperature": "0..1", "initial_prompt": "str | null", "beam_size": "1..10", "audio_stream": "int >= 0 | null", "asset_id": "str | null",
                "budget": {"timeout": "seconds", "max_audio_seconds": "seconds"}, "cache": "bool", "workspace": "path | null", "offline": "bool",
-               "allowed_input_roots": "list[dir] | null", "dry_run": "bool", "vad_filter": "bool"},
+               "allowed_input_roots": "list[dir] | null", "dry_run": "bool", "vad_filter": "bool",
+               "vocabulary": "{written form: list[reading]} | null"},
      "output": {"transcript": "Transcript", "cache_hit": "bool", "cache_key": "sha256 hex", "warnings": "list[str]"}, "deterministic": True,
      "side_effects": ["writes cache under workspace"]},
     {"name": "transcription/segments", "description": "Derive SpeechEvent-compatible candidates from a Transcript (one per segment, optional gap merge).",
@@ -76,7 +78,7 @@ CONTRACT_VERSION = "1.0"
 
 # Skill dependencies in the OS sense (other Skills this one invokes at runtime). None: recognition runs
 # in-process through the engine contract; ffmpeg/ffprobe are external tools reported by `doctor`, and
-# faster-whisper is an optional provider package, not a Skill.
+# faster-whisper / haas-asr are optional provider packages, not Skills.
 DEPENDENCIES: List[Dict[str, str]] = []
 
 # Self-declared non-responsibilities (SKILL_SPEC.md: a machine-readable `not_provided`), mirroring the

@@ -27,8 +27,9 @@ CAP_LOCAL_MODEL = "local_model"              # models are files on this machine
 CAP_MODEL_DOWNLOAD = "model_download"        # the engine can fetch a missing model (needs network at that time only)
 CAP_WORD_TIMESTAMPS = "word_timestamps"
 CAP_LANGUAGE_DETECTION = "language_detection"
+CAP_CUSTOM_VOCABULARY = "custom_vocabulary"  # takes a request `vocabulary` ({written form: [readings]}) to bias decoding
 ENGINE_CAPABILITIES = (CAP_LOCAL_EXECUTION, CAP_REMOTE_EXECUTION, CAP_NETWORK_REQUIRED, CAP_LOCAL_MODEL, CAP_MODEL_DOWNLOAD,
-                       CAP_WORD_TIMESTAMPS, CAP_LANGUAGE_DETECTION)
+                       CAP_WORD_TIMESTAMPS, CAP_LANGUAGE_DETECTION, CAP_CUSTOM_VOCABULARY)
 
 # model availability, separate from doctor's AVAILABLE/MISSING/UNKNOWN status
 MODEL_AVAILABLE = "MODEL_AVAILABLE"                  # usable now, no network
@@ -86,6 +87,7 @@ class EngineRequest:
     beam_size: int
     offline: bool = False                # hard constraint: the engine must not touch the network (no model download)
     vad_filter: bool = False             # skip non-speech before decoding (engine capability pass-through; unchanged default)
+    vocabulary: Optional[Dict[str, List[str]]] = None   # written form -> readings; only for engines with custom_vocabulary
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -175,6 +177,15 @@ class TranscriptionEngine:
     def supports_language_detection(self) -> bool:
         raise NotImplementedError
 
+    def supports_vocabulary(self) -> bool:
+        """Whether the engine takes a custom vocabulary (request `vocabulary`). Default: no."""
+        return False
+
+    def unsupported_parameters(self, parameters: Dict[str, Any]) -> List[str]:
+        """Names of request parameters (TranscribeRequest.parameters()) set to a value this engine cannot
+        honour; the service refuses such a request instead of silently ignoring them. Default: none."""
+        return []
+
     def model_status(self, model: str, offline: bool = False) -> ModelStatus:
         """Availability of one model on this machine. Must not download anything. With offline=True a
         model that is not present is MODEL_MISSING even if the engine could otherwise fetch it."""
@@ -196,6 +207,8 @@ class TranscriptionEngine:
             caps.append(CAP_WORD_TIMESTAMPS)
         if self.supports_language_detection():
             caps.append(CAP_LANGUAGE_DETECTION)
+        if self.supports_vocabulary():
+            caps.append(CAP_CUSTOM_VOCABULARY)
         return caps
 
     def model_capabilities(self) -> List[str]:

@@ -66,7 +66,7 @@ has `end <= start`.
 | `engine`, `engine_version` | same as the top level |
 | `execution_mode` | `local` or `remote`: where recognition ran (from the engine's spec) |
 | `model`, `model_version` | model name; snapshot/commit id when the engine can report one, else `null` |
-| `parameters` | `language`, `word_timestamps`, `temperature`, `initial_prompt`, `beam_size`, `audio_stream` (0-based index actually used; `0` when the request left it unset) |
+| `parameters` | `language`, `word_timestamps`, `temperature`, `initial_prompt`, `beam_size`, `audio_stream` (0-based index actually used; `0` when the request left it unset), `vad_filter`; `vocabulary` (`{written form: [readings]}`) only when the request carried one (ADR-033) |
 | `parameters_hash` | sha256 of the canonical parameters JSON |
 | `cache_key` | sha256 identity of (fingerprint, {engine id, version, execution_mode}, {model, model_version}, parameters) |
 | `created_at`, `processing_seconds` | when, and total wall clock of the run (probe + extraction + engine) |

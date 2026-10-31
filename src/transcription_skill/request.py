@@ -17,9 +17,13 @@ from .validate import CREDENTIAL_PATTERNS
 DEFAULT_ENGINE = "faster_whisper"
 DEFAULT_MODEL = "base"
 MAX_INITIAL_PROMPT_CHARS = 500
+# custom vocabulary ({written form: [readings]}): bounded so a request stays a small, typed document
+MAX_VOCABULARY_WORDS = 500
+MAX_VOCABULARY_READINGS = 20
+MAX_VOCABULARY_CHARS = 100
 
 ALLOWED_KEYS = {"input", "language", "engine", "model", "word_timestamps", "temperature", "initial_prompt", "beam_size", "audio_stream",
-                "asset_id", "budget", "cache", "workspace", "offline", "allowed_input_roots", "vad_filter"}
+                "asset_id", "budget", "cache", "workspace", "offline", "allowed_input_roots", "vad_filter", "vocabulary"}
 FORBIDDEN_KEYS = {"command", "argv", "cmd", "shell", "exec", "args", "script", "binary", "api_key", "apikey", "token",
                   "secret", "password", "credentials", "env"}
 BUDGET_KEYS = {"timeout", "max_audio_seconds"}
@@ -60,14 +64,20 @@ class TranscribeRequest:
     offline: bool = False                # hard constraint: no network at any step (no remote engine, no model download)
     allowed_input_roots: Optional[List[str]] = None   # when given, the input must resolve inside one of these directories
     vad_filter: bool = False             # skip non-speech before decoding (faster-whisper's own VAD filter; opt-in, unchanged default)
+    vocabulary: Optional[Dict[str, List[str]]] = None   # custom vocabulary {written form: [readings]}; engines with custom_vocabulary only
 
     def parameters(self) -> Dict[str, Any]:
         """The parameters that shape the ASR output. Part of provenance and of the cache identity.
         `audio_stream` is normalized to its effective index (None means the same stream as 0) so a
-        request that omits it and one that names index 0 explicitly share a cache entry."""
-        return {"language": self.language, "word_timestamps": self.word_timestamps, "temperature": self.temperature,
-                "initial_prompt": self.initial_prompt, "beam_size": self.beam_size,
-                "audio_stream": self.audio_stream if self.audio_stream is not None else 0, "vad_filter": self.vad_filter}
+        request that omits it and one that names index 0 explicitly share a cache entry. `vocabulary`
+        appears only when given, so requests without one keep the parameters (and cache keys) they had
+        before the field existed (ADR-033)."""
+        p = {"language": self.language, "word_timestamps": self.word_timestamps, "temperature": self.temperature,
+             "initial_prompt": self.initial_prompt, "beam_size": self.beam_size,
+             "audio_stream": self.audio_stream if self.audio_stream is not None else 0, "vad_filter": self.vad_filter}
+        if self.vocabulary is not None:
+            p["vocabulary"] = self.vocabulary
+        return p
 
     def parameters_hash(self) -> str:
         return hashlib.sha256(json.dumps(self.parameters(), sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
@@ -112,7 +122,10 @@ def parse_request(doc: Any) -> TranscribeRequest:
     engine = doc.get("engine", DEFAULT_ENGINE)
     if not isinstance(engine, str) or not engine.replace("_", "").replace("-", "").isalnum():
         raise _bad("'engine' must be an engine id")
-    model = doc.get("model", DEFAULT_MODEL)
+    model = doc.get("model")
+    if model is None:   # each engine's own default (faster_whisper: "base", unchanged)
+        from .engines import default_registry
+        model = default_registry().default_model(engine) or DEFAULT_MODEL
     if not isinstance(model, str) or not model or any(c in model for c in "/\\ \t\n") or model.startswith("."):
         raise _bad("'model' must be a model name (not a path)", model=model)
 
@@ -161,6 +174,8 @@ def parse_request(doc: Any) -> TranscribeRequest:
     if not isinstance(vad_filter, bool):
         raise _bad("'vad_filter' must be a boolean")
 
+    vocabulary = parse_vocabulary(doc.get("vocabulary"))
+
     budget = Budget()
     b = doc.get("budget")
     if b is not None:
@@ -175,7 +190,53 @@ def parse_request(doc: Any) -> TranscribeRequest:
 
     return TranscribeRequest(input=inp, language=lang, engine=engine, model=model, word_timestamps=wt, temperature=float(temp),
                              initial_prompt=prompt, beam_size=beam, audio_stream=audio_stream, asset_id=asset_id, budget=budget, cache=cache,
-                             workspace=ws, offline=offline, allowed_input_roots=roots, vad_filter=vad_filter)
+                             workspace=ws, offline=offline, allowed_input_roots=roots, vad_filter=vad_filter,
+                             vocabulary=vocabulary)
+
+
+def _vocab_text(value: Any, what: str) -> str:
+    if not isinstance(value, str):
+        raise _bad(f"'vocabulary': {what} must be a string")
+    text = value.strip()
+    if len(text) > MAX_VOCABULARY_CHARS:
+        raise _bad(f"'vocabulary': {what} longer than {MAX_VOCABULARY_CHARS} characters")
+    if any(ord(c) < 32 for c in text):
+        raise _bad(f"'vocabulary': {what} contains control characters")
+    if any(pat.search(text) for pat in CREDENTIAL_PATTERNS):
+        raise _bad(f"'vocabulary': {what} looks like it contains a credential; refused")
+    return text
+
+
+def parse_vocabulary(value: Any) -> Optional[Dict[str, List[str]]]:
+    """Validate a custom vocabulary: an object mapping each written form (how the word must appear in the
+    transcript, e.g. "心房細動") to a list of readings (how the engine may hear/write it, usually kana,
+    e.g. ["しんぼうさいどう"]); an empty list means "boost the written form as is". Returns a normalized
+    copy (stripped, duplicates dropped, keys sorted) or None for null / an empty object. Data only: the
+    words are decoding hints, never instructions."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise _bad("'vocabulary' must be an object mapping each written form to a list of readings")
+    if len(value) > MAX_VOCABULARY_WORDS:
+        raise _bad(f"'vocabulary' has more than {MAX_VOCABULARY_WORDS} words")
+    out: Dict[str, List[str]] = {}
+    for written, readings in value.items():
+        w = _vocab_text(written, "a written form")
+        if not w:
+            raise _bad("'vocabulary': a written form is empty")
+        if isinstance(readings, str):
+            readings = [readings]
+        if not isinstance(readings, list):
+            raise _bad(f"'vocabulary': readings of {w!r} must be a list of strings")
+        if len(readings) > MAX_VOCABULARY_READINGS:
+            raise _bad(f"'vocabulary': {w!r} has more than {MAX_VOCABULARY_READINGS} readings")
+        kept: List[str] = list(out.get(w, []))
+        for r in readings:
+            rt = _vocab_text(r, f"a reading of {w!r}")
+            if rt and rt not in kept:
+                kept.append(rt)
+        out[w] = kept
+    return {k: out[k] for k in sorted(out)} or None
 
 
 def default_workspace() -> str:

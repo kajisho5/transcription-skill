@@ -40,7 +40,8 @@ stdout) and `transcribe` accepts `--dry-run` (plan only, no ASR).
 | "is this transcript file valid" | `check t.json` |
 | "what would it do / how long is it" | `transcribe input.mp4 --dry-run` |
 | "use a bigger / better model" | `--model small` (or `medium`, `large-v3`); doctor shows which are cached |
-| "these names / terms keep coming out wrong" | `--initial-prompt "名前, 用語, ..."` (a vocabulary hint to the decoder, not an instruction) |
+| "these names / terms keep coming out wrong" | `--initial-prompt "名前, 用語, ..."` (a vocabulary hint to the decoder, not an instruction); with `--engine haas_ja`: `--vocabulary terms.json` (`{"written form": ["reading", ...]}`) |
+| "Japanese conference / medical talk, need better accuracy", GPU machine | `transcribe input.mp4 --engine haas_ja --language ja [--vocabulary terms.json]`; `doctor` shows whether `haas_ja` is usable here and why not |
 | "don't reuse the old result" | `--no-cache` |
 | "no internet here", "air-gapped", "must not upload the audio" | `transcribe ... --offline` (refuses remote engines and any model download); `doctor --offline` first |
 | "which engines / models can I use here" | `engines` / `engines --engine faster_whisper` / `engines --offline --language ja` |

@@ -37,6 +37,12 @@ class EngineRegistry:
             raise TranscriptionError("ENGINE_UNAVAILABLE", f"unknown engine {engine_id!r}", {"known": self.ids()})
         return e() if isinstance(e, type) else e
 
+    def default_model(self, engine_id: str) -> Optional[str]:
+        """The engine's default model, read from the registered class (no instantiation, so nothing is
+        imported or probed). None for an unknown engine."""
+        e = self._engines.get(engine_id)
+        return None if e is None else getattr(e, "default_model", None)
+
     def list(self) -> List[EngineSpec]:
         return [self.get(eid).spec() for eid in self.ids()]
 
@@ -73,7 +79,9 @@ def default_registry() -> EngineRegistry:
     global _DEFAULT
     if _DEFAULT is None:
         from .faster_whisper import FasterWhisperEngine
+        from .haas import HaasJaEngine
         r = EngineRegistry()
         r.register(FasterWhisperEngine)
+        r.register(HaasJaEngine)
         _DEFAULT = r
     return _DEFAULT

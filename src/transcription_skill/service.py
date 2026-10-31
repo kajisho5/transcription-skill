@@ -101,6 +101,14 @@ class TranscriptionService:
         if req.language is None and not engine.supports_language_detection():
             raise TranscriptionError("INVALID_INPUT", f"engine {engine.id} cannot detect the language; pass 'language' explicitly",
                                      {"engine": engine.id, "reason": "language_detection_unsupported"})
+        if req.vocabulary is not None and not engine.supports_vocabulary():
+            raise TranscriptionError("INVALID_INPUT", f"engine {engine.id} does not take a custom vocabulary; use an engine with the "
+                                     f"custom_vocabulary capability, or initial_prompt for a faster_whisper vocabulary hint",
+                                     {"engine": engine.id, "reason": "custom_vocabulary_unsupported"})
+        unsupported = engine.unsupported_parameters(req.parameters())
+        if unsupported:
+            raise TranscriptionError("INVALID_INPUT", f"engine {engine.id} cannot honour {', '.join(unsupported)}; remove them from the request",
+                                     {"engine": engine.id, "reason": "parameter_unsupported", "parameters": unsupported})
         model = engine.model_status(req.model, offline=req.offline)
         if model.availability not in (MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED):
             raise TranscriptionError("MODEL_UNAVAILABLE", f"model {req.model!r}: {model.detail}",
@@ -129,7 +137,8 @@ class TranscriptionService:
             "audio_stream": req.audio_stream if req.audio_stream is not None else 0,
             "path_policy": prep["path_policy"],
             "engine": {"id": eng.id, "version": eng.version, "execution_mode": eng.execution_mode, "requires_network": eng.requires_network,
-                       "capabilities": eng.capabilities(), "word_timestamps": eng.supports_word_timestamps(), "supported_languages": len(eng.supported_languages)},
+                       "capabilities": eng.capabilities(), "word_timestamps": eng.supports_word_timestamps(), "supported_languages": len(eng.supported_languages),
+                       "custom_vocabulary": eng.supports_vocabulary()},
             "model": prep["model"].to_dict(),
             "language": req.language or "auto",
             "word_timestamps": req.word_timestamps,
@@ -168,7 +177,7 @@ class TranscriptionService:
             extraction = extract_audio(prep["path"], wav, audio_stream=req.audio_stream if req.audio_stream is not None else 0)
             ereq = EngineRequest(audio_path=wav, language=req.language, model=req.model, word_timestamps=req.word_timestamps,
                                  temperature=req.temperature, initial_prompt=req.initial_prompt, beam_size=req.beam_size, offline=req.offline,
-                                 vad_filter=req.vad_filter)
+                                 vad_filter=req.vad_filter, vocabulary=req.vocabulary)
             t_engine = time.time()
             result = self._run_engine(engine, ereq, req.budget.timeout, run_dir)
             engine_seconds = time.time() - t_engine

@@ -81,6 +81,8 @@ transcription transcribe lecture.mp4 --word-timestamps     # per-word timing
 transcription transcribe lecture.mp4 --offline             # hard no-network constraint
 transcription transcribe dubbed.mkv --audio-stream 1       # multi-track input: decode the 2nd audio stream, not ffmpeg's default pick
 transcription transcribe meeting.wav --vad-filter           # skip non-speech before decoding (long recordings with real silence)
+transcription transcribe talk.mp4 --engine haas_ja --language ja --vocabulary terms.json --word-timestamps
+                                                           # optional Japanese engine (Linux + NVIDIA GPU), jargon/names list
 
 # hand off
 transcription export lecture.transcript.json --format srt -o lecture.srt
@@ -154,6 +156,7 @@ is chosen by constraints, never by the skill's own judgement.
 | engine | execution_mode | status |
 |--------|----------------|--------|
 | `faster_whisper` | `local` | **implemented**, verified on the fixtures (Reference Local Engine) |
+| `haas_ja` | `local` | **implemented, optional**: [Haas-ja-v1.0](https://huggingface.co/third-intelligence/Haas-ja-v1.0) via `haas-asr`; Japanese only; Linux + NVIDIA GPU + Python 3.11+; custom vocabulary; unit-tested against a fake `haas_asr`, **not yet run on a GPU** ([ADR-033](docs/decisions.md#adr-033-haas-ja-v10-is-an-optional-second-local-engine-haas_ja-with-token-timed-segments-and-a-custom-vocabulary)) |
 | cloud ASR (any vendor) | `remote` | future possible engine: expressible by the contract, **not implemented** |
 | whisper.cpp | `local` | future possible engine: expressible by the contract, **not implemented** |
 
@@ -167,6 +170,7 @@ refused (`ENGINE_UNAVAILABLE`, reason `network_required`), a model that is not a
 ```bash
 transcription engines                          # EngineSpec of every registered engine
 transcription engines --engine faster_whisper  # plus per-model availability
+transcription engines --vocabulary             # engines that take a custom vocabulary (haas_ja), with reasons for the rest
 transcription engines --offline --language ja  # constraint filtering: candidates and per-engine rejection reasons
 transcription doctor --offline                 # "ready to transcribe offline" only when the default model is local
 ```
@@ -182,6 +186,30 @@ is no plugin loader, and only implemented engines are registered.
 | Engine (`faster_whisper`) | the recognition implementation | know about caches, budgets, other engines |
 | Selector | constraint filtering with reasons | rank, prefer, choose |
 | Agent (`video-production-agent`) | final policy: which candidate to adopt, whether remote is acceptable | import engine internals |
+
+### Optional Japanese engine: `haas_ja` (Haas-ja-v1.0)
+
+For Japanese talks, conferences and medical sessions where Whisper's accuracy, speed or handling of names
+and jargon is not enough. Requirements come from the model card and `haas-asr`'s `pyproject.toml`: Linux,
+an NVIDIA GPU with CUDA, Python 3.11+, NeMo 2.7 (CPU and macOS are not supported). Install it next to the
+skill (it is not a package extra: `haas-asr` is not on PyPI, only on GitHub):
+
+```bash
+pip install -e .                                                                   # this skill
+pip install "haas-asr @ git+https://github.com/third-intelligence/Haas-ASR.git"    # pulls torch, NeMo, flash-linear-attention
+transcription doctor                          # engine:haas_ja AVAILABLE, or MISSING with the reason
+transcription models pull Haas-ja-v1.0 --engine haas_ja   # ~1.2 GB, once, before going --offline
+```
+
+- `--language ja` is required (the engine does not detect languages and refuses any other language).
+- `--vocabulary terms.json`: a JSON object mapping each written form to its readings, for example
+  `{"心房細動": ["しんぼうさいどう"], "カテーテルアブレーション": [], "Haas": ["ハース"]}`. The readings are boosted while
+  decoding and re-written in the written form (haas-asr's `Vocabulary`). Other engines refuse a vocabulary
+  (`INVALID_INPUT`, reason `custom_vocabulary_unsupported`); for faster-whisper use `--initial-prompt`.
+- Timing: segments split after `。？！` and at pauses of 1 s or more; `--word-timestamps` gives the timed
+  SentencePiece token groups (80 ms resolution) as words. `initial_prompt`, `vad_filter` and a non-zero
+  `temperature` are refused (`parameter_unsupported`); `beam_size` is ignored with a warning (greedy decoding).
+- The model tends to omit fillers (えー, あの) — the transcript is closer to a cleaned-up subtitle than a verbatim record.
 
 ## CLI
 

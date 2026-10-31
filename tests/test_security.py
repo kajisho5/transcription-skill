@@ -97,12 +97,13 @@ class StaticSecurityTests(unittest.TestCase):
                     self.assertNotEqual(node.module.split(".")[0], "subprocess", f.name)
             self.assertNotRegex(f.read_text(encoding="utf-8"), r"os\.(exec\w*|spawn\w*|popen|system)\s*\(", f.name)
 
-    def test_only_faster_whisper_registered_and_no_network_capability(self):
+    def test_only_implemented_local_engines_registered_and_no_network_capability(self):
         from transcription_skill.engines import default_registry
         specs = default_registry().list()
-        self.assertEqual([s.id for s in specs], ["faster_whisper"])
-        self.assertEqual(specs[0].execution_mode, "local")
-        self.assertFalse(specs[0].requires_network)
+        self.assertEqual([s.id for s in specs], ["faster_whisper", "haas_ja"])
+        for sp in specs:
+            self.assertEqual(sp.execution_mode, "local", sp.id)
+            self.assertFalse(sp.requires_network, sp.id)
 
     def test_environment_reads_are_an_allow_list_and_never_name_an_executable(self):
         allowed = {"TRANSCRIPTION_WORKSPACE", "HF_HUB_CACHE", "HF_HOME"}

@@ -232,3 +232,52 @@
   Like the end-overrun clamp (ADR-028), this is the one documented adjustment to word timing (ADR-010 is about
   text). Cache keys do not change, so a transcript cached before this rule keeps its `null` words until it is
   recomputed.
+
+## ADR-033 Haas-ja-v1.0 is an optional second local engine (`haas_ja`), with token-timed segments and a custom vocabulary
+- Need: Japanese event / conference / medical subtitling, where Whisper's accuracy and speed on Japanese and its
+  handling of names and jargon are the limit. Haas-ja-v1.0 (third-intelligence, Apache-2.0) reports CER strict 6.12%
+  on asr-ja-bench v1.1 and an RTFx ~15x Whisper large-v3, and its inference package `haas-asr` has a custom vocabulary
+  (written form → readings, GPU phrase boosting with a guard). Roadmap step 5 ("optional second engine").
+- Decision: register `HaasJaEngine` (`engines/haas.py`) next to `faster_whisper`. It is a real implementation, so
+  ADR-002 holds; `faster_whisper` stays the default and Reference Local Engine. The requirements are the model's:
+  Linux, NVIDIA GPU (flash-linear-attention needs Triton + CUDA), Python 3.11+, NeMo 2.7. The engine reports itself
+  unavailable with a reason for each missing one, checked in that order; `haas_asr` (and torch/NeMo) is imported
+  only when the platform and Python checks pass, so 3.9/3.10, macOS and Windows never import it. The import is a
+  plain `import` (no importlib: the security tests forbid it). `haas-asr` is not a package extra: it is on GitHub
+  only, and a direct URL dependency would block a PyPI upload; the install line is in `doctor`'s reason and the docs.
+- Timing, verified by reading the sources (haas-asr `main`: `__init__`, `transcription.py`, `longform.py`,
+  `boosting.py`, `model.py`, `audio.py`; NeMo `v2.7.3`: `rnnt_models.py`, `rnnt_decoding.py`, `timestamp_utils.py`;
+  the model's `config.yaml`), not by running them: `haas_asr.transcribe` / `transcribe_longform` return strings only,
+  and haas-asr's vocabulary path replaces `_transcribe_output_processing` with a text-only function, so neither gives
+  times. `load_model` returns a NeMo `EncDecRNNTBPEModel` (config `target`), whose `transcribe(..., timestamps=True)`
+  sets `compute_timestamps`, returns hypotheses, and runs `process_timestamp_outputs(hyp, subsampling_factor=8,
+  window_stride=0.01)`: `timestamp["char"]` holds one entry per emitted token with `start_offset` = TDT emission frame,
+  `end_offset` = frame + predicted duration (TDT `_compute_offsets_tdt`; durations 0–4) and `start`/`end` in seconds
+  (80 ms frames); punctuation is pinned to the previous token's end (`_refine_timestamps_tdt`). NeMo's `word` and
+  `segment` entries are built by splitting on `▁`/spaces and on `. ? !`; Japanese output has neither (haas-asr's
+  `boosting.word_forms` notes the `▁` appears only at an utterance start), so they would be about one per 30 s
+  chunk — too coarse for subtitles. The engine therefore groups the token timings itself (positive-duration groups,
+  byte-fallback pieces decoded together), cuts segments after `。？！?!` and at pauses ≥ 1.0 s, and declares
+  `word_timestamps` with the groups as words. These are sub-word units at the model's 80 ms resolution, real
+  emissions of the model, not interpolated; the docs say they are not dictionary words. No timestamps at all →
+  `TRANSCRIPTION_FAILED`; groups that do not reproduce the hypothesis text → NeMo's segment entries for that chunk,
+  without words, with a warning. Long audio uses `split_at_quiet_points` (the same cuts as `transcribe_longform`) and
+  offsets each chunk.
+- Custom vocabulary: new request key `vocabulary` (`{written form: [readings]}`, bounded: 500 words, 20 readings,
+  100 characters, credential-looking text refused; CLI `--vocabulary FILE.json`), new engine capability
+  `custom_vocabulary`, skill capability `custom_vocabulary`, selector requirement `vocabulary`. Engines without it
+  refuse the request (`custom_vocabulary_unsupported`) instead of ignoring it. haas_ja passes it to
+  `haas_asr.Vocabulary` and `haas_asr.transcribe(..., vocabulary=)` and aligns the resulting text to the plain decode's
+  timed groups (difflib), so a re-spelled word keeps the timing of the tokens it replaced; this costs one more encoder
+  pass than haas-asr's own path. `vocabulary` enters `parameters()` (provenance, cache key) only when present, so
+  every existing request keeps its parameters hash and cache key.
+- Parameters the engine cannot honour (`initial_prompt`, `vad_filter`, `temperature > 0`) are refused through a new
+  `TranscriptionEngine.unsupported_parameters()` hook (`parameter_unsupported`); `beam_size` (default 5, cannot be
+  told from "unset") is ignored with a warning. A request without `model` now uses the engine's `default_model`
+  (faster_whisper: `base`, unchanged); the CLI `--model` default moved from `base` to "engine default".
+- Contract: additive only (engine, capability, tool input key, schema enum value); `CONTRACT_VERSION` stays `1.0`.
+  `deterministic` is `false` for haas_ja until a GPU run shows repeatable output.
+- Not verified here (no GPU in the authoring environment, model weights not downloaded): actual recognition, real
+  hypothesis contents, timing accuracy, memory at `BATCH_SIZE` 16, the vocabulary effect, speed. Unit tests use a fake
+  `haas_asr` shaped after the sources above. A GPU run against faster-whisper on real conference audio is the next
+  step (STATE.md).
