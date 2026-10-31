@@ -15,6 +15,12 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 - Release rule (ADR-036): in auto mode a push to `main` releases only if a file outside `.github/`, `docs/`, `tests/`,
   `scripts/release/` and Markdown (`SKILL.md` excepted) changed since the latest tag (`scripts/release/release_scope.py`);
   CI-, docs-, test-only merges cut no release. An explicit `pyproject.toml` bump always releases; `[skip release]` still skips
+- The release job skips when the pushed (squash) commit message contains the skip token anywhere, body included.
+  GitHub's default squash message lists every commit of the PR branch, so a branch that still carries an older,
+  already-merged commit whose message contained the token skips the release of new code: #42 (speaker merge,
+  ADR-037) merged on 2026-10-31 that way and cut no tag. The `src/` change stays releasable (ADR-036 diffs against
+  the latest tag), so the next push to `main` releases it; when merging such a branch, set the squash commit
+  message explicitly
 - CI: `.github/workflows/tests.yml` runs the unit matrix (Ubuntu/Windows/macOS × Python 3.9/3.11) on every pull request
   and push to `main` (owner decision on Actions minutes, ADR-036); `.github/workflows/heavy-tests.yml` (`integration`
   with faster-whisper `base`, `engines` with the real speech.cpp) stays `workflow_dispatch` only
