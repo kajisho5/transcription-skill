@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0 - 2026-10-31
+
+- feat(engines): optional whisperX engine with wav2vec2 word alignment (ADR-038) (#44) (220a3f4)
+
 ## 0.7.10 - 2026-10-31
 
 - STATE.md: note why #42 cut no release (#43) (29b38c0)
