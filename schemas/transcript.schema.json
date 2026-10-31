@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/kajisho5/transcription-skill/schemas/transcript.schema.json",
   "title": "Transcript",
-  "description": "transcription-skill/transcript/0.1. Timestamps are seconds on the asset's own timeline. speaker_id is reserved and always null in this skill.",
+  "description": "transcription-skill/transcript/0.1. Timestamps are seconds on the asset's own timeline. speaker_id is null unless filled from diarization-skill speaker turns (transcription/speakers or transcribe speaker_turns, ADR-037); recognition alone never sets it.",
   "type": "object",
   "required": [
     "schema",
@@ -114,6 +114,14 @@
           ],
           "minimum": 0,
           "maximum": 1
+        },
+        "speaker_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "description": "optional; present after a speaker merge (ADR-037): the word's own speaker or null"
         }
       }
     },
@@ -172,7 +180,8 @@
             "string",
             "null"
           ],
-          "description": "reserved for diarization; always null here"
+          "minLength": 1,
+          "description": "anonymous speaker id (SPEAKER_nn) from diarization-skill turns, or null: recognition never sets it; transcription/speakers fills it (ADR-037)"
         }
       }
     },

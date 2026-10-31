@@ -278,7 +278,13 @@ run_tool("transcription/export", {"transcript": transcript, "format": "srt", "ou
 run_tool("transcription/check", {"transcript": "lecture.transcript.json"})
 ```
 
-Tools: `transcription/transcribe`, `transcription/segments`, `transcription/export`, `transcription/check`, `transcription/batch`.
+Tools: `transcription/transcribe`, `transcription/segments`, `transcription/export`, `transcription/speakers`, `transcription/check`, `transcription/batch`.
+
+Speaker merge (ADR-037): `run_tool("transcription/speakers", {"transcript": transcript, "turns": "talk.turns.json"})`
+(CLI `transcription speakers talk.transcript.json --turns talk.turns.json`), or `speaker_turns` on
+`transcription/transcribe` (CLI `--speaker-turns`), fills `speaker_id` from
+[diarization-skill](https://github.com/kajisho5/diarization-skill)'s speaker turns (`diarization-skill/turns@1`) with
+its own ASSIGN rule. The turns come from diarization-skill; this skill still does no diarization.
 Every parameter is typed JSON. A request that contains `command`, `argv`, `shell` or a credential is
 refused with `INVALID_INPUT`. `transcription contract --json` returns the contract including every
 registered engine's `EngineSpec` (schema `transcription-skill/engine-spec/0.1`); that JSON, not this

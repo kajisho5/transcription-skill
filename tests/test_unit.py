@@ -42,6 +42,7 @@ from transcription_skill.request import parse_request  # noqa: E402
 from transcription_skill.service import TranscriptionService  # noqa: E402
 from transcription_skill.skill import TOOLS, run_request, run_tool, skill_contract, tool_names  # noqa: E402
 from transcription_skill.models import SPEECH_EVENT_SCHEMA, TRANSCRIPT_SCHEMA  # noqa: E402
+from transcription_skill.speakers import merge_speakers  # noqa: E402
 from transcription_skill.speech_events import speech_events  # noqa: E402
 from transcription_skill import validate as V  # noqa: E402
 
@@ -294,7 +295,8 @@ class EngineContractTests(unittest.TestCase):
     def test_skill_contract_lists_only_implemented_tools(self):
         c = skill_contract()
         names = [t["name"] for t in c["tools"]]
-        self.assertEqual(names, ["transcription/transcribe", "transcription/segments", "transcription/export", "transcription/check", "transcription/batch"])
+        self.assertEqual(names, ["transcription/transcribe", "transcription/segments", "transcription/export", "transcription/speakers",
+                                 "transcription/check", "transcription/batch"])
         from transcription_skill import __version__
         self.assertEqual((c["id"], c["version"]), ("transcription-skill", __version__))
         for t in TOOLS:
@@ -730,6 +732,173 @@ class BatchTests(unittest.TestCase):
         with self.assertRaises(TranscriptionError) as cm:
             run_tool("transcription/batch", {"items": [], "extra": 1})
         self.assertEqual(cm.exception.code, "INVALID_INPUT")
+
+
+def turns_doc(fingerprint: str, turns=None, overlap_regions=None) -> dict:
+    """A diarization-skill/turns@1 document shaped exactly like diarization-skill's DIARIZE output (docs/turns.md)."""
+    turns = [{"start": 0.9, "end": 1.5, "speaker": "SPEAKER_00"}, {"start": 1.5, "end": 5.2, "speaker": "SPEAKER_01"}] if turns is None else turns
+    speakers = []
+    for t in turns:
+        if t["speaker"] not in speakers:
+            speakers.append(t["speaker"])
+    return {
+        "schema": "diarization-skill/turns@1",
+        "source": {"filename": "a.wav", "fingerprint": fingerprint, "size_bytes": 10, "media_duration": 6.0, "has_video": False, "audio_stream": 0},
+        "engine": {"id": "pyannote", "version": "4.0.0", "model": "pyannote/speaker-diarization-community-1", "revision": None,
+                   "license": "CC-BY-4.0", "attribution": "pyannoteAI", "execution_mode": "local", "device": "cpu"},
+        "parameters": {"num_speakers": None, "min_speakers": None, "max_speakers": None},
+        "speakers": speakers, "speaker_count": len(speakers), "turns": turns,
+        "speech_seconds": round(sum(t["end"] - t["start"] for t in turns), 3),
+        "overlap": ({"available": False, "turns": None, "regions": [], "total_seconds": None} if overlap_regions is None else
+                    {"available": True, "turns": list(turns), "regions": overlap_regions,
+                     "total_seconds": round(sum(r["end"] - r["start"] for r in overlap_regions), 3)}),
+        "audio_extraction": {"recipe": "mono 16000 Hz pcm_s16le", "audio_stream": 0, "engine_seconds": 1.0},
+        "skill": "diarization-skill", "skill_version": "0.1.0", "tool": "diarization/diarize",
+        "created_at": "2026-10-30T00:00:00Z", "processing_seconds": 1.0, "warnings": [],
+    }
+
+
+class SpeakerMergeTests(unittest.TestCase):
+    """ADR-037: diarization-skill turns in, speaker_id filled with diarization-skill's ASSIGN rule."""
+
+    def setUp(self):
+        self.doc = good_doc()
+        self.fp = self.doc["source"]["fingerprint"]
+
+    def test_merged_transcript_has_non_null_speaker_id_and_passes_schema_and_validator(self):
+        out = merge_speakers(self.doc, turns_doc(self.fp))
+        self.assertTrue(V.validate_transcript(out).ok, V.validate_transcript(out).errors)
+        # seg_0001 words: 本日の 1.0-1.6 (SPEAKER_00 0.5 s, SPEAKER_01 0.1 s), 講演を始めます。 1.6-3.0 (SPEAKER_01 1.4 s)
+        s1, s2 = out["segments"]
+        self.assertEqual([w["speaker_id"] for w in s1["words"]], ["SPEAKER_00", "SPEAKER_01"])
+        self.assertEqual(s1["speaker_id"], "SPEAKER_01")        # word votes: SPEAKER_00 0.6 s < SPEAKER_01 1.4 s
+        self.assertEqual(s2["speaker_id"], "SPEAKER_01")        # no words: the segment itself (3.5-5.0, inside SPEAKER_01)
+        schema = json.loads((ROOT / "schemas" / "transcript.schema.json").read_text(encoding="utf-8"))
+        prop = schema["$defs"]["segment"]["properties"]["speaker_id"]
+        word_prop = schema["$defs"]["word"]["properties"]["speaker_id"]
+        for seg in out["segments"]:
+            self.assertIn(type(seg["speaker_id"]).__name__.replace("str", "string"), prop["type"])
+            self.assertGreaterEqual(len(seg["speaker_id"]), prop["minLength"])
+            for w in seg["words"] or []:
+                self.assertIn(type(w["speaker_id"]).__name__.replace("str", "string"), word_prop["type"])
+        a = out["speaker_assignment"]
+        self.assertEqual((a["tool"], a["method"], a["turns_schema"], a["source_match"]),
+                         ("transcription/speakers", "max_overlap_with_exclusive_turns", "diarization-skill/turns@1", True))
+        self.assertEqual(a["counts"]["assigned"], 2)
+        self.assertEqual(a["segments_per_speaker"], {"SPEAKER_01": 2})
+        self.assertIsNone(self.doc["segments"][0]["speaker_id"])  # the input is not modified
+        self.assertEqual([s["text"] for s in out["segments"]], [s["text"] for s in self.doc["segments"]])
+
+    def test_ties_and_gaps_stay_null(self):
+        gap = turns_doc(self.fp, [{"start": 5.5, "end": 6.0, "speaker": "SPEAKER_00"}])
+        out = merge_speakers(self.doc, gap)
+        self.assertEqual([s["speaker_id"] for s in out["segments"]], [None, None])
+        self.assertTrue(any("left null" in w for w in out["warnings"]))
+        # seg_0002 (3.5-5.0, no words): 0.75 s each -> tie -> null
+        tie = turns_doc(self.fp, [{"start": 3.5, "end": 4.25, "speaker": "SPEAKER_00"}, {"start": 4.25, "end": 5.0, "speaker": "SPEAKER_01"}])
+        self.assertIsNone(merge_speakers(self.doc, tie)["segments"][1]["speaker_id"])
+
+    def test_overlap_regions_are_reported_not_used(self):
+        out = merge_speakers(self.doc, turns_doc(self.fp, overlap_regions=[{"start": 3.6, "end": 3.8, "speakers": ["SPEAKER_00", "SPEAKER_01"]}]))
+        self.assertEqual(out["speaker_assignment"]["overlap_segment_ids"], ["seg_0002"])
+        self.assertEqual(out["segments"][1]["speaker_id"], "SPEAKER_01")
+
+    def test_refuses_mismatch_preset_and_bad_turns(self):
+        other = turns_doc("sha256:" + "f" * 64)
+        with self.assertRaises(TranscriptionError) as cm:
+            merge_speakers(self.doc, other)
+        self.assertEqual((cm.exception.code, cm.exception.details["reason"]), ("INVALID_INPUT", "SOURCE_MISMATCH"))
+        allowed = merge_speakers(self.doc, other, allow_source_mismatch=True)
+        self.assertFalse(allowed["speaker_assignment"]["source_match"])
+        with self.assertRaises(TranscriptionError) as cm:
+            merge_speakers(allowed, turns_doc(self.fp))
+        self.assertEqual(cm.exception.details["reason"], "SPEAKERS_ALREADY_SET")
+        self.assertTrue(any("replaced" in w for w in merge_speakers(allowed, turns_doc(self.fp), replace=True)["warnings"]))
+        for bad in (dict(turns_doc(self.fp), schema="diarization-skill/turns@2"),
+                    turns_doc(self.fp, [{"start": 1.0, "end": 3.0, "speaker": "SPEAKER_00"}, {"start": 2.0, "end": 4.0, "speaker": "SPEAKER_01"}]),
+                    dict(turns_doc(self.fp), speakers=["alice"]),
+                    turns_doc(self.fp, [{"start": 2.0, "end": 1.0, "speaker": "SPEAKER_00"}]), "not a document"):
+            with self.assertRaises(TranscriptionError) as cm:
+                merge_speakers(self.doc, bad)
+            self.assertEqual(cm.exception.code, "INVALID_INPUT", bad)
+        broken = good_doc()
+        broken["segments"][0]["end"] = 0.5
+        with self.assertRaises(TranscriptionError) as cm:
+            merge_speakers(broken, turns_doc(self.fp))
+        self.assertEqual(cm.exception.code, "VERIFICATION_FAILED")
+
+    def test_speakers_tool_takes_paths_and_the_run_transport(self):
+        tmp = tempfile.mkdtemp(prefix="ts_spk_")
+        try:
+            tp, dp = os.path.join(tmp, "t.json"), os.path.join(tmp, "turns.json")
+            Path(tp).write_text(json.dumps(self.doc, ensure_ascii=False), encoding="utf-8")
+            Path(dp).write_text(json.dumps(turns_doc(self.fp)), encoding="utf-8")
+            res = run_request({"tool": "transcription/speakers", "params": {"transcript": tp, "turns": dp}})["result"]
+            self.assertEqual(res["transcript"]["segments"][0]["speaker_id"], "SPEAKER_01")
+            self.assertTrue(run_tool("transcription/check", {"transcript": res["transcript"]})["ok"])
+            with self.assertRaises(TranscriptionError) as cm:
+                run_tool("transcription/speakers", {"transcript": tp, "turns": dp, "shell": "x"})
+            self.assertEqual(cm.exception.code, "INVALID_INPUT")
+            with self.assertRaises(TranscriptionError) as cm:
+                run_tool("transcription/speakers", {"transcript": tp, "turns": os.path.join(tmp, "missing.json")})
+            self.assertEqual(cm.exception.code, "FILE_NOT_FOUND")
+            out = os.path.join(tmp, "out.json")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = cli.main(["speakers", tp, "--turns", dp, "-o", out, "--json"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(Path(out).read_text(encoding="utf-8"))["segments"][1]["speaker_id"], "SPEAKER_01")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_contract_lists_the_tool_and_the_transcribe_input(self):
+        c = skill_contract(include_models=False)
+        self.assertIn("transcription/speakers", tool_names())
+        self.assertIn("speaker_merge", c["capabilities"])
+        t = next(x for x in c["tools"] if x["name"] == "transcription/transcribe")
+        self.assertIn("speaker_turns", t["input"])
+        self.assertEqual([p["tool_id"] for p in c["provides"]], ["transcription/transcribe"])   # ADR-026 unchanged
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "needs ffmpeg/ffprobe")
+class TranscribeWithSpeakerTurnsTests(unittest.TestCase):
+    """`speaker_turns` on transcribe: merged after recognition, never part of the cache key (ADR-037)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ts_spkt_")
+        self.wav = os.path.join(self.tmp, "talk.wav")
+        make_wav(self.wav, 6.0)
+        self.ws = os.path.join(self.tmp, "ws")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _svc(self, workspace=None):
+        return TranscriptionService(workspace=workspace, engine=FakeEngine())
+
+    def _params(self, **extra):
+        return dict({"input": self.wav, "engine": "fake", "model": "fake-model", "language": "ja", "workspace": self.ws,
+                     "word_timestamps": True}, **extra)
+
+    def test_transcribe_merges_turns_and_keeps_the_cache_speakerless(self):
+        with unittest.mock.patch("transcription_skill.batch.TranscriptionService", side_effect=self._svc):
+            plain = run_tool("transcription/transcribe", self._params())
+            fp = plain["transcript"]["source"]["fingerprint"]
+            merged = run_tool("transcription/transcribe", self._params(speaker_turns=turns_doc(fp)))
+            again = run_tool("transcription/transcribe", self._params())
+            dry = run_tool("transcription/transcribe", self._params(speaker_turns=turns_doc(fp), dry_run=True))
+            items = run_batch([self._params(speaker_turns=turns_doc(fp))])["results"]
+            with self.assertRaises(TranscriptionError):
+                run_tool("transcription/transcribe", self._params(speaker_turns={"schema": "x"}))
+        self.assertTrue(merged["cache_hit"])
+        self.assertEqual(merged["cache_key"], plain["cache_key"])
+        self.assertEqual([s["speaker_id"] for s in merged["transcript"]["segments"]], ["SPEAKER_01", "SPEAKER_01"])
+        self.assertTrue(V.validate_transcript(merged["transcript"]).ok)
+        self.assertEqual([s["speaker_id"] for s in again["transcript"]["segments"]], [None, None])   # the cache never holds speakers
+        self.assertNotIn("speaker_assignment", again["transcript"])
+        self.assertEqual(dry["speaker_turns"]["speakers"], 2)
+        self.assertTrue(items[0]["ok"])
+        self.assertEqual(items[0]["result"]["transcript"]["segments"][0]["speaker_id"], "SPEAKER_01")
 
 
 class OutputTests(unittest.TestCase):

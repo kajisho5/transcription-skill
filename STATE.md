@@ -36,9 +36,9 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   Linux CPU binary with `parakeet-tdt_ctc-0.6b-ja:q4_k` and `qwen3-asr-0.6b:q4_k` runs in the `engines` CI job on the
   Japanese fixture. Not yet run on Metal/Vulkan or on long real recordings
 - Deterministic cache keyed by content fingerprint + engine id/version/execution_mode + model/model_version + parameters
-- Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt/tsv/txt), `check`, `batch` (many transcribe
+- Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt/tsv/txt), `speakers` (ADR-037), `check`, `batch` (many transcribe
   requests, one process; one item's failure never aborts the rest); CLI: doctor, transcribe, segments, export, check,
-  engines, batch, cache (size/list/clear), models (list/pull/remove), contract (alias `skill --json`, identical output), skill, `run -` (one JSON request
+  engines, batch, speakers, cache (size/list/clear), models (list/pull/remove), contract (alias `skill --json`, identical output), skill, `run -` (one JSON request
   in, one JSON document out)
 - `vad_filter` (opt-in, default off): request/tool/`--vad-filter` field passed straight through to
   faster-whisper's own voice-activity-detection filter (`WhisperModel.transcribe(vad_filter=...)`);
@@ -52,6 +52,12 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 - Provenance: engine, engine_version, execution_mode, model, model_version, parameters(+hash), cache_key, skill, tool,
   created_at, audio_extraction (recipe + actually-selected stream index)
 - OS contract fields: `skill_id`, `contract_version`, `provides` (`transcribe.audio`, EXPERIMENTAL), `dependencies` ([]), `not_provided`
+- Speaker merge (ADR-037, roadmap step 4): `transcription/speakers` (CLI `speakers T --turns F`) and the optional
+  `speaker_turns` input on `transcription/transcribe` / `batch` items (CLI `--speaker-turns`) fill `segments[].speaker_id`
+  and `words[].speaker_id` from diarization-skill's `diarization-skill/turns@1` with diarization-skill's own ASSIGN
+  rule, recorded under `speaker_assignment`; checked against `diarization assign` on 490 random layouts (identical).
+  Not part of the cache key; this skill still does no diarization. Not yet run on a real diarization of real audio
+  (that needs diarization-skill's gated pyannote weights)
 - Output boundary: opt-in `allowed_output_roots` / `--allowed-output` (transcribe, segments, export); inputs never overwritten
 - Tests: unit / security / paths / conformance (SKILL_SPEC §8, all eight checks) / integration (real engine) ; evals 30 cases
 

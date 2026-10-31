@@ -238,6 +238,8 @@ def validate_transcript(doc: Any, expected_asset_id: Optional[str] = None, expec
             wprev = we
             if not isinstance(w["text"], str):
                 rep.errors.append(f"{ww}: text must be a string")
+            if w.get("speaker_id") is not None and (not isinstance(w["speaker_id"], str) or not w["speaker_id"]):
+                rep.errors.append(f"{ww}: speaker_id must be null or a non-empty string")
             _check_conf(w["confidence"], ww, rep)
 
     _scan_leakage(doc, "", rep)

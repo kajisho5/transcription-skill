@@ -4,8 +4,8 @@ Plain dataclasses that serialise with to_dict()/from_dict(). All timestamps are 
 on the input asset's own timeline. The model carries no interpretation: no topics, no chapters,
 no speaker attribution, no edit decisions.
 
-speaker_id: reserved for a future diarization skill. It is always present on a Segment and is
-``null`` until something real fills it. This skill never sets it.
+speaker_id: always present on a Segment and ``null`` from recognition. Only a speaker merge with
+diarization-skill turns (speakers.py, ADR-037) fills it; this skill never infers a speaker itself.
 """
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ class Segment(Model):
     raw_text: str                        # exactly what the engine returned
     confidence: Optional[float] = None   # 0..1 or None
     words: Optional[List[Dict[str, Any]]] = None   # Word.to_dict() list, None when unavailable
-    speaker_id: Optional[str] = None     # always None in this skill (no diarization)
+    speaker_id: Optional[str] = None     # None from recognition; speakers.py fills it from diarization turns (ADR-037)
 
 
 @dataclass
