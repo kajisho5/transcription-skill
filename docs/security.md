@@ -2,8 +2,10 @@
 
 ## Execution boundary
 
-- The only external programs this package runs are `ffprobe`, `ffmpeg` (both in `media.py`) and its own
-  worker module (`service.py`). Every invocation is a fixed Python list; no shell is involved
+- The only external programs this package runs are `ffprobe`, `ffmpeg` (both in `media.py`), its own
+  worker module (`service.py`) and, for the optional `speechcpp` engine, speech.cpp's `speech` found on `PATH`
+  (through `media.run_program`: own process group, stdin closed, killed on timeout; never `speech serve`, which has
+  no authentication, and never `speech pull`; ADR-035). Every invocation is a fixed Python list; no shell is involved
   (`tests/test_security.py` checks this statically: no `os.system`, `shell=True`, `eval`, `exec`,
   `importlib`, string commands to `subprocess`).
 - User input never becomes part of a command except as a file path argument that was verified to be
@@ -16,8 +18,10 @@
   of time as `MODEL_DOWNLOAD_REQUIRED`, and disabled by `--offline` (or `download=False`), after which a
   missing model is `MODEL_UNAVAILABLE` / `MODEL_MISSING`.
 - The engine abstraction does not widen the execution boundary: engine modules may not import
-  `subprocess` or call `os.exec*/spawn*/popen/system` (static test). The only process launch for
-  recognition is the service's fixed worker argv. A future engine gets the same rule.
+  `subprocess` or call `os.exec*/spawn*/popen/system` (static test). The only process launch for an
+  engine library is the service's fixed worker argv; an engine that wraps a program (`speechcpp`) builds a fixed
+  argv of the binary, subcommand, fixed flags and the paths it resolved, and runs it through `media.run_program`,
+  the one helper only that engine calls (static test). A future engine gets the same rule.
 - `--offline` is a hard constraint enforced before anything runs (remote engines and missing models
   are refused, the engine is told `local_files_only`), not a hint.
 - The registry contains only implemented engines; the test `FakeEngine` (which can pose as local or
@@ -25,7 +29,9 @@
 - Executables are never configurable: `ffmpeg`/`ffprobe` come from `PATH`, the worker is
   `sys.executable -m transcription_skill.engines.worker` (a literal argv, asserted by a static test).
   The only environment variables the package reads are `TRANSCRIPTION_WORKSPACE`, `HF_HUB_CACHE` and
-  `HF_HOME` (allow-list test); none names a binary.
+  `HF_HOME` (allow-list test); none names a binary. Child processes get `child_env()`: `PATH`, `HOME`, temp and
+  locale variables and the folders speech.cpp finds its models from (`SPEECH_MODEL_DIR`, `XDG_CACHE_HOME`,
+  `LOCALAPPDATA`), nothing else; `speech` also gets `NO_COLOR=1` and `SPEECH_NO_UPDATE_CHECK=1`.
 - `transcription run -` accepts only `{"tool", "params"}`; unknown keys, unknown tools and non-object
   params are `INVALID_INPUT`; malformed stdin yields an error document, not a traceback.
 

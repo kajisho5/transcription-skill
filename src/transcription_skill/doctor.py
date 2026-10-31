@@ -45,6 +45,7 @@ def run_doctor(workspace: Optional[str] = None, offline: bool = False, allowed_i
                     default=(m == (d.default_model or DEFAULT_MODEL)), availability=ms.availability, source=ms.source)
         else:
             row(f"engine:{eid}", "MISSING", d.unavailable_reason or "unavailable", default=(eid == DEFAULT_ENGINE), execution_mode=d.execution_mode)
+        rows.extend(eng.doctor_rows())    # e.g. speechcpp: the `speech` binary, its version and backend (ADR-035)
 
     try:
         os.makedirs(ws, exist_ok=True)

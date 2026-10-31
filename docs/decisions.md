@@ -306,3 +306,97 @@
   first on `sys.path`. The version number and the contract document are unchanged: from source, `contract --json` is
   byte-identical before and after this change.
 
+
+## ADR-035 speech.cpp is an optional local engine (`speechcpp`), run as its `speech` command through `media.run_program`
+- Need: Japanese recognition without Python ML stacks, CUDA or an NVIDIA GPU. `haas_ja` (ADR-033) needs Linux + CUDA +
+  NeMo; faster-whisper is weaker on Japanese. [speech.cpp](https://github.com/nyosegawa/speech.cpp) (MIT, C++ on
+  ggml) is one executable, `speech`, that runs ReazonSpeech v2, parakeet-tdt_ctc-0.6b-ja, Haas-ja-v1.0 and
+  Qwen3-ASR on Metal, Vulkan or the CPU. The owner approved adding it.
+- Protocol sources, read from the repository itself at tag `v0.10.0`, commit
+  `06590811a90041f935a470ba0e2b85346d2fc041` (2026-10-31), not guessed: `README.md`, `docs/cli.md`, `docs/worker.md`,
+  `docs/models.md`, `docs/install.md`, `docs/models/fastconformer.md`, `docs/models/qwen3-asr.md`,
+  `docs/models/silero-vad.md`, `tools/cli/main.cpp` (`--version` line, exit codes), `tools/cli/asr.cpp`,
+  `tools/cli/vad.cpp`, `tools/common/transcript.{h,cpp}` (`recognition_members`, `words_of`),
+  `tools/common/regions.cpp` (`region_options`, `region_samples`, `transcribe_regions`), `tools/catalog/cache.cpp`
+  (`models_json`, `model_dir`, `model_path`) and `tools/catalog/catalog.json`. Release archives and their
+  `SHA256SUMS`: <https://github.com/nyosegawa/speech.cpp/releases/tag/v0.10.0>. The binary was not run in the
+  authoring environment; the `engines` CI job runs the real one (below).
+- What is used, and only that: `speech --version` (`speech.cpp X.Y.Z, C API M.N`; 0.10.0+ with C API 4 accepted, else
+  unavailable with the reason), `speech models --json` (per catalog file: `type`, `file`, `size`, `sha256`, absolute
+  `path`, `fetched`), `speech devices --json` (doctor's backend row), `speech vad MODEL.gguf --format json` with the
+  region defaults of `speech asr --vad` given explicitly (`--threshold 0.5 --speech-pad-ms 300
+  --min-silence-duration-ms 500 --max-speech-duration-s 10`; `speech vad`'s own defaults differ), and `speech asr
+  MODEL.gguf --format json --language L [--timestamps] r00001.wav ...` (one `{"file", "text", "stop"[, "segments",
+  "tokens"][, "untimed"]}` per file). Exit 0 done, 1 `speech: <code> (<option>): <message>` (mapped to
+  `TRANSCRIPTION_FAILED` with `speech_error`/`option`/`exit`, or `MODEL_UNAVAILABLE` for `model_file`), 2 a command
+  line it cannot run, 3 `model_limit` (text kept, warning).
+- Not used: `speech serve` (an HTTP server with no authentication) and `speech worker`. The worker's point is a model
+  kept loaded between requests; this skill starts a fresh worker process per request, so it would only add a
+  base64 PCM protocol. A static test asserts that `serve`, `worker`, `pull` and `update` never appear as arguments.
+- Never downloading at run time: a catalog name given to `asr`/`vad` makes speech.cpp fetch the file, so the engine
+  passes only the absolute `.gguf` paths that `speech models --json` reports as fetched (and that exist on disk). A
+  model that is not there is `MODEL_MISSING` whether or not the request is offline, with `speech pull NAME` in the
+  detail; the engine has no `model_download` capability and no `models pull`. The silero-vad detector (MIT, 1.2 MB)
+  is required for every model and reported the same way.
+- Recognition by regions: a FastConformer model given a stretch of several sentences drops whole sentences
+  (docs/models/fastconformer.md, the 600-clip measurement), which is why `speech asr --vad` exists. The engine runs
+  `speech vad` once, cuts each region from the 16 kHz WAV at `floor(t x rate + 0.5)` (`region_samples`) into
+  `r00001.wav` ... in a per-run folder next to the WAV, and runs `speech asr` on up to 200 of them per run (short
+  relative names keep the Windows command line short), so `vad_filter` has no effect on this engine.
+- Mapping to `transcript/0.1` (schema unchanged): for ReazonSpeech, parakeet and Haas (`--timestamps`), each region's
+  `segments` (cut by speech.cpp after `. ? !` and their full-width forms) become segments, offset by the region's
+  start, and the `tokens` become words as speech.cpp's own `words_of` builds them (a Japanese character token is a
+  word of its own); a word or segment without duration (a TDT token emitted without a frame of its own) joins its
+  neighbour, keeping the neighbour's times. Qwen3-ASR refuses `--timestamps` ("timestamps,
+  which need a second model, Qwen3-ForcedAligner-0.6B"), so its segments are the detected regions and `words` is
+  null with a warning; so is a timed model's answer that carries `untimed`. No time is interpolated: every time is
+  speech.cpp's or the region's. Confidence is null. Diarization is not mapped: this skill does no diarization (its
+  hard rules and `not_provided`); speech.cpp's `--diarize` stays out.
+- Execution boundary (ADR-019 anticipated this): engine modules still never import `subprocess`. `media.run_program`
+  runs a list argv with stdin closed, in its own process group (own session on POSIX, `CREATE_NEW_PROCESS_GROUP` +
+  `taskkill /T` on Windows), and kills the group on timeout; only `engines/speechcpp.py` calls it (static test). The
+  binary is `shutil.which("speech")`, never configurable. `EngineRequest` gained `timeout` (the request's
+  `budget.timeout`, internal, not in the contract); `speech` is stopped a little before it (`timeout - min(5 s,
+  10%)`) and the engine reports `TRANSCRIPTION_TIMEOUT`, so the service's kill of the worker group never leaves a
+  `speech` process behind. The child environment is `child_env()` plus `NO_COLOR=1` and `SPEECH_NO_UPDATE_CHECK=1`
+  (speech.cpp only checks for releases when stderr is a terminal, which it never is here; this makes it explicit);
+  `CHILD_ENV_KEYS` gained `SPEECH_MODEL_DIR`, `XDG_CACHE_HOME` and `LOCALAPPDATA`, the folders speech.cpp's model
+  folder is found from, so the skill sees the models `speech pull` fetched. None names an executable or carries a
+  credential.
+- Model licences, from the Hugging Face model cards (front matter `license:` and the card's licence section) of the
+  upstream weights and of speech.cpp's converted GGUF repositories at the revisions its 0.10.0 catalog pins, read on
+  2026-10-31. Only models whose licence allows commercial use are registered; all of the requested ones do:
+
+  | model name | upstream card | licence | converted files (catalog revision) |
+  |---|---|---|---|
+  | `reazonspeech-v2` | reazon-research/reazonspeech-nemo-v2 | Apache-2.0 | sakasegawa/reazonspeech-nemo-v2-GGUF `ed04d9e` (Apache-2.0) |
+  | `parakeet-tdt_ctc-0.6b-ja` | nvidia/parakeet-tdt_ctc-0.6b-ja | CC-BY-4.0 (commercial use allowed, attribution required) | sakasegawa/parakeet-tdt_ctc-0.6b-ja-GGUF `f7cb538` (CC-BY-4.0) |
+  | `haas-ja-v1.0` | third-intelligence/Haas-ja-v1.0 | Apache-2.0 | sakasegawa/Haas-ja-v1.0-GGUF `6b965d5` (Apache-2.0) |
+  | `qwen3-asr-0.6b` | Qwen/Qwen3-ASR-0.6B | Apache-2.0 (front matter and Hub tag; the card has no licence section) | sakasegawa/Qwen3-ASR-0.6B-GGUF `ee78f87` (Apache-2.0) |
+  | `qwen3-asr-1.7b` | Qwen/Qwen3-ASR-1.7B | Apache-2.0 (the same) | sakasegawa/Qwen3-ASR-1.7B-GGUF `81e2423` (Apache-2.0) |
+  | `silero-vad` (detector) | snakers4/silero-vad (GitHub `LICENSE`) | MIT | sakasegawa/silero-vad-GGUF `7fcb7aa` (MIT) |
+
+  Not registered: the rest of speech.cpp's catalog (parakeet-tdt-0.6b-v3, Nemotron 3.5 Transcribe under the OpenMDW
+  License, the synthesis models), which nobody asked for; the licences of training data are not part of the model
+  licences and were not assessed. Weight types: `NAME` means the catalog's default file, `NAME:TYPE` another
+  (`f16`, `q8_0`, `q6_k`, `q5_k`, `q4_k`, where the catalog has it).
+- Spec: `execution_mode` local, `requires_network` false, `deterministic` false (speech.cpp picks the device, `auto`,
+  and repeatability was not verified), capabilities `local_execution`, `local_model`, `word_timestamps`; no
+  `language_detection` (the language is required; Qwen3-ASR is steered by it, the FastConformer models only check
+  it, and a language outside the model is `INVALID_INPUT` before anything runs); default model `reazonspeech-v2`
+  (speech.cpp's own Japanese start model). `initial_prompt` and `temperature > 0` are refused
+  (`parameter_unsupported`); `beam_size` is ignored with a warning. Qwen3-ASR's `--prompt` and Haas's `--keywords`
+  (text only: speech.cpp refuses keywords with timestamps) are follow-ups.
+- Doctor gains a generic `TranscriptionEngine.doctor_rows()` hook (default none); speechcpp reports
+  `speechcpp:binary` (path and version line), `speechcpp:backend` (Metal / Vulkan / CPU from `speech devices
+  --json`'s ggml device names) and `model:speechcpp:silero-vad`, next to the usual per-model rows. None of it runs
+  recognition or fetches anything.
+- Contract: additive only. `contract --json` gains one entry in `engines`; capability names, tools, schemas and
+  `CONTRACT_VERSION` 1.0 are unchanged. Without `speech` on PATH the entry is fixed (asserted by
+  `tests/test_speechcpp.py`), so video-production-agent's byte-for-byte pin changes by exactly that object.
+- Tests: `tests/test_speechcpp.py` drives a fake `speech` (`tests/fake_speech.py`) that implements the subcommands,
+  flags, output shapes, exit codes and model folder above, refuses a model given by name, and logs every argv;
+  through the engine, the service (injected engine) and the worker with the fake found on PATH. The `engines` CI job
+  installs the pinned `speech-0.10.0-linux-x64-cpu.zip` (SHA-256 from the release's `SHA256SUMS`), fetches
+  `parakeet-tdt_ctc-0.6b-ja:q4_k`, `qwen3-asr-0.6b:q4_k` and `silero-vad` with `speech pull` in CI only, and requires
+  the real-engine tests (`RealSpeechCppTests`, skipped elsewhere) to run and pass on the Japanese fixture.

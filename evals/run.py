@@ -283,8 +283,8 @@ def run_contract_case2(case: Dict[str, Any], check) -> None:
             else:
                 check(f"{e['id']}: unavailable engine publishes execution capabilities only", e["capabilities"] == engine.capabilities() == ["local_execution"],
                       e["capabilities"], ["local_execution"])
-        check("contract lists exactly the registry", [e["id"] for e in c["engines"]] == reg.ids() == ["faster_whisper", "haas_ja"], [e["id"] for e in c["engines"]],
-              ["faster_whisper", "haas_ja"])
+        check("contract lists exactly the registry", [e["id"] for e in c["engines"]] == reg.ids() == ["faster_whisper", "haas_ja", "speechcpp"],
+              [e["id"] for e in c["engines"]], ["faster_whisper", "haas_ja", "speechcpp"])
     elif m == "model_status":
         eng = reg.get("faster_whisper")
         bad = []

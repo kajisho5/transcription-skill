@@ -1,7 +1,8 @@
-"""Media access: fingerprint, ffprobe, and a single fixed audio-extraction recipe.
+"""Media access: fingerprint, ffprobe, a single fixed audio-extraction recipe, and the bounded runner
+for an engine's own command-line program (speech.cpp's `speech`, ADR-035).
 
-This is the only module that runs external programs. Every invocation is a fixed argv list built
-from validated values; no user string is ever interpreted by a shell. The recipe (mono, 16 kHz,
+Besides the service's worker boundary, this is the only module that runs external programs. Every
+invocation is a fixed argv list built from validated values; no user string is ever interpreted by a shell. The recipe (mono, 16 kHz,
 PCM 16-bit WAV) is what ASR engines consume; the skill does no other media processing. Which audio
 stream is decoded is always an explicit `-map 0:a:N` (default N=0, the first) so a multi-audio-track
 input never depends on ffmpeg's own "best stream" heuristic.
@@ -12,13 +13,17 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .errors import TranscriptionError
 
 AUDIO_RECIPE = {"channels": 1, "sample_rate": 16000, "codec": "pcm_s16le", "container": "wav"}
-CHILD_ENV_KEYS = ("PATH", "HOME", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "LANG", "LC_ALL", "PYTHONUTF8")
+# SPEECH_MODEL_DIR / XDG_CACHE_HOME / LOCALAPPDATA locate speech.cpp's model folder (ADR-035); they are folders,
+# never an executable, and carry no credentials.
+CHILD_ENV_KEYS = ("PATH", "HOME", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "LANG", "LC_ALL", "PYTHONUTF8",
+                  "SPEECH_MODEL_DIR", "XDG_CACHE_HOME", "LOCALAPPDATA")
 
 
 def child_env() -> Dict[str, str]:
@@ -40,6 +45,41 @@ def tool_version(name: str) -> Optional[str]:
         return None
     first = (proc.stdout or proc.stderr).strip().splitlines()[:1]
     return first[0] if first else None
+
+
+def run_program(argv: List[str], timeout: float, cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None) -> Tuple[Optional[int], str, str]:
+    """Run an engine's program: `argv` is a list (never a shell string), stdin is closed, the child runs in its
+    own process group (its own session on POSIX), and on `timeout` the whole group is killed. Returns
+    (exit code, stdout, stderr), with None as the exit code when the timeout killed it. `env` defaults to
+    child_env(); text is decoded as UTF-8."""
+    kw: Dict[str, Any] = {"stdin": subprocess.DEVNULL, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "cwd": cwd,
+                          "env": child_env() if env is None else env}
+    if os.name == "nt":
+        kw["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        kw["start_new_session"] = True
+    proc = subprocess.Popen(argv, **kw)
+    try:
+        out, err = proc.communicate(timeout=max(0.001, timeout))
+    except subprocess.TimeoutExpired:
+        _kill_group(proc)
+        out, err = proc.communicate()
+        return None, (out or b"").decode("utf-8", errors="replace"), (err or b"").decode("utf-8", errors="replace")
+    return proc.returncode, (out or b"").decode("utf-8", errors="replace"), (err or b"").decode("utf-8", errors="replace")
+
+
+def _kill_group(proc: "subprocess.Popen[bytes]") -> None:
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
 
 
 def fingerprint_file(path: str, chunk: int = 1 << 20) -> str:

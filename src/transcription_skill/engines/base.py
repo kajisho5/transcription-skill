@@ -88,6 +88,7 @@ class EngineRequest:
     offline: bool = False                # hard constraint: the engine must not touch the network (no model download)
     vad_filter: bool = False             # skip non-speech before decoding (engine capability pass-through; unchanged default)
     vocabulary: Optional[Dict[str, List[str]]] = None   # written form -> readings; only for engines with custom_vocabulary
+    timeout: Optional[float] = None      # the request's budget.timeout, for an engine that runs a program of its own (ADR-035)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -184,6 +185,12 @@ class TranscriptionEngine:
     def unsupported_parameters(self, parameters: Dict[str, Any]) -> List[str]:
         """Names of request parameters (TranscribeRequest.parameters()) set to a value this engine cannot
         honour; the service refuses such a request instead of silently ignoring them. Default: none."""
+        return []
+
+    def doctor_rows(self) -> List[Dict[str, Any]]:
+        """Extra `doctor` rows ({check, status, detail, ...}) about what the engine runs on: for an engine that
+        wraps a program, its path, version and backend. Must not run recognition or download anything.
+        Default: none."""
         return []
 
     def model_status(self, model: str, offline: bool = False) -> ModelStatus:

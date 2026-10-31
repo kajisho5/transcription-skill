@@ -1,9 +1,10 @@
 # Engines
 
 transcription-skill is a transcription **capability**; engines are interchangeable implementations of
-one contract. Two engines are implemented and registered: `faster_whisper`, the Reference Local Engine,
-and `haas_ja` (Haas-ja-v1.0), an optional Japanese engine that is only usable on Linux with an NVIDIA GPU
-and Python 3.11+ (ADR-033). Cloud ASR (any vendor) and whisper.cpp are *future possible engines*: the
+one contract. Three engines are implemented and registered: `faster_whisper`, the Reference Local Engine;
+`haas_ja` (Haas-ja-v1.0), an optional Japanese engine that is only usable on Linux with an NVIDIA GPU
+and Python 3.11+ (ADR-033); and `speechcpp`, an optional engine that runs speech.cpp's `speech` command
+(Metal, Vulkan or the CPU; no Python ML stack, no CUDA; ADR-035). Cloud ASR (any vendor) and whisper.cpp are *future possible engines*: the
 contract can describe them, nothing in this repository implements them.
 
 ## Contract (`engines/base.py`)
@@ -27,6 +28,7 @@ class TranscriptionEngine:
     unsupported_parameters(params) -> list[str]   # set request parameters it cannot honour (default [])
     model_capabilities() -> list[str]     # local_model / model_download (remote engines: none)
     model_status(model, offline=False) -> ModelStatus     # never downloads
+    doctor_rows() -> list[dict]           # extra doctor rows (speechcpp: binary, backend); default []
     transcribe(EngineRequest) -> EngineResult
     spec(include_models=False, offline=False) -> EngineSpec   # derived; what registry/doctor/contract publish
 ```
@@ -48,7 +50,8 @@ null), `version` (snapshot/revision when known), `detail`, `download_required`.
 
 `EngineRequest`: `audio_path` (mono 16 kHz PCM WAV prepared by the skill), `language` or `None`,
 `model`, `word_timestamps`, `temperature`, `initial_prompt`, `beam_size`, `offline`, `vad_filter`,
-`vocabulary` (`{written form: [readings]}` or `None`).
+`vocabulary` (`{written form: [readings]}` or `None`), `timeout` (the request's `budget.timeout`, for an
+engine that runs a program of its own; not part of the contract or the cache key).
 
 `EngineResult`: `engine_id`, `engine_version`, `model`, `model_version`, `segments`
 (`start`, `end`, `text`, `confidence`, `words`), `language` + `language_probability` (detection, only
@@ -102,6 +105,7 @@ contract tests and is never in the default registry (`tests/test_security.py` as
 |----|----------------|----------------|--------|
 | `faster_whisper` | local | `engines/faster_whisper.py` | Reference Local Engine, verified on the fixtures |
 | `haas_ja` | local | `engines/haas.py` | optional (Linux + NVIDIA GPU + Python 3.11+); unit-tested with a fake `haas_asr`, not yet run on a GPU |
+| `speechcpp` | local | `engines/speechcpp.py` | optional (speech.cpp's `speech` 0.10.0+ on PATH); unit-tested with a fake `speech`, real binary in the `engines` CI job |
 | cloud ASR | remote | none | future possible engine (contract only) |
 | whisper.cpp | local | none | future possible engine (contract only) |
 
@@ -135,7 +139,10 @@ future. `offline=True` implies `network="forbidden"` and requires the model to b
 Registry engines run in a worker subprocess (`python -m transcription_skill.engines.worker
 request.json result.json`) started in its own process group. `budget.timeout` kills the group; the
 result file is structured JSON. Engine modules never import `subprocess` (static test): abstracting
-engines does not grant them process execution; the worker boundary in `service.py` is the only one.
+engines does not grant them process execution. The worker boundary in `service.py` is the only process
+launch for an engine library; an engine that wraps a program (`speechcpp`) runs it only through
+`media.run_program` (list argv, stdin closed, own process group, the group killed on timeout), and only
+that engine module calls it (static test, ADR-019 / ADR-035).
 An engine object injected into `TranscriptionService(engine=...)` (tests, embedding) runs in-process
 under a daemon-thread timeout instead.
 
@@ -235,6 +242,75 @@ GPU Haas, not like with like. What to look at: the SRTs against the audio (do se
 speech; are the word groups usable for cue splitting), names and jargon with and without `terms.json`,
 fillers dropped by Haas, the `warnings` of each transcript (fallbacks to NeMo segment timing), GPU memory
 (`nvidia-smi` while it runs), and whether `haas.json` and `haas2.json` are identical.
+
+## speechcpp (optional speech.cpp engine, ADR-035)
+
+- Program: [speech.cpp](https://github.com/nyosegawa/speech.cpp) (MIT, C++ on ggml), its `speech` command found
+  on `PATH` (never configurable), 0.10.0 or later with C API 4. Install it with speech.cpp's installer (`speech` goes
+  to `~/.local/bin`); the Linux builds need glibc 2.34+. Only the command line is used: never `speech serve` (an HTTP
+  server without authentication), and not `speech worker` (its point, a model kept loaded, does not apply to a
+  per-request worker process).
+- Models (see the licence table below), named as speech.cpp names them: `reazonspeech-v2` (default),
+  `parakeet-tdt_ctc-0.6b-ja`, `haas-ja-v1.0`, `qwen3-asr-0.6b`, `qwen3-asr-1.7b`, each optionally `:TYPE`
+  (`f16`, `q8_0`, `q6_k`, `q5_k`, `q4_k`, where speech.cpp's catalog has that file). The region detector
+  `silero-vad` is required too.
+- Never downloads: `model_status` asks `speech models --json` which files are fetched, and recognition passes those
+  absolute `.gguf` paths, never a name (a name makes speech.cpp fetch the file). A missing model is `MODEL_MISSING`,
+  online or offline, with the command to run once, outside the skill: `speech pull reazonspeech-v2 silero-vad`.
+  The engine has no `model_download` capability and `transcription models pull --engine speechcpp` is refused. The
+  model folder is speech.cpp's (`~/.cache/speech.cpp/models`, `~/Library/Caches/speech.cpp/models`,
+  `%LOCALAPPDATA%\speech.cpp\models`, or `SPEECH_MODEL_DIR`); those variables are passed to `speech`.
+- Recognition: `speech vad <silero-vad.gguf> --format json` with the region defaults of `speech asr --vad`
+  (threshold 0.5, 300 ms pad, 500 ms silence, 10 s longest region), each region cut from the WAV, then `speech asr
+  <model.gguf> --format json --language <lang> [--timestamps] r00001.wav ...` (up to 200 regions per run). By regions
+  because a FastConformer model loses whole sentences of a long stretch; `vad_filter` has no effect here.
+- Timing: ReazonSpeech, parakeet and Haas give segments (cut after `。？！.?!`) and tokens with times; segments are
+  offset by their region's start and `words` are built from the tokens as speech.cpp's `words_of` does (each kana or
+  kanji token is a word; tokens of a spaced script join up to the next space; a word without duration joins the word
+  before it). Qwen3-ASR gives no times in
+  speech.cpp, so each region is one segment and `words` is null, with a warning; a timed model that answers
+  `untimed` is treated the same. No time is interpolated.
+- Languages: `ja` for ReazonSpeech, parakeet and Haas; Qwen3-ASR's 30 (`ar cs da de el en es fa fi fil fr hi hu id it
+  ja ko mk ms nl pl pt ro ru sv th tr vi yue zh`). The language is required (no detection); a language the model does
+  not have is `INVALID_INPUT` (`reason: language_unsupported`) before anything runs.
+- Parameters: `initial_prompt` and `temperature > 0` are refused (`parameter_unsupported`); `beam_size` is ignored with
+  a warning; no `vocabulary` (Haas's `--keywords` in speech.cpp gives text without times). Confidence: null.
+- Timeout: `speech` runs in its own process group and is stopped a little before `budget.timeout`
+  (`TRANSCRIPTION_TIMEOUT`); a failure is `TRANSCRIPTION_FAILED` with speech.cpp's error code, option and exit status
+  in `details` (`MODEL_UNAVAILABLE` for `model_file`); exit 3 (`model_limit`) keeps the text and warns.
+- Doctor: `engine:speechcpp`, `speechcpp:binary` (path and `speech --version` line), `speechcpp:backend` (Metal,
+  Vulkan or CPU from `speech devices --json`), `model:speechcpp:silero-vad` and one row per model. Nothing runs
+  recognition.
+- `deterministic: false`: speech.cpp chooses the device (`auto`: the first GPU, else the CPU), and repeatability was
+  not verified.
+
+### Model licences (verified 2026-10-31)
+
+Read from the Hugging Face model cards (front matter `license:` and the licence section) of the upstream weights and of
+the converted GGUF repositories at the revisions speech.cpp 0.10.0's catalog pins. Only models whose licence allows
+commercial use are registered. Nothing in this table is unverified.
+
+| model | upstream weights | licence | commercial use | converted files (catalog revision) |
+|---|---|---|---|---|
+| `reazonspeech-v2` | [reazon-research/reazonspeech-nemo-v2](https://huggingface.co/reazon-research/reazonspeech-nemo-v2) | Apache-2.0 | yes | [sakasegawa/reazonspeech-nemo-v2-GGUF](https://huggingface.co/sakasegawa/reazonspeech-nemo-v2-GGUF) `ed04d9e`, Apache-2.0 |
+| `parakeet-tdt_ctc-0.6b-ja` | [nvidia/parakeet-tdt_ctc-0.6b-ja](https://huggingface.co/nvidia/parakeet-tdt_ctc-0.6b-ja) | CC-BY-4.0 | yes, with attribution | [sakasegawa/parakeet-tdt_ctc-0.6b-ja-GGUF](https://huggingface.co/sakasegawa/parakeet-tdt_ctc-0.6b-ja-GGUF) `f7cb538`, CC-BY-4.0 |
+| `haas-ja-v1.0` | [third-intelligence/Haas-ja-v1.0](https://huggingface.co/third-intelligence/Haas-ja-v1.0) | Apache-2.0 | yes | [sakasegawa/Haas-ja-v1.0-GGUF](https://huggingface.co/sakasegawa/Haas-ja-v1.0-GGUF) `6b965d5`, Apache-2.0 |
+| `qwen3-asr-0.6b` | [Qwen/Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B) | Apache-2.0 (front matter; no licence section) | yes | [sakasegawa/Qwen3-ASR-0.6B-GGUF](https://huggingface.co/sakasegawa/Qwen3-ASR-0.6B-GGUF) `ee78f87`, Apache-2.0 |
+| `qwen3-asr-1.7b` | [Qwen/Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) | Apache-2.0 (the same) | yes | [sakasegawa/Qwen3-ASR-1.7B-GGUF](https://huggingface.co/sakasegawa/Qwen3-ASR-1.7B-GGUF) `81e2423`, Apache-2.0 |
+| `silero-vad` (region detector) | [snakers4/silero-vad](https://github.com/snakers4/silero-vad) | MIT | yes | [sakasegawa/silero-vad-GGUF](https://huggingface.co/sakasegawa/silero-vad-GGUF) `7fcb7aa`, MIT |
+
+The licences of the training data were not assessed; they are not the model licences. speech.cpp's other models
+(parakeet-tdt-0.6b-v3, Nemotron 3.5 Transcribe, the synthesis models) are not registered.
+
+### Trying speechcpp
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nyosegawa/speech.cpp/main/install.sh | sh   # speech.cpp's installer (checks SHA-256)
+speech pull reazonspeech-v2 silero-vad        # 0.66 GB + 1.2 MB, once, outside the skill
+transcription doctor                          # engine:speechcpp, speechcpp:binary, speechcpp:backend, model rows
+transcription transcribe talk.mp4 --engine speechcpp --language ja --word-timestamps -o talk.json
+transcription transcribe talk.mp4 --engine speechcpp --model qwen3-asr-0.6b --language en -o talk_en.json   # words null
+```
 
 ## Determinism
 
