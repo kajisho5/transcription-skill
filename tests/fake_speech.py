@@ -74,7 +74,10 @@ def fail(code: str, option: str, message: str, status: int = 1) -> None:
 
 
 def out(doc) -> None:
-    sys.stdout.write(json.dumps(doc, ensure_ascii=False) + "\n")
+    """speech.cpp writes UTF-8 on every platform (stdout is binary on Windows)."""
+    sys.stdout.flush()
+    sys.stdout.buffer.write((json.dumps(doc, ensure_ascii=False) + "\n").encode("utf-8"))
+    sys.stdout.buffer.flush()
 
 
 def known_file(path: str):

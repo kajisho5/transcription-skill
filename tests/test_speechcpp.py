@@ -538,6 +538,11 @@ class RealSpeechCppTests(unittest.TestCase):
     def test_real_timed_model_transcribes_japanese_with_word_timestamps(self):
         self.need(REAL_TIMED)
         t = self.transcribe(REAL_TIMED)
+        vad = self.engine._file(S.VAD_MODEL)[0]["path"]
+        regions = subprocess.run(S.vad_argv([REAL], vad, str(FX / "ja_short.wav")), stdout=subprocess.PIPE, text=True, env=S.speech_env()).stdout
+        print(f"\n  regions {regions.strip()}")
+        for s in t["segments"]:
+            print(f"  {s['start']:.3f}-{s['end']:.3f} {s['text']} {[(w['start'], w['end'], w['text']) for w in s['words'] or []][:6]}")
         self.assertTrue(validate_transcript(t).ok, validate_transcript(t).errors)
         ref = REF["ja_short.wav"]
         text = "".join(s["text"] for s in t["segments"])
