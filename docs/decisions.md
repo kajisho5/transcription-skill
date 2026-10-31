@@ -400,3 +400,46 @@
   installs the pinned `speech-0.10.0-linux-x64-cpu.zip` (SHA-256 from the release's `SHA256SUMS`), fetches
   `parakeet-tdt_ctc-0.6b-ja:q4_k`, `qwen3-asr-0.6b:q4_k` and `silero-vad` with `speech pull` in CI only, and requires
   the real-engine tests (`RealSpeechCppTests`, skipped elsewhere) to run and pass on the Japanese fixture.
+
+
+## ADR-036 CI-, docs-, test-only merges cut no release; the unit matrix runs on every pull request
+- Need: `.github/workflows/release.yml` released on every push to `main`. In auto mode (pyproject.toml's version ==
+  the latest tag) release-drafter's version resolver always found at least a patch bump (`default: patch`, and the
+  autolabeler's `chore` label is itself a patch label), so a `ci:` merge (#37) produced v0.7.6 with no change to what
+  anyone installs. video-production-agent pins this Skill's exact version and contract, so every such release drifts
+  that pin for nothing. The only escape was remembering `[skip release]` in the merge message. The owner decided
+  (option A): stop releasing non-code merges, then turn on PR CI.
+- Rule, auto mode only: a push releases if at least one file changed since the latest tag is a *releasing* path.
+  Non-releasing: `.github/**`, `docs/**`, `tests/**`, `scripts/release/**`, and any `*.md` outside `src/` except
+  `SKILL.md` (agents read `SKILL.md` as the Skill, so a change there releases). Everything else releases:
+  `src/**`, `schemas/**`, `evals/**`, `pyproject.toml`, `SKILL.md`, `LICENSE`, assets. Nothing changed at all means
+  nothing to release. When something does release, release-drafter still picks the bump size from the labels of
+  every PR merged since the tag (`feature` → minor, `fix`/`chore`/unlabeled → patch), and CHANGELOG.md still lists
+  every commit since the tag, so held-back docs/CI commits appear in the next real release.
+- Unchanged: manual mode (a human bumped `pyproject.toml` to a version with no tag) releases exactly that version
+  whatever the paths; `[skip release]` in the head commit message still skips the whole job.
+- Mechanism: `scripts/release/release_scope.py` runs `git diff --name-only --no-renames -z v<latest> HEAD` (argv list;
+  the tag is validated as `vX.Y.Z` first, so it cannot be read as an option; a rename counts its old and new path)
+  and writes `releasable=true|false`. release.yml runs it only in auto mode, runs release-drafter only when it says
+  true (so no draft release is created and deleted for nothing), and passes it to `ci_decide_version.py`, which on
+  false keeps the version at the latest tag with `already_released=true`; every later step (bump, CHANGELOG, tag,
+  GitHub Release, publish) already keys off that output. A missing value reads as true, the old behaviour.
+- Rejected: release-drafter `exclude-labels: [chore]`. The autolabeler adds `chore` to any PR touching `**/*.md` or
+  `.github/**`, so a `fix` PR that also edits a README would be excluded and its fix never released. Deciding from
+  PR titles or labels at all was rejected for the same reason: a `ci:`-titled PR that edits `src/` must release,
+  and a `fix`-titled PR that only edits docs must not. The changed files are the fact; labels only size the bump.
+- Checked against history: v0.7.5..#37 (`ci: pin third-party actions`) → not releasable; v0.7.6..#38 and v0.7.8..#40
+  → releasable (src/, schemas/, SKILL.md).
+- CI (owner decision on Actions minutes): `.github/workflows/tests.yml` now runs on `pull_request`, on `push` to
+  `main` and on `workflow_dispatch`, with `concurrency: tests-<ref>` cancelling superseded runs. It holds only the
+  `unit` matrix (Ubuntu/Windows/macOS × Python 3.9/3.11, no model download), plus the release-tooling tests on the
+  Linux cells. The heavy jobs moved unchanged to `.github/workflows/heavy-tests.yml`, `workflow_dispatch` only:
+  `integration` downloads faster-whisper `base`, `engines` downloads speech.cpp and pulls its models. Splitting the
+  file (rather than `if: github.event_name == 'workflow_dispatch'` per job) keeps them off PR checks entirely
+  instead of listing them as skipped.
+- Tests: `scripts/release/tests/test_release_scripts.py` `ReleaseScopeTests` (paths, chore/CI/docs-only → no
+  release, code or SKILL.md → release, manual → release, renames, tag validation, CLI with `--github-output`) and
+  `DecideVersionTests` (`ci_decide_version.py`: auto + not releasable → tag unchanged and `already_released`, auto
+  + releasable → release-drafter's patch/minor, manual → the explicit version).
+- The PR introducing this is itself merged with `[skip release]`: the new rule takes effect only after it is on
+  `main`.

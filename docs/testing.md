@@ -83,7 +83,9 @@ acceptable. Raise the bar by running with `--model small` or larger.
 
 ## CI
 
-`.github/workflows/tests.yml` (manual trigger, like the sibling repositories): unit + security on
-Ubuntu/Windows/macOS × Python 3.9/3.11 with ffmpeg; integration + evals on Ubuntu with faster-whisper and a
-cached `base` model. The matrix has not been executed from this environment (no Actions minutes); no
-job is skipped or marked as passing without running.
+`.github/workflows/tests.yml` runs on every pull request, every push to `main` and on manual dispatch (ADR-036):
+unit + security + paths + conformance + haas_ja/speechcpp fakes + version on Ubuntu/Windows/macOS × Python
+3.9/3.11 with ffmpeg, plus the release-tooling tests (`python -m unittest discover -s scripts/release/tests`) on
+the Linux cells; a newer push to the same ref cancels the older run. `.github/workflows/heavy-tests.yml` is manual
+only, to save Actions minutes: `integration` (integration + evals on Ubuntu with faster-whisper and a cached `base`
+model) and `engines` (the real speech.cpp). No job is skipped or marked as passing without running.
