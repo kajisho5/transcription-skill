@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.10 - 2026-10-31
+
+- STATE.md: note why #42 cut no release (#43) (29b38c0)
+- Speaker merge input: fill speaker_id from diarization-skill turns (roadmap step 4) (#42) (0dad0ad)
+- ci: no release for CI/docs/test-only merges; unit tests on every pull request (ADR-036) (#41) [skip release] (ce42fd2)
+
 ## 0.7.9 - 2026-10-31
 
 - speech.cpp as an optional local engine speechcpp, run as its speech command (ADR-035) (#40) (ca6c46d)
