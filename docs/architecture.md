@@ -50,11 +50,13 @@ Transcript ──► validate.py      ──► ValidationReport         (transc
 |--------|----------------|-------------------------|
 | `request.py` | input contract: allowed keys, types, ranges, budget | no |
 | `paths.py` | input boundary: `PathPolicy` (allowed roots, resolution, traversal/symlink refusal), `is_within` (component containment, posix/nt), `make_run_dir`, `resolve_workspace` | no |
-| `media.py` | fingerprint, ffprobe, fixed audio-extraction recipe, child environment | yes: `ffprobe`, `ffmpeg` (list argv) |
+| `media.py` | fingerprint, ffprobe, fixed audio-extraction recipe, child environment, `run_program` (bounded run of an engine's program) | yes: `ffprobe`, `ffmpeg`, and `speech` for `speechcpp` (list argv, own process group) |
 | `engines/base.py` | `TranscriptionEngine` contract, `EngineSpec`, `ModelStatus`, execution modes and capability vocabulary, `EngineRequest`/`EngineResult` | no |
 | `engines/registry.py` | `EngineRegistry`: register / get / list / available / inspect / find_by_* ; `default_registry()` holds implemented engines only | no |
 | `engines/selector.py` | `EngineRequirements` → `select_engines` / `require_engine`: constraint filtering with per-engine rejection reasons, no ranking | no |
 | `engines/faster_whisper.py` | Reference Local Engine | no (in-process library; may fetch a model unless offline) |
+| `engines/haas.py` | optional Haas-ja-v1.0 engine (ADR-033) | no (in-process library) |
+| `engines/speechcpp.py` | optional speech.cpp engine (ADR-035): builds the `speech` argv, maps its JSON to segments | no (calls `media.run_program`) |
 | `engines/worker.py` | subprocess entry point running one engine call | no |
 | `engines/__init__.py` | public surface of the engine package | no |
 | `service.py` | orchestration, worker launch with timeout, Transcript construction | yes: the worker (list argv) |
@@ -101,7 +103,7 @@ fetch. Implemented and registered today: `faster_whisper` (local). Remote engine
 | # | invariant | where it is enforced |
 |---|-----------|----------------------|
 | 1 | transcription-skill owns speech recognition | `skill.py` tools; no inference/decision module exists |
-| 2 | Engine owns the recognition implementation | `engines/base.py` contract; engine modules cannot spawn processes (`test_security`) |
+| 2 | Engine owns the recognition implementation | `engines/base.py` contract; engine modules cannot import `subprocess`; only `speechcpp` runs a program, via `media.run_program` (`test_security`) |
 | 3 | Selector filters, never ranks | `engines/selector.py`; `SelectionMatrixTests`, eval 19 |
 | 4 | Agent owns final policy / decision | selector returns all candidates + reasons; nothing here picks one |
 | 5–8 | Transcript is a recognition result, not an Event / Decision / Subtitle | `models.py`; SpeechEvent is a separate derived record; SRT/VTT are views |

@@ -78,7 +78,7 @@ CONTRACT_VERSION = "1.0"
 
 # Skill dependencies in the OS sense (other Skills this one invokes at runtime). None: recognition runs
 # in-process through the engine contract; ffmpeg/ffprobe are external tools reported by `doctor`, and
-# faster-whisper / haas-asr are optional provider packages, not Skills.
+# faster-whisper / haas-asr are optional provider packages and speech.cpp's `speech` an optional program, not Skills.
 DEPENDENCIES: List[Dict[str, str]] = []
 
 # Self-declared non-responsibilities (SKILL_SPEC.md: a machine-readable `not_provided`), mirroring the

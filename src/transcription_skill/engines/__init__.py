@@ -1,7 +1,8 @@
 """Engine ecosystem: contract (base), registry, selector, and the implemented engines.
 
-Implemented today: faster_whisper (local, the reference engine) and haas_ja (local, optional: Linux +
-NVIDIA GPU + Python 3.11+, Japanese only). Remote engines are expressible through the same contract but
+Implemented today: faster_whisper (local, the reference engine), haas_ja (local, optional: Linux +
+NVIDIA GPU + Python 3.11+, Japanese only) and speechcpp (local, optional: speech.cpp's `speech` command on
+PATH, ADR-035). Remote engines are expressible through the same contract but
 none is implemented or registered here."""
 from __future__ import annotations
 

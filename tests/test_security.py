@@ -97,10 +97,31 @@ class StaticSecurityTests(unittest.TestCase):
                     self.assertNotEqual(node.module.split(".")[0], "subprocess", f.name)
             self.assertNotRegex(f.read_text(encoding="utf-8"), r"os\.(exec\w*|spawn\w*|popen|system)\s*\(", f.name)
 
+    def test_engine_programs_run_only_through_media_run_program(self):
+        """An engine that wraps a program (speechcpp, ADR-035) still imports no subprocess: it runs `speech` through
+        media.run_program (list argv, own process group, timeout), and only that engine module calls it. Its argv
+        lists start with the binary found on PATH, carry fixed flags and paths it resolved, never a model name."""
+        callers = sorted(f.relative_to(SRC).as_posix() for f in FILES if re.search(r"\brun_program\(", f.read_text(encoding="utf-8")))
+        self.assertEqual(callers, ["engines/speechcpp.py", "media.py"])
+        media = (SRC / "media.py").read_text(encoding="utf-8")
+        self.assertIn("proc = subprocess.Popen(argv, **kw)", media)
+        self.assertIn('kw["start_new_session"] = True', media)
+        from transcription_skill.engines import speechcpp as S
+        tree = ast.parse((SRC / "engines" / "speechcpp.py").read_text(encoding="utf-8"))
+        runs = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("run_program", "_run")]
+        self.assertGreaterEqual(len(runs), 2)
+        for n in runs:
+            self.assertIsInstance(n.args[0], (ast.Name, ast.BinOp), f"speechcpp.py:{n.lineno}: argv must be a list built in the module")
+        self.assertEqual(S.SPEECH_ENV, {"NO_COLOR": "1", "SPEECH_NO_UPDATE_CHECK": "1"})
+        self.assertEqual(S.asr_argv(["speech"], "/m/a.gguf", "ja", True, ["r00001.wav"])[:4], ["speech", "asr", "/m/a.gguf", "--format"])
+        literals = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+        self.assertTrue({"vad", "asr", "models", "devices", "--version"} <= literals)
+        self.assertFalse({"serve", "worker", "pull", "update"} & literals)   # no HTTP server (no auth), no fetch, no self-update
+
     def test_only_implemented_local_engines_registered_and_no_network_capability(self):
         from transcription_skill.engines import default_registry
         specs = default_registry().list()
-        self.assertEqual([s.id for s in specs], ["faster_whisper", "haas_ja"])
+        self.assertEqual([s.id for s in specs], ["faster_whisper", "haas_ja", "speechcpp"])
         for sp in specs:
             self.assertEqual(sp.execution_mode, "local", sp.id)
             self.assertFalse(sp.requires_network, sp.id)

@@ -517,10 +517,10 @@ class CliTests(unittest.TestCase):
         rc, doc = self.cli(["transcribe", wav, "--vocabulary", notjson, "--dry-run", "--json"])
         self.assertEqual(doc["error"]["code"], "INVALID_INPUT")
 
-    def test_contract_declares_vocabulary_and_both_engines(self):
+    def test_contract_declares_vocabulary_and_every_engine(self):
         rc, doc = self.cli(["contract"])
         self.assertEqual(rc, 0)
-        self.assertEqual([e["id"] for e in doc["engines"]], ["faster_whisper", "haas_ja"])
+        self.assertEqual([e["id"] for e in doc["engines"]], ["faster_whisper", "haas_ja", "speechcpp"])
         self.assertIn("vocabulary", doc["tools"][0]["input"])
         self.assertIn("custom_vocabulary", doc["capabilities"])
         self.assertIn("custom_vocabulary", doc["engine_contract"]["capabilities"])

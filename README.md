@@ -83,6 +83,8 @@ transcription transcribe dubbed.mkv --audio-stream 1       # multi-track input: 
 transcription transcribe meeting.wav --vad-filter           # skip non-speech before decoding (long recordings with real silence)
 transcription transcribe talk.mp4 --engine haas_ja --language ja --vocabulary terms.json --word-timestamps
                                                            # optional Japanese engine (Linux + NVIDIA GPU), jargon/names list
+transcription transcribe talk.mp4 --engine speechcpp --language ja --word-timestamps
+                                                           # optional engine: speech.cpp's `speech` (Metal/Vulkan/CPU, no Python ML, no CUDA)
 
 # hand off
 transcription export lecture.transcript.json --format srt -o lecture.srt
@@ -157,6 +159,7 @@ is chosen by constraints, never by the skill's own judgement.
 |--------|----------------|--------|
 | `faster_whisper` | `local` | **implemented**, verified on the fixtures (Reference Local Engine) |
 | `haas_ja` | `local` | **implemented, optional**: [Haas-ja-v1.0](https://huggingface.co/third-intelligence/Haas-ja-v1.0) via `haas-asr`; Japanese only; Linux + NVIDIA GPU + Python 3.11+; custom vocabulary; unit-tested against a fake `haas_asr`, **not yet run on a GPU** ([ADR-033](docs/decisions.md#adr-033-haas-ja-v10-is-an-optional-second-local-engine-haas_ja-with-token-timed-segments-and-a-custom-vocabulary)) |
+| `speechcpp` | `local` | **implemented, optional**: [speech.cpp](https://github.com/nyosegawa/speech.cpp)'s `speech` command (0.10.0+ on PATH) on Metal, Vulkan or the CPU; ReazonSpeech v2 / parakeet-tdt_ctc-0.6b-ja / Haas-ja-v1.0 (Japanese, word timestamps) and Qwen3-ASR (30 languages, words null); models fetched with `speech pull`, never by the skill; unit-tested against a fake `speech`, the real binary runs in the `engines` CI job ([ADR-035](docs/decisions.md#adr-035-speechcpp-is-an-optional-local-engine-speechcpp-run-as-its-speech-command-through-mediarun_program)) |
 | cloud ASR (any vendor) | `remote` | future possible engine: expressible by the contract, **not implemented** |
 | whisper.cpp | `local` | future possible engine: expressible by the contract, **not implemented** |
 
@@ -210,6 +213,28 @@ transcription models pull Haas-ja-v1.0 --engine haas_ja   # ~1.2 GB, once, befor
   SentencePiece token groups (80 ms resolution) as words. `initial_prompt`, `vad_filter` and a non-zero
   `temperature` are refused (`parameter_unsupported`); `beam_size` is ignored with a warning (greedy decoding).
 - The model tends to omit fillers (えー, あの) — the transcript is closer to a cleaned-up subtitle than a verbatim record.
+
+### Optional engine: `speechcpp` (speech.cpp)
+
+[speech.cpp](https://github.com/nyosegawa/speech.cpp) (MIT, C++ on ggml) is one executable, `speech`, with Japanese
+recognizers that need no Python ML stack and no CUDA: Metal on Apple silicon, Vulkan or the CPU on Linux and Windows.
+The skill runs its command line only (never its HTTP server, which has no authentication) and never downloads a
+model: fetch the models once with speech.cpp itself.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nyosegawa/speech.cpp/main/install.sh | sh   # speech.cpp's installer
+speech pull reazonspeech-v2 silero-vad        # the default model and the region detector (0.66 GB + 1.2 MB)
+transcription doctor                          # speechcpp:binary / speechcpp:backend (Metal, Vulkan or CPU) / model rows
+transcription transcribe talk.mp4 --engine speechcpp --language ja --word-timestamps
+```
+
+- Models: `reazonspeech-v2` (default), `parakeet-tdt_ctc-0.6b-ja`, `haas-ja-v1.0` (Japanese, segments and word
+  timestamps from speech.cpp's token times), `qwen3-asr-0.6b`, `qwen3-asr-1.7b` (30 languages; speech.cpp gives no
+  times for them, so each detected speech region is a segment and `words` is null). `NAME:q4_k` and the other weight
+  types of speech.cpp's catalog work too. All have licences that allow commercial use (table in
+  [docs/engines.md](docs/engines.md#model-licences-verified-2026-10-31); parakeet is CC-BY-4.0: attribute NVIDIA).
+- Recognition runs by the regions silero-vad finds, as `speech asr --vad` does, because these models drop sentences
+  from long stretches. `--language` is required; `initial_prompt` and a non-zero `temperature` are refused.
 
 ## CLI
 
@@ -347,7 +372,7 @@ These are enforced by code and tests, not by convention (details: [docs/security
 
 | guarantee | how |
 |-----------|-----|
-| No shell, no command passthrough | every external call is a fixed argv list (`ffprobe`, `ffmpeg`, the engine worker); requests that carry `command`, `argv`, `shell` or a credential are refused; engine modules cannot spawn processes |
+| No shell, no command passthrough | every external call is a fixed argv list (`ffprobe`, `ffmpeg`, the engine worker, speech.cpp's `speech` for `speechcpp`); requests that carry `command`, `argv`, `shell` or a credential are refused; engine modules cannot import `subprocess` (a program-backed engine goes through `media.run_program`) |
 | No credentials anywhere | no cloud engine exists, so none is read; child processes get a minimal environment (`OPENAI_API_KEY`, `HF_TOKEN` and the like are not forwarded); transcripts, contract and doctor output are scanned for credential-shaped strings |
 | Offline is a hard constraint | `--offline`: remote engines → `ENGINE_UNAVAILABLE`, a model not on disk → `MODEL_UNAVAILABLE` (`MODEL_MISSING`), the engine loads with `local_files_only`; nothing is downloaded |
 | Network for recognition vs. network for a model download | separate facts: `EngineSpec.requires_network` (false for faster-whisper) and per-model `ModelStatus.availability` |

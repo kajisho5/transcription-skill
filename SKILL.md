@@ -42,6 +42,7 @@ stdout) and `transcribe` accepts `--dry-run` (plan only, no ASR).
 | "use a bigger / better model" | `--model small` (or `medium`, `large-v3`); doctor shows which are cached |
 | "these names / terms keep coming out wrong" | `--initial-prompt "名前, 用語, ..."` (a vocabulary hint to the decoder, not an instruction); with `--engine haas_ja`: `--vocabulary terms.json` (`{"written form": ["reading", ...]}`) |
 | "Japanese conference / medical talk, need better accuracy", GPU machine | `transcribe input.mp4 --engine haas_ja --language ja [--vocabulary terms.json]`; `doctor` shows whether `haas_ja` is usable here and why not |
+| "Japanese, better than Whisper, on a Mac / no NVIDIA GPU" | `transcribe input.mp4 --engine speechcpp --language ja [--model parakeet-tdt_ctc-0.6b-ja] --word-timestamps`; needs speech.cpp's `speech` on PATH and `speech pull <model> silero-vad` done once by the user (the skill never downloads these); `doctor` shows the binary, backend and models |
 | "don't reuse the old result" | `--no-cache` |
 | "no internet here", "air-gapped", "must not upload the audio" | `transcribe ... --offline` (refuses remote engines and any model download); `doctor --offline` first |
 | "which engines / models can I use here" | `engines` / `engines --engine faster_whisper` / `engines --offline --language ja` |
@@ -75,8 +76,11 @@ never "fix" the transcript text yourself when the user asked for the transcript.
 - `MODEL_UNAVAILABLE` with `availability: MODEL_MISSING` under `--offline` means the model is not on
   this machine; either run once online (`MODEL_DOWNLOAD_REQUIRED` shows a download will happen) or pick
   a model that `engines --engine faster_whisper --offline` lists as `MODEL_AVAILABLE`.
-- `execution_mode` in provenance says where recognition ran (`local` today). Only `faster_whisper`
-  exists; do not offer a cloud engine or whisper.cpp, they are not implemented.
+- `execution_mode` in provenance says where recognition ran (`local` today). The engines are
+  `faster_whisper`, `haas_ja` and `speechcpp` (both optional; `doctor` says whether they are usable here);
+  do not offer a cloud engine or whisper.cpp, they are not implemented.
+- With `--engine speechcpp`, `qwen3-asr-*` models give `words: null` (each segment is one speech region);
+  `MODEL_MISSING` means the user must run `speech pull <model> silero-vad` once; never run it for them unasked.
 - `BUDGET_EXCEEDED` means the media is longer than `--max-audio-seconds`; raise the budget on purpose,
   or transcribe a cut made by ffmpeg-skill. `TRANSCRIPTION_TIMEOUT` means the engine was stopped; a
   smaller model or a longer `--timeout` are the options.

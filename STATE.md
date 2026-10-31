@@ -24,6 +24,13 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   (`--vocabulary FILE`, capability `custom_vocabulary`; refused by other engines). Unit-tested against a fake
   `haas_asr` (`tests/test_haas.py`); **never run on a GPU yet** — recognition, timing accuracy, memory, speed and the
   vocabulary effect are UNKNOWN until someone runs the comparison below on a GPU machine
+- Optional engine `speechcpp` (speech.cpp's `speech` command, 0.10.0+ on PATH, ADR-035) — EXPERIMENTAL: models
+  `reazonspeech-v2` (default), `parakeet-tdt_ctc-0.6b-ja`, `haas-ja-v1.0` (Japanese, word timestamps from speech.cpp's
+  tokens) and `qwen3-asr-0.6b` / `qwen3-asr-1.7b` (30 languages, `words` null), all commercially licensed (table in
+  docs/engines.md); recognition by silero-vad regions; never downloads (models from `speech pull`); doctor rows for
+  the binary, version, backend and models. Unit-tested against a fake `speech` (`tests/test_speechcpp.py`); the real
+  Linux CPU binary with `parakeet-tdt_ctc-0.6b-ja:q4_k` and `qwen3-asr-0.6b:q4_k` runs in the `engines` CI job on the
+  Japanese fixture. Not yet run on Metal/Vulkan or on long real recordings
 - Deterministic cache keyed by content fingerprint + engine id/version/execution_mode + model/model_version + parameters
 - Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt/tsv/txt), `check`, `batch` (many transcribe
   requests, one process; one item's failure never aborts the rest); CLI: doctor, transcribe, segments, export, check,
@@ -107,7 +114,11 @@ v1 (batch mode, language force-selection, long-recording timeout fix, tsv/txt ex
    on real Japanese conference audio (commands in docs/engines.md / the PR), record: whether it runs at all, timing
    quality of segments/word groups against the audio, CER feel on names/jargon with and without `--vocabulary`, speed,
    GPU memory at `BATCH_SIZE` 16, and whether two runs are identical (then flip `deterministic`).
-7. **PyPI distribution** (lower priority, needs a human decision, not just code): currently git-only
+7. **Run `speechcpp` on long real Japanese audio** (ADR-035) on Metal and/or Vulkan: compare `reazonspeech-v2`,
+   `parakeet-tdt_ctc-0.6b-ja` and `haas-ja-v1.0` with faster-whisper on the same talk (CER, segment/word timing
+   against the audio, speed), check whether two runs are identical (then flip `deterministic`), and decide on the
+   follow-ups: Qwen3-ASR `--prompt` for `initial_prompt`, Haas `--keywords` for `vocabulary` (text only in speech.cpp).
+8. **PyPI distribution** (lower priority, needs a human decision, not just code): currently git-only
    because `PYPI_API_TOKEN` isn't configured (`.github/workflows/release.yml`'s publish step is skipped
    by design). Adding it is an operational/account decision (a PyPI project + token), not something a
    session should do unprompted — listed here so it isn't forgotten, not as work to start on its own.
@@ -201,3 +212,7 @@ ever needed.
 - 2026-10-31: roadmap step 5, optional second engine: `haas_ja` (Haas-ja-v1.0 via haas-asr, ADR-033) with request
   `vocabulary` / `--vocabulary`, engine capability `custom_vocabulary`, `unsupported_parameters` refusal hook,
   per-engine default model. Unit tests with a fake `haas_asr` (`tests/test_haas.py`); not run on a GPU.
+- 2026-10-31: optional engine `speechcpp` (speech.cpp 0.10.0's `speech` command, ADR-035): `media.run_program`
+  (list argv, own process group, killed on timeout), `EngineRequest.timeout`, `TranscriptionEngine.doctor_rows()`,
+  `CHILD_ENV_KEYS` + speech.cpp's model-folder variables. Fake-binary unit tests and an `engines` CI job with the real
+  Linux binary. Contract: one more `engines` entry, nothing else.
