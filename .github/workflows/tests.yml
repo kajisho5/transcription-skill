@@ -41,4 +41,4 @@ jobs:
       - run: python -m unittest -v tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py tests/test_version_source.py tests/test_speechcpp.py
       - name: Release-tooling scripts (the release decision, ADR-036)
         if: runner.os == 'Linux'
-        run: python -m unittest -v discover -s scripts/release/tests
+        run: python -m unittest discover -v -s scripts/release/tests
