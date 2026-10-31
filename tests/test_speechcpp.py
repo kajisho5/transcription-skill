@@ -496,6 +496,17 @@ REAL_TIMED = os.environ.get("TRANSCRIPTION_TEST_SPEECHCPP_TIMED", "parakeet-tdt_
 REAL_UNTIMED = os.environ.get("TRANSCRIPTION_TEST_SPEECHCPP_UNTIMED", "qwen3-asr-0.6b:q4_k")
 
 
+def speech_span(path: str, level: int = 1000):
+    """(first, last) second of the 10 ms windows whose peak exceeds `level`: where the speech is in a clean recording."""
+    import struct
+    with wave.open(path, "rb") as w:
+        rate, n = w.getframerate(), w.getnframes()
+        d = struct.unpack("<%dh" % n, w.readframes(n))
+    hop = rate // 100
+    loud = [i for i in range(0, n - hop, hop) if max(abs(x) for x in d[i:i + hop]) > level]
+    return loud[0] / rate, (loud[-1] + hop) / rate
+
+
 def _cer(ref: str, hyp: str) -> float:
     from test_integration import cer
     return cer(ref, hyp)
@@ -547,8 +558,14 @@ class RealSpeechCppTests(unittest.TestCase):
         ref = REF["ja_short.wav"]
         text = "".join(s["text"] for s in t["segments"])
         self.assertLessEqual(_cer(ref["reference_text"], text), 0.3, text)
-        self.assertGreaterEqual(t["segments"][0]["start"], ref["speech_onset"] - 0.4)    # the VAD pads a region by 0.3 s
         self.assertTrue(all(s["words"] for s in t["segments"]), t["segments"])
+        # the words sit on the speech as measured in the file itself (fixtures.json's speech_onset of 1.0 s does not
+        # match ja_short.wav, whose speech starts at about 0.3 s): first word within 0.25 s of the onset, last word
+        # ending within 0.4 s of the end of the speech
+        onset, offset = speech_span(str(FX / "ja_short.wav"))
+        words = [w for s in t["segments"] for w in s["words"]]
+        self.assertLess(abs(words[0]["start"] - onset), 0.25, (onset, words[0]))
+        self.assertLess(abs(words[-1]["end"] - offset), 0.4, (offset, words[-1]))
         print(f"\n  {REAL_TIMED}: {text!r}; {[(s['start'], s['end']) for s in t['segments']]}; warnings {t['warnings']}")
 
     def test_real_untimed_model_gives_region_segments_with_null_words(self):
