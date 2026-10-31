@@ -7,6 +7,9 @@
 #      semantic version from the labels of PRs merged since the last tag. It does not generate the
 #      release body or CHANGELOG.md content itself -- release.yml builds those from `git log`
 #      (scripts/release/changelog.py) so untrusted PR titles never pass through a shell.
+#      It only runs when scripts/release/release_scope.py finds a releasing change since the last tag
+#      (ADR-036): a `chore` label sets the bump size when something releases, it does not decide
+#      whether anything releases -- CI-, docs-, test-only merges cut no release at all.
 
 name-template: "v$RESOLVED_VERSION"
 tag-template: "v$RESOLVED_VERSION"

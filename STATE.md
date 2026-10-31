@@ -12,8 +12,12 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   (`pip install "transcription-skill[faster-whisper] @ git+https://github.com/kajisho5/transcription-skill@v0.4.0"`);
   no PyPI package (`PYPI_API_TOKEN` not configured, so `.github/workflows/release.yml`'s publish step
   is skipped by design)
-- CI: `.github/workflows/tests.yml`, `workflow_dispatch` only (Actions minutes policy shared with sibling repos);
-  never executed from an automated session — status UNKNOWN until someone triggers it
+- Release rule (ADR-036): in auto mode a push to `main` releases only if a file outside `.github/`, `docs/`, `tests/`,
+  `scripts/release/` and Markdown (`SKILL.md` excepted) changed since the latest tag (`scripts/release/release_scope.py`);
+  CI-, docs-, test-only merges cut no release. An explicit `pyproject.toml` bump always releases; `[skip release]` still skips
+- CI: `.github/workflows/tests.yml` runs the unit matrix (Ubuntu/Windows/macOS × Python 3.9/3.11) on every pull request
+  and push to `main` (owner decision on Actions minutes, ADR-036); `.github/workflows/heavy-tests.yml` (`integration`
+  with faster-whisper `base`, `engines` with the real speech.cpp) stays `workflow_dispatch` only
 
 ## What exists (CURRENT)
 - Transcript / Segment / Word model, validator, JSON Schemas (`transcript/0.1`, `speech-event/0.1`, `engine-spec/0.1`)
@@ -90,8 +94,8 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 ## Active work / next highest-value tasks (ordered) — v1.1 roadmap
 v1 (batch mode, language force-selection, long-recording timeout fix, tsv/txt export) shipped
 2026-09-13 (PRs #22, #25, #26). Next, in priority order:
-1. Trigger CI once (workflow_dispatch) and record the matrix result here (carried over, still blocked
-   on human approval — see "Pending human approval" below).
+1. ~~Trigger CI once (workflow_dispatch) and record the matrix result here.~~ Done 2026-10-31: the owner chose
+   PR CI for the unit matrix (ADR-036, roadmap step 3); it now runs on every pull request.
 2. ~~**VAD (voice-activity-detection) pass-through.**~~ Done 2026-09-13: `vad_filter: bool` (default
    `False`, unchanged behavior) on `TranscribeRequest`/the `transcription/transcribe` tool/CLI
    (`--vad-filter`), threaded through `EngineRequest` into `faster_whisper.py`'s
@@ -125,15 +129,10 @@ v1 (batch mode, language force-selection, long-recording timeout fix, tsv/txt ex
 
 ## Pending human approval
 
-1. **Trigger CI once.** `.github/workflows/tests.yml` is `workflow_dispatch`-only because the account's
-   Actions minutes are shared and limited across `ffmpeg-skill`, `video-production-agent` and this repo
-   (see the comment at the top of that file). Running it consumes minutes from that shared pool — that's
-   the only reason it hasn't been run automatically. A session (including one reached through
-   `kajisho5/AI-video-production-OS`) may relay a human's go-ahead and trigger it directly.
-   - **How, once approved:** GitHub Actions API/UI `workflow_dispatch` on `tests.yml`, ref `main` (repo
-     `kajisho5/transcription-skill`, workflow file `.github/workflows/tests.yml`). No inputs required.
-   - **After it runs:** record the run result (pass/fail per OS/Python cell) in this file's Version/release
-     section, replacing the "never executed from an automated session" note.
+Nothing pending. **Resolved 2026-10-31 (ADR-036, roadmap step 3):** "Trigger CI once" was blocked on the owner's
+Actions-minutes decision. The owner decided: the `unit` matrix runs on every pull request and push to `main`
+(`.github/workflows/tests.yml`); the heavy `integration` and `engines` jobs stay manual
+(`.github/workflows/heavy-tests.yml`). Together with it, CI-, docs-, test-only merges no longer cut a release.
 
 **Resolved, not by a human go-ahead as originally intended:** "First tagged release" was listed here as
 blocked on (1) plus an explicit human approval, because a tag/release is an externally-visible
@@ -216,3 +215,7 @@ ever needed.
   (list argv, own process group, killed on timeout), `EngineRequest.timeout`, `TranscriptionEngine.doctor_rows()`,
   `CHILD_ENV_KEYS` + speech.cpp's model-folder variables. Fake-binary unit tests and an `engines` CI job with the real
   Linux binary. Contract: one more `engines` entry, nothing else.
+- 2026-10-31: roadmap step 3, CI on pull requests (ADR-036): `release.yml` no longer releases a merge that changes only
+  `.github/`, `docs/`, `tests/`, `scripts/release/` or Markdown other than `SKILL.md` (`scripts/release/release_scope.py`,
+  tested in `scripts/release/tests/`); `tests.yml` runs the unit matrix on `pull_request` and `push` to `main`, the heavy
+  jobs moved to the manual `heavy-tests.yml`.

@@ -1,9 +1,10 @@
 # transcription-skill — instructions for Claude Code sessions
 
 Read `STATE.md` first: it says what exists, what is incomplete, known limitations and the next tasks —
-including a "Pending human approval" section for the two actions blocked on an explicit human go-ahead
-(triggering CI once, the first tagged release). If a human has approved one of those, execute it as
-described there; otherwise leave it pending. Do not rely on conversation history; update `STATE.md` when
+including a "Pending human approval" section for actions blocked on an explicit human go-ahead. If a human
+has approved one of those, execute it as described there; otherwise leave it pending. Release rule
+(ADR-036): a merge that changes only `.github/`, `docs/`, `tests/`, `scripts/release/` or Markdown other than
+`SKILL.md` cuts no release; any other change releases, and an explicit `pyproject.toml` bump always does. Do not rely on conversation history; update `STATE.md` when
 the facts change.
 
 ## What this repository is
@@ -24,6 +25,7 @@ Transcript out. Standalone-usable (CLI + `run -` JSON transport); OS integration
 ```bash
 pip install -e ".[faster-whisper]"
 python -m unittest tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py tests/test_version_source.py
+python -m unittest discover -s scripts/release/tests   # release tooling (runs in PR CI on Linux)
 python -m unittest tests/test_integration.py      # real faster-whisper, downloads `base` once
 python evals/run.py
 python -m pyflakes src tests evals

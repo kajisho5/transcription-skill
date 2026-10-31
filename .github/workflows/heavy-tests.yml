@@ -1,0 +1,90 @@
+# The heavy test jobs, manual trigger only (owner decision on Actions minutes, ADR-036): `integration`
+# downloads the faster-whisper `base` model, `engines` downloads speech.cpp and pulls its models. They are
+# kept out of tests.yml, which runs the unit matrix on every pull request and push to main, so a PR never
+# spends minutes (or bandwidth) on them and never shows them as checks. Run from the Actions tab or
+# `gh workflow run heavy-tests.yml --ref <branch>`.
+name: heavy tests
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: heavy-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: {python-version: "3.11"}
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/huggingface/hub
+          key: faster-whisper-base-${{ runner.os }}
+      - run: pip install -e ".[faster-whisper]"
+      - run: transcription doctor
+      - run: python -m unittest -v tests/test_integration.py
+      - run: python evals/run.py
+  engines:
+    # The real speech.cpp (ADR-035): the Linux CPU build of release v0.10.0, checked against the SHA-256 its
+    # SHA256SUMS lists, and a small model of each kind (timed parakeet-ja, untimed Qwen3-ASR) plus the silero-vad
+    # detector, fetched here with `speech pull` (CI only; the skill itself never downloads). The real-engine tests
+    # that skip in every other job must run and pass here.
+    runs-on: ubuntu-latest
+    env:
+      SPEECH_VERSION: "0.10.0"
+      SPEECH_ZIP_SHA256: 0194c2a9a7285429c5b363b9a35853967c31fbbe9ad470432fe266aa48d2608e
+      SPEECH_NO_UPDATE_CHECK: "1"
+      TRANSCRIPTION_TEST_SPEECHCPP_TIMED: "parakeet-tdt_ctc-0.6b-ja:q4_k"
+      TRANSCRIPTION_TEST_SPEECHCPP_UNTIMED: "qwen3-asr-0.6b:q4_k"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: {python-version: "3.11"}
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg unzip
+      - name: Install speech.cpp (pinned release, SHA-256 checked)
+        run: |
+          set -eu
+          dir="$RUNNER_TEMP/speechcpp"
+          mkdir -p "$dir"
+          curl -fsSL --retry 3 -o "$dir/speech.zip" \
+            "https://github.com/nyosegawa/speech.cpp/releases/download/v$SPEECH_VERSION/speech-$SPEECH_VERSION-linux-x64-cpu.zip"
+          echo "$SPEECH_ZIP_SHA256  $dir/speech.zip" | sha256sum -c -
+          unzip -q "$dir/speech.zip" -d "$dir/bin"
+          echo "$dir/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/speech.cpp/models
+          key: speechcpp-models-${{ env.SPEECH_VERSION }}-parakeet-ja-q4_k-qwen3-asr-0.6b-q4_k-silero-vad
+      - name: The real CLI (the subcommands and flags ADR-035 builds on)
+        run: |
+          speech --version
+          speech asr --help
+          speech vad --help
+          speech devices --json
+      - name: Fetch the test models (CI only)
+        run: speech pull "$TRANSCRIPTION_TEST_SPEECHCPP_TIMED" "$TRANSCRIPTION_TEST_SPEECHCPP_UNTIMED" silero-vad
+      - run: pip install -e .
+      - name: doctor reports the binary, its backend and the models
+        run: |
+          transcription doctor --json | tee doctor.json
+          python -c "import json; r={c['check']: c for c in json.load(open('doctor.json'))['checks']}; assert r['engine:speechcpp']['status']=='AVAILABLE', r['engine:speechcpp']; assert r['speechcpp:binary']['status']=='AVAILABLE'; assert r['speechcpp:backend']['status']=='AVAILABLE'; assert r['model:speechcpp:silero-vad']['status']=='AVAILABLE'"
+      - name: speechcpp tests, the real-engine ones included
+        run: |
+          set -o pipefail
+          python -m unittest -v tests/test_speechcpp.py 2>&1 | tee test.log
+          ! grep -E "\.\.\. skipped" test.log
+          for t in test_real_cli_has_the_subcommands_and_flags_the_engine_uses test_real_timed_model_transcribes_japanese_with_word_timestamps \
+                   test_real_untimed_model_gives_region_segments_with_null_words test_real_doctor_reports_binary_backend_and_models; do
+            grep -E "^$t .*\.\.\. ok$" test.log || { echo "::error::$t did not run and pass"; exit 1; }
+          done
+      - name: The Japanese fixture through the CLI (job summary)
+        run: |
+          for m in "$TRANSCRIPTION_TEST_SPEECHCPP_TIMED" "$TRANSCRIPTION_TEST_SPEECHCPP_UNTIMED"; do
+            transcription transcribe tests/fixtures/ja_short.wav --engine speechcpp --model "$m" --language ja --word-timestamps --no-cache -o out.json
+            transcription check out.json
+            python -c "import json,sys; d=json.load(open('out.json')); print('|', sys.argv[1], '|', ' '.join(s['text'] for s in d['segments']), '|', [(s['start'], s['end'], len(s['words'] or [])) for s in d['segments']], '|')" "$m" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
