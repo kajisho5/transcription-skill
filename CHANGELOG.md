@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.8 - 2026-10-31
+
+- Single-source the version: every reported version tested against pyproject.toml (ADR-034) (#39) (a52c8e4)
+
 ## 0.7.7 - 2026-10-31
 
 - Haas-ja-v1.0 as an optional Japanese engine haas_ja with custom vocabulary (ADR-033) (#38) (bf75420)
