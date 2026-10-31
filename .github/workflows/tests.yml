@@ -29,7 +29,7 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install ffmpeg -y --no-progress
       - run: pip install -e .
-      - run: python -m unittest -v tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py
+      - run: python -m unittest -v tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py tests/test_version_source.py
   integration:
     runs-on: ubuntu-latest
     steps:

@@ -281,3 +281,28 @@
   hypothesis contents, timing accuracy, memory at `BATCH_SIZE` 16, the vocabulary effect, speed. Unit tests use a fake
   `haas_asr` shaped after the sources above. A GPU run against faster-whisper on real conference audio is the next
   step (STATE.md).
+
+## ADR-034 The version has one source, `pyproject.toml`; every reported version is read from it and tested against it
+- The release workflow bumps only `pyproject.toml` (`scripts/release/bump_version.py`) and tags that value, so the
+  version is single-sourced there. A hard-coded `__version__` kept reporting `0.2.0` in the contract, `--version`,
+  `doctor` and every transcript's `provenance.skill_version` while the tags moved to 0.7.x (fixed in #35). Roadmap
+  step 1's done-when, "`skill --json` version == tag", is now enforced by a test instead of by care.
+- `__version__` comes from `_version()` in `__init__.py`: this checkout's `pyproject.toml` when the package runs from
+  source (an editable install included, whose recorded metadata goes stale on the next bump), using the first
+  top-level `version = "..."` line, the same line `bump_version.py` rewrites. Otherwise it comes from the installed
+  distribution's `METADATA`, built from that same file. The fallback is `0.0.0+unknown`. qc-skill (its ADR-020),
+  subtitle-skill and media-analysis-skill use the same rule. qc-skill and subtitle-skill call
+  `importlib.metadata.version()`; this repository's security scan forbids `importlib` in the package
+  (`tests/test_security.py`), so, as in media-analysis-skill, `METADATA` is read directly.
+- The metadata is looked up next to the imported package first, then along `sys.path`. Scanning `sys.path` alone let
+  a stale `transcription_skill-*.dist-info` from another environment earlier on the path answer for the copy actually
+  imported.
+- Rejected: having the release workflow also rewrite a constant in `__init__.py`. That would mean two files to keep in
+  step, and a manual bump of one of them would drift again.
+- `tests/test_version_source.py` reads `pyproject.toml` with the release workflow's own reader
+  (`scripts/release/version_state.read_pyproject_version`). It checks `__version__`, `skill_contract()`, the CLI's
+  `contract --json` / `skill --json` / `--version` / `doctor --json` run from outside the checkout, and a transcript's
+  `provenance.skill_version`. It also checks that an installed copy reads its own dist-info when a stale one comes
+  first on `sys.path`. The version number and the contract document are unchanged: from source, `contract --json` is
+  byte-identical before and after this change.
+
