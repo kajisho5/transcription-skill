@@ -21,7 +21,7 @@ Agent wires transcribe only (ADR-024); segments/export/check/batch unused. Extra
 
 ## Steps
 
-- [ ] **1. Single-source the version** — coordinated with the agent's version gate
+- [x] **1. Single-source the version** — coordinated with the agent's version gate; read from `pyproject.toml` (#35), every reported version tested against it, ADR-034 — [#39](https://github.com/kajisho5/transcription-skill/pull/39)
   - Done when: `skill --json` version == tag
 - [x] **2. `contract` alias of `skill --json`** — same command name as the other skills — [#36](https://github.com/kajisho5/transcription-skill/pull/36)
   - Done when: outputs match

@@ -23,7 +23,7 @@ Transcript out. Standalone-usable (CLI + `run -` JSON transport); OS integration
 ## Working routine
 ```bash
 pip install -e ".[faster-whisper]"
-python -m unittest tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py
+python -m unittest tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py tests/test_version_source.py
 python -m unittest tests/test_integration.py      # real faster-whisper, downloads `base` once
 python evals/run.py
 python -m pyflakes src tests evals

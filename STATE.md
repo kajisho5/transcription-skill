@@ -4,7 +4,7 @@ Durable repository state for humans and future sessions. Facts only; update when
 Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move) · PLANNED · VISION · UNKNOWN.
 
 ## Version / release
-- package `transcription-skill` 0.4.0 (`pyproject.toml`), `contract_version` 1.0 (`skill.py`)
+- package `transcription-skill`: the version is the one in `pyproject.toml`, the only file the release workflow bumps; every reported version is read from it (ADR-034). `contract_version` 1.0 (`skill.py`)
 - tags/GitHub Releases `v0.2.0`..`v0.4.0` exist — CURRENT, all non-draft, non-prerelease, auto-cut by
   `.github/workflows/release.yml` on merges to `main` (`v0.2.1`/`v0.2.2` from doc-only merges, `v0.3.0`
   from the batch-mode feature merge/PR #22, `v0.3.1` from the STATE.md cleanup/PR #24, `v0.3.2` from the
