@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.9 - 2026-10-31
+
+- speech.cpp as an optional local engine speechcpp, run as its speech command (ADR-035) (#40) (ca6c46d)
+
 ## 0.7.8 - 2026-10-31
 
 - Single-source the version: every reported version tested against pyproject.toml (ADR-034) (#39) (a52c8e4)
