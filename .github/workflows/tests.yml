@@ -38,7 +38,7 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install ffmpeg -y --no-progress
       - run: pip install -e .
-      - run: python -m unittest -v tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py tests/test_version_source.py tests/test_speechcpp.py
+      - run: python -m unittest -v tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py tests/test_version_source.py tests/test_speechcpp.py tests/test_whisperx.py
       - name: Release-tooling scripts (the release decision, ADR-036)
         if: runner.os == 'Linux'
         run: python -m unittest discover -v -s scripts/release/tests

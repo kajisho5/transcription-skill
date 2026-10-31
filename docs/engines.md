@@ -1,10 +1,11 @@
 # Engines
 
 transcription-skill is a transcription **capability**; engines are interchangeable implementations of
-one contract. Three engines are implemented and registered: `faster_whisper`, the Reference Local Engine;
+one contract. Four engines are implemented and registered: `faster_whisper`, the Reference Local Engine;
 `haas_ja` (Haas-ja-v1.0), an optional Japanese engine that is only usable on Linux with an NVIDIA GPU
 and Python 3.11+ (ADR-033); and `speechcpp`, an optional engine that runs speech.cpp's `speech` command
-(Metal, Vulkan or the CPU; no Python ML stack, no CUDA; ADR-035). Cloud ASR (any vendor) and whisper.cpp are *future possible engines*: the
+(Metal, Vulkan or the CPU; no Python ML stack, no CUDA; ADR-035); and `whisperx`, an optional engine that adds wav2vec2
+forced alignment of words to faster-whisper output (Python 3.10+, English and Japanese, no diarization; ADR-038). Cloud ASR (any vendor) and whisper.cpp are *future possible engines*: the
 contract can describe them, nothing in this repository implements them.
 
 ## Contract (`engines/base.py`)
@@ -106,6 +107,7 @@ contract tests and is never in the default registry (`tests/test_security.py` as
 | `faster_whisper` | local | `engines/faster_whisper.py` | Reference Local Engine, verified on the fixtures |
 | `haas_ja` | local | `engines/haas.py` | optional (Linux + NVIDIA GPU + Python 3.11+); unit-tested with a fake `haas_asr`, not yet run on a GPU |
 | `speechcpp` | local | `engines/speechcpp.py` | optional (speech.cpp's `speech` 0.10.0+ on PATH); unit-tested with a fake `speech`, real binary in the `engines` CI job |
+| `whisperx` | local | `engines/whisperx.py` | optional (Python 3.10+, `pip install whisperx`); en/ja with wav2vec2 alignment; unit-tested with a fake `whisperx`, not yet run for real |
 | cloud ASR | remote | none | future possible engine (contract only) |
 | whisper.cpp | local | none | future possible engine (contract only) |
 
@@ -311,6 +313,35 @@ transcription doctor                          # engine:speechcpp, speechcpp:bina
 transcription transcribe talk.mp4 --engine speechcpp --language ja --word-timestamps -o talk.json
 transcription transcribe talk.mp4 --engine speechcpp --model qwen3-asr-0.6b --language en -o talk_en.json   # words null
 ```
+
+## whisperx (optional word-alignment engine, ADR-038)
+
+- Program: [whisperX](https://github.com/m-bain/whisperX) (BSD-2-Clause; written against v3.8.6), `pip install whisperx`,
+  Python 3.10–3.13, pulls PyTorch. `whisperx` is imported only after the Python check passes.
+- Pipeline: `whisperx.load_model(model, device, compute_type="int8", language=, asr_options={beam_size, temperatures:
+  [temperature], initial_prompt}, vad_method="pyannote", local_files_only=)`, `transcribe(audio, batch_size=8,
+  language=)`, then `load_align_model(language_code=, model_name=<explicit repo>, model_cache_only=)` and
+  `align(..., return_char_alignments=False)`. The audio is the prepared WAV read with `wave` (never `whisperx.load_audio`,
+  which starts ffmpeg).
+- Models: the Whisper names and Hugging Face cache of `faster_whisper` (default `large-v3`), plus one alignment model per
+  language and NLTK `punkt_tab`; `transcription models pull MODEL --engine whisperx` fetches all of them. Offline, or with
+  downloads off, each missing piece is `MODEL_UNAVAILABLE` (`MODEL_MISSING`, `details.component`).
+- Languages and licences (read 2026-10-31; only commercially usable alignment weights are used):
+
+  | language | alignment model | licence | source |
+  |---|---|---|---|
+  | `en` | [facebook/wav2vec2-base-960h](https://huggingface.co/facebook/wav2vec2-base-960h) (`22aad52`) | Apache-2.0 (card); torchaudio's `WAV2VEC2_ASR_BASE_960H`, the same wav2vec 2.0 weights, is MIT ("published ... under MIT License and redistributed with the same license") | HF card front matter; torchaudio `pipelines/_wav2vec2/impl.py` |
+  | `ja` | [jonatasgrosman/wav2vec2-large-xlsr-53-japanese](https://huggingface.co/jonatasgrosman/wav2vec2-large-xlsr-53-japanese) (`cf031e0`) | Apache-2.0 | HF card front matter |
+  | (VAD) | pyannote segmentation bundled in the whisperX package | MIT ([pyannote/segmentation](https://huggingface.co/pyannote/segmentation)) | `whisperx/vads/pyannote.py` |
+
+  NLTK `punkt_tab` (sentence splitting): no licence in the NLTK data index; not assessed. No language detection.
+- Output: aligned segment times; with `--word-timestamps`, aligned words (`confidence` = alignment score, clipped). An
+  untimed word joins its neighbour (warning), nothing is interpolated; no timed word → `words: null`. Segment
+  `confidence`: null. `model_version`: `<whisper snapshot>+align:<alignment snapshot>`.
+- Not done here: diarization. `whisperx.diarize` / `assign_word_speakers` are never called (static test); speakers come
+  from diarization-skill's turns (ADR-037).
+- `vad_filter`: whisperX always decodes voice-activity regions, so `false` is reported as a warning. `deterministic:
+  false` until two real runs are shown identical.
 
 ## Determinism
 

@@ -58,6 +58,7 @@ Transcript + diarization-skill turns ──► speakers.py ──► Transcript 
 | `engines/faster_whisper.py` | Reference Local Engine | no (in-process library; may fetch a model unless offline) |
 | `engines/haas.py` | optional Haas-ja-v1.0 engine (ADR-033) | no (in-process library) |
 | `engines/speechcpp.py` | optional speech.cpp engine (ADR-035): builds the `speech` argv, maps its JSON to segments | no (calls `media.run_program`) |
+| `engines/whisperx.py` | optional whisperX engine (ADR-038): batched Whisper + wav2vec2 word alignment, no diarization | no (in-process library; reads the WAV itself) |
 | `engines/worker.py` | subprocess entry point running one engine call | no |
 | `engines/__init__.py` | public surface of the engine package | no |
 | `service.py` | orchestration, worker launch with timeout, Transcript construction | yes: the worker (list argv) |

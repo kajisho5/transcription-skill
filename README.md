@@ -160,6 +160,7 @@ is chosen by constraints, never by the skill's own judgement.
 | `faster_whisper` | `local` | **implemented**, verified on the fixtures (Reference Local Engine) |
 | `haas_ja` | `local` | **implemented, optional**: [Haas-ja-v1.0](https://huggingface.co/third-intelligence/Haas-ja-v1.0) via `haas-asr`; Japanese only; Linux + NVIDIA GPU + Python 3.11+; custom vocabulary; unit-tested against a fake `haas_asr`, **not yet run on a GPU** ([ADR-033](docs/decisions.md#adr-033-haas-ja-v10-is-an-optional-second-local-engine-haas_ja-with-token-timed-segments-and-a-custom-vocabulary)) |
 | `speechcpp` | `local` | **implemented, optional**: [speech.cpp](https://github.com/nyosegawa/speech.cpp)'s `speech` command (0.10.0+ on PATH) on Metal, Vulkan or the CPU; ReazonSpeech v2 / parakeet-tdt_ctc-0.6b-ja / Haas-ja-v1.0 (Japanese, word timestamps) and Qwen3-ASR (30 languages, words null); models fetched with `speech pull`, never by the skill; unit-tested against a fake `speech`, the real binary runs in the `engines` CI job ([ADR-035](docs/decisions.md#adr-035-speechcpp-is-an-optional-local-engine-speechcpp-run-as-its-speech-command-through-mediarun_program)) |
+| `whisperx` | `local` | **implemented, optional**: [whisperX](https://github.com/m-bain/whisperX) (Python 3.10+, `pip install whisperx`): faster-whisper batched over voice-activity regions plus wav2vec2 forced alignment for word timestamps; English and Japanese (alignment models Apache-2.0); no diarization (speakers come from diarization-skill, ADR-037); unit-tested against a fake `whisperx`, **not yet run for real** ([ADR-038](docs/decisions.md#adr-038-whisperx-is-an-optional-local-engine-whisperx-for-wav2vec2-aligned-word-timestamps-it-does-not-diarize)) |
 | cloud ASR (any vendor) | `remote` | future possible engine: expressible by the contract, **not implemented** |
 | whisper.cpp | `local` | future possible engine: expressible by the contract, **not implemented** |
 
@@ -235,6 +236,27 @@ transcription transcribe talk.mp4 --engine speechcpp --language ja --word-timest
   [docs/engines.md](docs/engines.md#model-licences-verified-2026-10-31); parakeet is CC-BY-4.0: attribute NVIDIA).
 - Recognition runs by the regions silero-vad finds, as `speech asr --vad` does, because these models drop sentences
   from long stretches. `--language` is required; `initial_prompt` and a non-zero `temperature` are refused.
+
+### Optional engine: `whisperx` (word alignment)
+
+[whisperX](https://github.com/m-bain/whisperX) (BSD-2-Clause) runs the same Whisper checkpoints as `faster_whisper`, batched
+over voice-activity regions, then force-aligns every word with a wav2vec2 model, so word times sit on the speech.
+Python 3.10+ and PyTorch.
+
+```bash
+pip install whisperx
+transcription models pull large-v3 --engine whisperx   # Whisper model + en/ja alignment models + NLTK punkt_tab, once
+transcription doctor                                   # engine:whisperx, model:whisperx:align:en|ja, model:whisperx:punkt_tab
+transcription transcribe talk.mp4 --engine whisperx --language en --word-timestamps
+```
+
+- Languages: `en` (`facebook/wav2vec2-base-960h`) and `ja` (`jonatasgrosman/wav2vec2-large-xlsr-53-japanese`), both
+  Apache-2.0 per their model cards; whisperX's models for other languages were not licence-checked and are not offered.
+  `--language` is required.
+- No diarization: whisperX's pyannote diarization is never called. Pass diarization-skill's turns with
+  `--speaker-turns` (ADR-037) to fill `speaker_id`.
+- Words the aligner cannot time (e.g. digits) join the neighbouring word, with a warning; segment `confidence` is null.
+  `vad_filter` cannot be turned off (whisperX always decodes voice-activity regions).
 
 ## CLI
 

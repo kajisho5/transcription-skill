@@ -487,3 +487,58 @@
 - Release (ADR-036): this changes `src/`, `schemas/` and `SKILL.md`, so the merge releases (a patch unless the PR
   is labelled `feature`). video-production-agent pins this skill's exact version and contract, so it needs a
   re-pin to see `transcription/speakers` / `speaker_turns`; its `check_contract` accepts the new contract as is.
+
+## ADR-038 whisperX is an optional local engine (`whisperx`) for wav2vec2-aligned word timestamps; it does not diarize
+- Need: English subtitles whose word times sit on the speech. faster-whisper's word times come from Whisper's
+  cross-attention; [whisperX](https://github.com/m-bain/whisperX) (BSD-2-Clause, ★25.0k on 2026-10-31) runs the same
+  faster-whisper checkpoints batched over voice-activity regions and then force-aligns every word with a wav2vec2 CTC
+  model. The English engine survey of 2026-10-31 named it the optional high-quality ASR engine, on condition that the
+  English alignment model's weight licence is checked first.
+- Alignment model licences, read from the primary sources on 2026-10-31 (only commercially usable ones are used):
+  - English: whisperX's default is torchaudio's `WAV2VEC2_ASR_BASE_960H` (`whisperx/alignment.py`
+    `DEFAULT_ALIGN_MODELS_TORCH`), mapped to the Hugging Face repo `facebook/wav2vec2-base-960h` when torchaudio is
+    missing (`TORCHAUDIO_PIPELINE_TO_HF`). torchaudio's pipeline documentation (`src/torchaudio/pipelines/_wav2vec2/impl.py`)
+    says it was "Originally published by the authors of wav2vec 2.0 under MIT License and redistributed with the same
+    license" (fairseq `LICENSE` at `ce6c9ee`). The Hugging Face card of
+    [`facebook/wav2vec2-base-960h`](https://huggingface.co/facebook/wav2vec2-base-960h) (revision `22aad52`) says
+    `license: apache-2.0`; training data LibriSpeech. **Commercial use allowed: adopted.**
+  - Japanese: whisperX's default `jonatasgrosman/wav2vec2-large-xlsr-53-japanese`
+    ([card](https://huggingface.co/jonatasgrosman/wav2vec2-large-xlsr-53-japanese), revision `cf031e0`):
+    `license: apache-2.0`, trained on Common Voice. Adopted as well, since Japanese is this ecosystem's main language.
+  - Voice activity: `vad_method="pyannote"` loads the segmentation weights bundled inside the whisperX package
+    (`whisperx/vads/pyannote.py`, `assets/pytorch_model.bin`; upstream
+    [`pyannote/segmentation`](https://huggingface.co/pyannote/segmentation), `license: mit`), so nothing is fetched for it.
+  - NLTK `punkt_tab` (sentence splitting inside `whisperx.align`): the NLTK data index gives no licence for it; it is
+    sentence-boundary data, not recognition weights, and is fetched by whisperX only when missing. Recorded as not assessed.
+  - whisperX's defaults for every other language were not checked, so those languages are not offered.
+- Decision: register `WhisperXEngine` (`engines/whisperx.py`) as an optional local engine; `faster_whisper` stays the
+  default and Reference Local Engine. Languages: `en` and `ja` only, each with its alignment repo named explicitly
+  (`ALIGN_MODELS`), so whisperX never picks an unchecked model. No language detection (the alignment model is chosen per
+  language). Default model `large-v3`; the Whisper model names and cache are faster-whisper's. Python 3.10+ (whisperX's
+  floor) is checked before `import whisperx`, so Python 3.9 never imports it; `whisperx` is not a package extra (it pins
+  torch and would make `pip install .[...]` multi-gigabyte), the install line is in the unavailable reason.
+- Diarization is not duplicated: whisperX's pyannote diarization (`whisperx.diarize`, `assign_word_speakers`, gated
+  `pyannote/speaker-diarization-community-1`) is never imported or called (static test). Speakers come from
+  diarization-skill's turns through `transcription/speakers` / `speaker_turns` (ADR-037), so `not_provided` keeps
+  "speaker diarization" and the ecosystem's owner of 話者識別 stays diarization-skill.
+- Behaviour: `load_model(..., vad_method="pyannote", asr_options={beam_size, temperatures: [temperature], initial_prompt},
+  local_files_only=offline or downloads off)` (a single temperature, as faster_whisper: no fallback ladder), batch size
+  fixed at 8, then `load_align_model(model_name=<explicit repo>, model_cache_only=...)` and `align(...,
+  return_char_alignments=False)`. Segments always get the aligned times; `words` only with `word_timestamps`. A word the
+  aligner cannot time (e.g. digits missing from the CTC dictionary) joins the timed word before it (or after it, at a
+  segment start), with a warning; no time is interpolated; a segment with no timed word gets `words: null`. Word
+  `confidence` is the alignment score clipped to [0, 1]; segment `confidence` is `null` (the batched pipeline reports no
+  log-probability). `vad_filter` cannot be switched off (whisperX always decodes voice-activity regions): `false` gives a
+  warning, not a refusal. The audio is the prepared WAV read with `wave` (not `whisperx.load_audio`, which starts
+  ffmpeg), so the engine module still starts no process. `model_version` is `<whisper snapshot>+align:<alignment snapshot>`,
+  so a different alignment model is a different cache key. `deterministic: false` until repeatability is shown.
+- Offline: the Whisper model, the alignment model and `punkt_tab` must all be present; each missing one is
+  `MODEL_UNAVAILABLE` (`availability: MODEL_MISSING`, `details.component` `alignment` / `sentence_splitter`) before
+  anything loads. `transcription models pull MODEL --engine whisperx` fetches all three. `doctor` adds
+  `model:whisperx:align:en|ja` and `model:whisperx:punkt_tab` rows.
+- Contract: additive (one more engine in `engines`); `CONTRACT_VERSION` stays `1.0`. video-production-agent pins this
+  skill's exact version and contract, so it needs a re-pin to see the new engine.
+- Tests: `tests/test_whisperx.py` drives the engine against a fake `whisperx` module shaped after v3.8.6 and a faked
+  faster-whisper cache; CI never installs whisperX, torch or a model. Not verified here: a real run (recognition quality,
+  alignment accuracy against faster-whisper's word times, speed, memory). Next step: run both engines on the same English
+  recording and compare the SRTs.

@@ -41,6 +41,10 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   the binary, version, backend and models. Unit-tested against a fake `speech` (`tests/test_speechcpp.py`); the real
   Linux CPU binary with `parakeet-tdt_ctc-0.6b-ja:q4_k` and `qwen3-asr-0.6b:q4_k` runs in the `engines` CI job on the
   Japanese fixture. Not yet run on Metal/Vulkan or on long real recordings
+- Optional engine `whisperx` (whisperX, ADR-038) — EXPERIMENTAL: faster-whisper batched over VAD regions plus wav2vec2
+  forced alignment for word timestamps; `en` / `ja` only (alignment models Apache-2.0, licences read from the model
+  cards); Python 3.10+; no diarization (speakers stay with diarization-skill, ADR-037). Unit-tested against a fake
+  `whisperx` (`tests/test_whisperx.py`); **never run for real yet**
 - Deterministic cache keyed by content fingerprint + engine id/version/execution_mode + model/model_version + parameters
 - Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt/tsv/txt), `speakers` (ADR-037), `check`, `batch` (many transcribe
   requests, one process; one item's failure never aborts the rest); CLI: doctor, transcribe, segments, export, check,
@@ -134,7 +138,10 @@ v1 (batch mode, language force-selection, long-recording timeout fix, tsv/txt ex
    `parakeet-tdt_ctc-0.6b-ja` and `haas-ja-v1.0` with faster-whisper on the same talk (CER, segment/word timing
    against the audio, speed), check whether two runs are identical (then flip `deterministic`), and decide on the
    follow-ups: Qwen3-ASR `--prompt` for `initial_prompt`, Haas `--keywords` for `vocabulary` (text only in speech.cpp).
-8. **PyPI distribution** (lower priority, needs a human decision, not just code): currently git-only
+8. **Run `whisperx` for real** (ADR-038): `pip install whisperx` on Python 3.10+, `models pull large-v3 --engine whisperx`,
+   transcribe the same English (and Japanese) talk with `faster_whisper --word-timestamps` and `whisperx`, compare the
+   word times against the audio in the SRTs, speed and memory; check two runs for identity (then flip `deterministic`).
+9. **PyPI distribution** (lower priority, needs a human decision, not just code): currently git-only
    because `PYPI_API_TOKEN` isn't configured (`.github/workflows/release.yml`'s publish step is skipped
    by design). Adding it is an operational/account decision (a PyPI project + token), not something a
    session should do unprompted — listed here so it isn't forgotten, not as work to start on its own.
@@ -227,6 +234,9 @@ ever needed.
   (list argv, own process group, killed on timeout), `EngineRequest.timeout`, `TranscriptionEngine.doctor_rows()`,
   `CHILD_ENV_KEYS` + speech.cpp's model-folder variables. Fake-binary unit tests and an `engines` CI job with the real
   Linux binary. Contract: one more `engines` entry, nothing else.
+- 2026-10-31: roadmap step 7, optional engine `whisperx` (ADR-038): wav2vec2-aligned word timestamps for en/ja, alignment
+  model licences checked (en `facebook/wav2vec2-base-960h` Apache-2.0 / torchaudio MIT; ja Apache-2.0), no diarization.
+  Fake-module unit tests. Contract: one more `engines` entry.
 - 2026-10-31: roadmap step 3, CI on pull requests (ADR-036): `release.yml` no longer releases a merge that changes only
   `.github/`, `docs/`, `tests/`, `scripts/release/` or Markdown other than `SKILL.md` (`scripts/release/release_scope.py`,
   tested in `scripts/release/tests/`); `tests.yml` runs the unit matrix on `pull_request` and `push` to `main`, the heavy

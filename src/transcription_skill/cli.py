@@ -395,7 +395,7 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("input")
     t.add_argument("--language", help="ISO 639-1 code (ja, en, ...); default: auto-detect, recorded as unknown when uncertain")
     t.add_argument("--engine", default="faster_whisper")
-    t.add_argument("--model", help="model name (default: the engine's default; faster_whisper: base, haas_ja: Haas-ja-v1.0, speechcpp: reazonspeech-v2)")
+    t.add_argument("--model", help="model name (default: the engine's default; faster_whisper: base, haas_ja: Haas-ja-v1.0, speechcpp: reazonspeech-v2, whisperx: large-v3)")
     t.add_argument("--word-timestamps", action="store_true", help="also record per-word timestamps")
     t.add_argument("--temperature", type=float, default=0.0)
     t.add_argument("--beam-size", type=int, default=5)

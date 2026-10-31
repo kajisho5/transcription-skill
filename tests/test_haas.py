@@ -520,7 +520,7 @@ class CliTests(unittest.TestCase):
     def test_contract_declares_vocabulary_and_every_engine(self):
         rc, doc = self.cli(["contract"])
         self.assertEqual(rc, 0)
-        self.assertEqual([e["id"] for e in doc["engines"]], ["faster_whisper", "haas_ja", "speechcpp"])
+        self.assertEqual([e["id"] for e in doc["engines"]], ["faster_whisper", "haas_ja", "speechcpp", "whisperx"])
         self.assertIn("vocabulary", doc["tools"][0]["input"])
         self.assertIn("custom_vocabulary", doc["capabilities"])
         self.assertIn("custom_vocabulary", doc["engine_contract"]["capabilities"])
