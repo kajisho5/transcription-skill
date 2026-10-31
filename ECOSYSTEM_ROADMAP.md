@@ -5,7 +5,7 @@ Written from a read-only audit of this repository on 2026-10-30. Each step below
 
 ## Where it stands
 
-pyproject/tag 0.7.2 but `__version__` 0.2.0 (contract says 0.2.0). faster-whisper engine (plus optional haas_ja and speechcpp), offline mode, cache, export json/srt/vtt/tsv/txt, batch. Unit CI runs on every pull request (#41); heavy jobs are manual.
+pyproject/tag 0.7.2 but `__version__` 0.2.0 (contract says 0.2.0). faster-whisper engine (plus optional haas_ja, speechcpp and whisperx), offline mode, cache, export json/srt/vtt/tsv/txt, batch. Unit CI runs on every pull request (#41); heavy jobs are manual.
 
 ## What this repository owns
 
@@ -33,6 +33,8 @@ Agent wires transcribe only (ADR-024); segments/export/check/batch unused. Extra
   - Done when: selector tests
 - [x] **6. Optional engine without Python or CUDA** — speech.cpp's `speech` command as `speechcpp` (ReazonSpeech v2, parakeet-ja, Haas-ja, Qwen3-ASR on Metal/Vulkan/CPU), commercially licensed models only, never downloads, ADR-035 — [#40](https://github.com/kajisho5/transcription-skill/pull/40)
   - Done when: fake-binary unit tests and the real binary on the Japanese fixture in the `engines` CI job
+- [x] **7. Optional word-alignment engine for English** — whisperX as `whisperx` (wav2vec2 forced alignment, en/ja, alignment weights Apache-2.0 checked on the model cards), no diarization (diarization-skill keeps 話者識別), ADR-038 — [#44](https://github.com/kajisho5/transcription-skill/pull/44)
+  - Done when: fake-module unit tests in the unit matrix; a real run still to do
 
 ## Boundaries
 

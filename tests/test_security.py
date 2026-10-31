@@ -121,7 +121,7 @@ class StaticSecurityTests(unittest.TestCase):
     def test_only_implemented_local_engines_registered_and_no_network_capability(self):
         from transcription_skill.engines import default_registry
         specs = default_registry().list()
-        self.assertEqual([s.id for s in specs], ["faster_whisper", "haas_ja", "speechcpp"])
+        self.assertEqual([s.id for s in specs], ["faster_whisper", "haas_ja", "speechcpp", "whisperx"])
         for sp in specs:
             self.assertEqual(sp.execution_mode, "local", sp.id)
             self.assertFalse(sp.requires_network, sp.id)
