@@ -5,7 +5,7 @@ Written from a read-only audit of this repository on 2026-10-30. Each step below
 
 ## Where it stands
 
-pyproject/tag 0.7.2 but `__version__` 0.2.0 (contract says 0.2.0). faster-whisper engine, offline mode, cache, export json/srt/vtt/tsv/txt, batch. 144 tests; CI is workflow_dispatch only and has never run.
+pyproject/tag 0.7.2 but `__version__` 0.2.0 (contract says 0.2.0). faster-whisper engine (plus optional haas_ja and speechcpp), offline mode, cache, export json/srt/vtt/tsv/txt, batch. 144 tests; CI is workflow_dispatch only and has never run.
 
 ## What this repository owns
 
@@ -31,6 +31,8 @@ Agent wires transcribe only (ADR-024); segments/export/check/batch unused. Extra
   - Done when: schema test with non-null speaker_id
 - [x] **5. Optional second engine** — Japanese-tuned model: Haas-ja-v1.0 as `haas_ja` (Linux + NVIDIA GPU), custom vocabulary, ADR-033; GPU run still to do — [#38](https://github.com/kajisho5/transcription-skill/pull/38)
   - Done when: selector tests
+- [x] **6. Optional engine without Python or CUDA** — speech.cpp's `speech` command as `speechcpp` (ReazonSpeech v2, parakeet-ja, Haas-ja, Qwen3-ASR on Metal/Vulkan/CPU), commercially licensed models only, never downloads, ADR-035 — [#40](https://github.com/kajisho5/transcription-skill/pull/40)
+  - Done when: fake-binary unit tests and the real binary on the Japanese fixture in the `engines` CI job
 
 ## Boundaries
 
