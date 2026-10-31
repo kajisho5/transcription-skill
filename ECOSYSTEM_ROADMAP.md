@@ -5,7 +5,7 @@ Written from a read-only audit of this repository on 2026-10-30. Each step below
 
 ## Where it stands
 
-pyproject/tag 0.7.2 but `__version__` 0.2.0 (contract says 0.2.0). faster-whisper engine (plus optional haas_ja and speechcpp), offline mode, cache, export json/srt/vtt/tsv/txt, batch. 144 tests; CI is workflow_dispatch only and has never run.
+pyproject/tag 0.7.2 but `__version__` 0.2.0 (contract says 0.2.0). faster-whisper engine (plus optional haas_ja and speechcpp), offline mode, cache, export json/srt/vtt/tsv/txt, batch. Unit CI runs on every pull request (#41); heavy jobs are manual.
 
 ## What this repository owns
 
@@ -25,7 +25,7 @@ Agent wires transcribe only (ADR-024); segments/export/check/batch unused. Extra
   - Done when: `skill --json` version == tag
 - [x] **2. `contract` alias of `skill --json`** — same command name as the other skills — [#36](https://github.com/kajisho5/transcription-skill/pull/36)
   - Done when: outputs match
-- [ ] **3. Run CI on PRs** — needs an owner decision on Actions minutes
+- [x] **3. Run CI on PRs** — owner decision on Actions minutes: every PR (and push to `main`) runs the `unit` matrix only; the heavy `integration`/`engines` jobs stay manual in `heavy-tests.yml`. Made safe first: CI-, docs-, test-only merges no longer cut a release, so they never drift video-production-agent's version pin (ADR-036) — [#41](https://github.com/kajisho5/transcription-skill/pull/41)
   - Done when: a green run recorded
 - [ ] **4. Speaker merge input** — accept diarization turns, fill speaker_id
   - Done when: schema test with non-null speaker_id
