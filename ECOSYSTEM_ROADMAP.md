@@ -37,6 +37,18 @@ Agent wires transcribe (ADR-024), with diarization-skill's turns as `speaker_tur
   - Done when: fake-module unit tests in the unit matrix; a real run still to do
 - [ ] **8. Script alignment (forced alignment)** — a known script (台本, or the speaker's own text) aligned to the audio instead of recognised: word and segment timestamps for the given words, in the same transcript schema with `source: aligned` and every word the aligner could not place marked, never invented. stable-ts (MIT; it runs Whisper weights, MIT) as an optional engine `stable_ts`, offline after the model is present. Consumers: subtitle-skill cues from a script, dubbing-skill source timing (its step 11), audio-production FILLER_REMOVE when the script is the reference
   - Done when: ADR (engine, weights, Japanese); on a fixture read from a known script, ja and en, the median word-start error is under 0.1 s; a script line that is not spoken is reported as unaligned
+- [ ] **9. Streaming and growing-file mode** — `transcribe --follow` reads a recording still being written (or an audio stream from a local device) in windows and emits partial and final segments with stable ids as JSON lines; finals never change after they are emitted. Field review 2026-11-05 (Velisa ROADMAP, third round)
+  - なぜ要るか：ライブ字幕と、収録中から始める文字起こしの両方の土台になる
+  - Done when: a fixture fed in 5 s windows yields finals equal to a batch run within a stated WER, each final emitted within a stated latency
+- [ ] **10. Long recordings: chunked, parallel, resumable** — 2-8 h inputs split at pauses (media-analysis-skill speech regions when present), chunks transcribed in parallel up to a stated limit, cached per chunk, resumed after a stop; the GPU and the realtime factor are in the result
+  - なぜ要るか：終日の学会収録を、時間内に、落ちても途中から文字起こしできる
+  - Done when: a 1 h fixture split into chunks gives the same words as one pass at the joins (no lost or doubled words), and resumes after a kill
+- [ ] **11. Domain vocabulary from the programme** — a vocabulary built from the programme, the abstracts and the slide text (slide-sync-skill import) passed to the engines that take hotwords or a prompt, and a post-correction list (wrong form → right form) applied with each replacement recorded
+  - なぜ要るか：医学用語・薬剤名・演者名の誤認識を、手直しする前に減らせる
+  - Done when: a fixture with five drug names improves their recognition, and every replacement is listed with its time
+- [ ] **12. One transcript per microphone** — `transcribe --per-channel`: each mic track transcribed on its own and merged by time, with `speaker_id` taken from the mic when the tracks are clean (diarization-skill is not needed then), and cross-talk words dropped by level
+  - なぜ要るか：ピンマイクを個別に録った対談やパネルで、話者の取り違えが起きない
+  - Done when: a 2-mic fixture with bleed gives each word once, under the right speaker
 
 ## Boundaries
 
