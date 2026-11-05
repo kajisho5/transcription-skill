@@ -5,7 +5,7 @@ Written from a read-only audit of this repository on 2026-10-30. Each step below
 
 ## Where it stands
 
-pyproject/tag 0.7.2 but `__version__` 0.2.0 (contract says 0.2.0). faster-whisper engine (plus optional haas_ja, speechcpp and whisperx), offline mode, cache, export json/srt/vtt/tsv/txt, batch. Unit CI runs on every pull request (#41); heavy jobs are manual.
+0.8.0, version single-sourced from `pyproject.toml` (step 1). faster-whisper engine (plus optional haas_ja, speechcpp and whisperx), offline mode, cache, export json/srt/vtt/tsv/txt, batch. Unit CI runs on every pull request (#41); heavy jobs are manual.
 
 ## What this repository owns
 
@@ -17,7 +17,7 @@ pyproject/tag 0.7.2 but `__version__` 0.2.0 (contract says 0.2.0). faster-whispe
 
 ## Wiring
 
-Agent wires transcribe only (ADR-024); segments/export/check/batch unused. Extracts audio with ffmpeg directly (by design).
+Agent wires transcribe (ADR-024), with diarization-skill's turns as `speaker_turns` when speaker ids are asked for (video-production-agent#111, its ADR-096); segments/export/check/batch unused. Extracts audio with ffmpeg directly (by design).
 
 ## Steps
 
@@ -35,10 +35,12 @@ Agent wires transcribe only (ADR-024); segments/export/check/batch unused. Extra
   - Done when: fake-binary unit tests and the real binary on the Japanese fixture in the `engines` CI job
 - [x] **7. Optional word-alignment engine for English** — whisperX as `whisperx` (wav2vec2 forced alignment, en/ja, alignment weights Apache-2.0 checked on the model cards), no diarization (diarization-skill keeps 話者識別), ADR-038 — [#44](https://github.com/kajisho5/transcription-skill/pull/44)
   - Done when: fake-module unit tests in the unit matrix; a real run still to do
+- [ ] **8. Script alignment (forced alignment)** — a known script (台本, or the speaker's own text) aligned to the audio instead of recognised: word and segment timestamps for the given words, in the same transcript schema with `source: aligned` and every word the aligner could not place marked, never invented. stable-ts (MIT; it runs Whisper weights, MIT) as an optional engine `stable_ts`, offline after the model is present. Consumers: subtitle-skill cues from a script, dubbing-skill source timing (its step 11), audio-production FILLER_REMOVE when the script is the reference
+  - Done when: ADR (engine, weights, Japanese); on a fixture read from a known script, ja and en, the median word-start error is under 0.1 s; a script line that is not spoken is reported as unaligned
 
 ## Boundaries
 
 stepcap has its own faster-whisper voice notes.
 
 ---
-Engine for every media operation: [ffmpeg-skill](https://github.com/kajisho5/ffmpeg-skill) (42 tools, treated as complete). Orchestrator: [video-production-agent](https://github.com/kajisho5/video-production-agent).
+Engine for every media operation: [ffmpeg-skill](https://github.com/kajisho5/ffmpeg-skill) (3.x, 42 tools, contract_version 2.0; treated as complete, proposals go to Velisa's ROADMAP). Orchestrator: [video-production-agent](https://github.com/kajisho5/video-production-agent).
