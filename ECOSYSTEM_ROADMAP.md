@@ -37,9 +37,9 @@ Agent wires transcribe (ADR-024), with diarization-skill's turns as `speaker_tur
   - Done when: fake-module unit tests in the unit matrix; a real run still to do
 - [ ] **8. Script alignment (forced alignment)** — a known script (台本, or the speaker's own text) aligned to the audio instead of recognised: word and segment timestamps for the given words, in the same transcript schema with `source: aligned` and every word the aligner could not place marked, never invented. stable-ts (MIT; it runs Whisper weights, MIT) as an optional engine `stable_ts`, offline after the model is present. Consumers: subtitle-skill cues from a script, dubbing-skill source timing (its step 11), audio-production FILLER_REMOVE when the script is the reference
   - Done when: ADR (engine, weights, Japanese); on a fixture read from a known script, ja and en, the median word-start error is under 0.1 s; a script line that is not spoken is reported as unaligned
-- [ ] **9. Streaming and growing-file mode** — `transcribe --follow` reads a recording still being written (or an audio stream from a local device) in windows and emits partial and final segments with stable ids as JSON lines; finals never change after they are emitted. Field review 2026-11-05 (Velisa ROADMAP, third round)
-  - なぜ要るか：ライブ字幕と、収録中から始める文字起こしの両方の土台になる
-  - Done when: a fixture fed in 5 s windows yields finals equal to a batch run within a stated WER, each final emitted within a stated latency
+- [ ] **9. Recordings in progress (growing files)** — `transcribe --follow` reads a recording still being written in windows and emits partial and final segments with stable ids as JSON lines; finals never change after they are emitted. Field review 2026-11-05 (Velisa ROADMAP, third round)
+  - なぜ要るか：終日の収録でも、収録中から文字起こしを進められる
+  - Done when: a fixture appended in 5 s windows yields finals equal to a batch run within a stated WER
 - [ ] **10. Long recordings: chunked, parallel, resumable** — 2-8 h inputs split at pauses (media-analysis-skill speech regions when present), chunks transcribed in parallel up to a stated limit, cached per chunk, resumed after a stop; the GPU and the realtime factor are in the result
   - なぜ要るか：終日の学会収録を、時間内に、落ちても途中から文字起こしできる
   - Done when: a 1 h fixture split into chunks gives the same words as one pass at the joins (no lost or doubled words), and resumes after a kill
