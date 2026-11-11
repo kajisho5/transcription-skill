@@ -40,7 +40,8 @@ concurrency:
 
 permissions:
   contents: write
-  pull-requests: read
+  # write: the step before release-drafter removes release-level labels a bot put on Dependabot pull requests
+  pull-requests: write
 
 jobs:
   release:
@@ -73,6 +74,14 @@ jobs:
         env:
           LATEST_TAG_VERSION: ${{ steps.state.outputs.latest_tag_version }}
         run: python3 scripts/release/release_scope.py --repo . --since "v$LATEST_TAG_VERSION" --github-output "$GITHUB_OUTPUT"
+
+      # Dependabot labels a pull request `major` when the dependency it bumps moved a major version, which says
+      # nothing about this product's version. A release-level label on a Dependabot pull request counts only when a
+      # person applied it; a failure here fails the release instead of resolving from unchecked labels.
+      - name: Drop release-level labels a bot put on Dependabot pull requests
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/release/dependabot_release_labels.py
 
       - name: Resolve next version from merged-PR labels (auto mode only)
         id: resolve
