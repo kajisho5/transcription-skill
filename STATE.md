@@ -183,6 +183,13 @@ reading `resolved_version`/`id` from its outputs. Confirmed working on multiple 
 release (`v0.2.0` through current) as `draft: false` with no stray drafts — no manual cleanup is
 ever needed.
 
+**Changed: release-drafter v7.10.0 (PR #48, 2026-11-11).** v7 has a real `dry-run` input, so
+`release.yml`'s "Resolve next version" step now uses `dry-run: true`: it sets `resolved_version` and
+creates no release, and the "delete the draft" step is gone. v7's main action no longer applies
+labels and has no `disable-releaser` / `disable-autolabeler` inputs, so `pr-labeler.yml` uses the
+separate `release-drafter/release-drafter/autolabeler` action from the same pinned commit. The same
+two steps run this way in video-editing-skill and color-grading-skill.
+
 ## Change log (session-level)
 - 2026-09-04: 0.1.0 → 0.2.0 (engine ecosystem, agent readiness, input boundary) merged as PR #1
 - 2026-09-05: sponsors (#2), README landing page (#3), subtitle-skill link (#4), `provides` (#5),
