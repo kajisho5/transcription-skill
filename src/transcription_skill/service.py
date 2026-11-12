@@ -332,10 +332,10 @@ def build_transcript(req: TranscribeRequest, prep: Dict[str, Any], result: Engin
                 ws, we = float(w.start), float(w.end)
                 if ws < duration < we <= duration + END_OVERRUN_CLAMP_SECONDS:
                     we = duration                                   # same clamp as the segment end
-                rows.append([ws, we, w.text, w.confidence])
+                rows.append([ws, we, w.text, w.confidence, getattr(w, "timing", None)])
             for t, ws, we in _widen_zero_length_words(rows, start, end):
                 warnings.append(f"{seg_id}: zero-length word at {t:.2f} s widened to {MIN_WORD_DURATION} s ([{ws:.2f}, {we:.2f}])")
-            for ws, we, wtext, wconf in rows:
+            for ws, we, wtext, wconf, wtiming in rows:
                 wt = normalize_text(str(wtext))
                 if not wt:
                     bad = f"empty word text at {ws:.2f}"
@@ -350,7 +350,10 @@ def build_transcript(req: TranscribeRequest, prep: Dict[str, Any], result: Engin
                     bad = f"word timestamps out of order at {ws:.2f}"
                     break
                 prev_end = we
-                words.append(Word(start=ws, end=we, text=wt, confidence=None if wconf is None else float(wconf)).to_dict())
+                wd = Word(start=ws, end=we, text=wt, confidence=None if wconf is None else float(wconf)).to_dict()
+                if wtiming is not None:
+                    wd["timing"] = wtiming                          # an engine's own estimate is never shown as measured
+                words.append(wd)
             if bad:
                 warnings.append(f"{seg_id}: word timestamps discarded ({bad})")
                 words = None

@@ -777,3 +777,12 @@
   `models pull`, and requires `RealQwen3AsrTests` on the Japanese and English fixtures (CER / WER <= 0.3, words inside
   their segments and in order, first and last word near the speech). Not verified here: any real run (recognition,
   timing accuracy against the vendor's numbers, CPU speed and memory, repeatability); the `qwen3_asr` job has not run yet.
+- *Addendum (first real-model run).* The manual `qwen3_asr` job showed the aligner giving two equal timestamps for
+  short English function words ("to", "first"). The rule "an item without duration joins the next" then produced
+  words that hold a space ("to the", "first session"), which breaks word-number plans built on one word per word.
+  Now a timed group of several items is split at the spaces between its items; the group's time is shared out by
+  the words' character counts, and each word of it carries `timing: "interpolated"` (the group's outer edges remain
+  the aligner's own; the inner ones are estimates). A group with no space between its items (CJK) stays one word with
+  measured times, as before. Engine words may therefore carry `timing` too (`EngineWord.timing`, passed through by the
+  service); dictionary mapping (ADR-039) treats such a word's edges as interpolated, never measured. The same split
+  applies where a repaired timestamp is dropped, so a repaired boundary is still never used.

@@ -42,7 +42,8 @@ class Model:
 @dataclass
 class Word(Model):
     """One engine word. In a Transcript every word dict also carries ``index`` (0-based over the whole document) and,
-    for dictionary words (word_segmentation "dictionary"), ``timing`` and ``pos``; words.py adds them (ADR-039)."""
+    for dictionary words (word_segmentation "dictionary"), ``timing`` and ``pos``; words.py adds them (ADR-039).
+    An engine word whose time is partly the engine's own estimate also carries ``timing: "interpolated"`` (ADR-041)."""
     start: float
     end: float
     text: str
