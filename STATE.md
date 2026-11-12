@@ -28,7 +28,12 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
 ## What exists (CURRENT)
 - Transcript / Segment / Word model, validator, JSON Schemas (`transcript/0.1`, `speech-event/0.1`, `engine-spec/0.1`)
 - Engine ecosystem: `EngineSpec`, `ModelStatus`, `EngineRegistry`, constraint `Selector` (no ranking), `--offline`
-- Reference Local Engine: `faster_whisper`; worker subprocess with real timeout
+- Reference Local Engine: `faster_whisper`; worker subprocess with real timeout. Its model names are an allowlist;
+  `distil-large-v3.5` (ADR-040, MIT, English only, faster-whisper 1.2.0+) refuses another language or none. Unit-tested
+  against a fake faster_whisper package; **never run for real** (not downloaded here)
+- Per-model language limits (ADR-040): `TranscriptionEngine.model_languages`; the service refuses a language outside a
+  model's (`language_unsupported`) or none (`language_detection_unsupported`) before audio extraction, the selector does
+  the same for a named model. Used by `faster_whisper` / `whisperx` (`distil-large-v3.5`) and every `speechcpp` model
 - Optional engine `haas_ja` (Haas-ja-v1.0 via `haas-asr`, ADR-033) — EXPERIMENTAL: Japanese only, Linux + NVIDIA GPU +
   Python 3.11+ (unavailable elsewhere with a reason), token-timed segments/words, custom `vocabulary`
   (`--vocabulary FILE`, capability `custom_vocabulary`; refused by other engines). Unit-tested against a fake
@@ -36,11 +41,13 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   vocabulary effect are UNKNOWN until someone runs the comparison below on a GPU machine
 - Optional engine `speechcpp` (speech.cpp's `speech` command, 0.10.0+ on PATH, ADR-035) — EXPERIMENTAL: models
   `reazonspeech-v2` (default), `parakeet-tdt_ctc-0.6b-ja`, `haas-ja-v1.0` (Japanese, word timestamps from speech.cpp's
-  tokens) and `qwen3-asr-0.6b` / `qwen3-asr-1.7b` (30 languages, `words` null), all commercially licensed (table in
+  tokens), `parakeet-tdt-0.6b-v3` (25 European languages, word timestamps, CC-BY-4.0 with the attribution recorded,
+  ADR-040) and `qwen3-asr-0.6b` / `qwen3-asr-1.7b` (30 languages, `words` null), all commercially licensed (table in
   docs/engines.md); recognition by silero-vad regions; never downloads (models from `speech pull`); doctor rows for
   the binary, version, backend and models. Unit-tested against a fake `speech` (`tests/test_speechcpp.py`); the real
   Linux CPU binary with `parakeet-tdt_ctc-0.6b-ja:q4_k` and `qwen3-asr-0.6b:q4_k` runs in the `engines` CI job on the
-  Japanese fixture. Not yet run on Metal/Vulkan or on long real recordings
+  Japanese fixture. Not yet run on Metal/Vulkan or on long real recordings. `parakeet-tdt-0.6b-v3:q4_k` on the English
+  fixture was added to the `engines` job; that job has **not been run with it yet**
 - Optional engine `whisperx` (whisperX, ADR-038) — EXPERIMENTAL: faster-whisper batched over VAD regions plus wav2vec2
   forced alignment for word timestamps; `en` / `ja` only (alignment models Apache-2.0, licences read from the model
   cards); Python 3.10+; no diarization (speakers stay with diarization-skill, ADR-037). Unit-tested against a fake
@@ -261,3 +268,8 @@ two steps run this way in video-editing-skill and color-grading-skill.
   request `word_segmentation` (`engine` default | `dictionary`, ja only, SudachiPy `[ja]` extra) with `timing` and `pos` on
   dictionary words; capabilities `word_index`, `dictionary_word_segmentation`; version 0.9.0 bumped in `pyproject.toml`.
   Contract additive (`contract_version` 1.0); video-production-agent needs a re-pin.
+- 2026-11-12: English and European engine options (ADR-040): `speechcpp` registers `parakeet-tdt-0.6b-v3` (speech.cpp
+  0.10.0 catalog, 25 languages, word timestamps, CC-BY-4.0 attribution recorded); `faster_whisper` allows
+  `distil-large-v3.5` (MIT, English only, faster-whisper 1.2.0+); per-model language limits refused before audio work.
+  Defaults unchanged. Version 0.10.0 bumped in `pyproject.toml`. Contract additive (`contract_version` 1.0);
+  video-production-agent needs a re-pin.

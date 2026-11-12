@@ -22,6 +22,8 @@ per-request worker process cannot use.
 - `--timestamps` gives segments (cut after `. ? !` and their full-width forms) and tokens for the FastConformer
   models (ReazonSpeech, parakeet, Haas). Qwen3-ASR refuses it ("timestamps, which need a second model"), so its
   segments are the detected regions, with `words` null. Words are built from tokens as `words_of` does.
+- The FastConformer models take no language: `--language` is only checked against the model's catalog languages, and
+  parakeet-tdt-0.6b-v3 (25 European languages, `tools/catalog/catalog.json`) finds the language of the audio itself.
 - Exit 0 done; 1 a failure, `speech: <code> (<option>): <message>` on stderr; 2 a command line it cannot run; 3 a
   recognition stopped at the most the model writes, every file's text written.
 """
@@ -40,7 +42,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from ..errors import TranscriptionError
 from ..media import child_env, run_program
 from .base import (CAP_LOCAL_MODEL, EXECUTION_LOCAL, MODEL_AVAILABLE, MODEL_MISSING, MODEL_UNKNOWN, EngineRequest, EngineResult,
-                   EngineSegment, EngineWord, ModelStatus, TranscriptionEngine)
+                   EngineSegment, EngineWord, ModelStatus, TranscriptionEngine, refuse_model_language)
 
 ENGINE_ID = "speechcpp"
 BINARY = "speech"
@@ -52,14 +54,32 @@ FAILURE_LINE = re.compile(r"speech: ([a-z_]+)(?: \(([^)]*)\))?: (.*)")
 
 QWEN3_LANGUAGES = ("ar", "cs", "da", "de", "el", "en", "es", "fa", "fi", "fil", "fr", "hi", "hu", "id", "it", "ja", "ko", "mk", "ms",
                    "nl", "pl", "pt", "ro", "ru", "sv", "th", "tr", "vi", "yue", "zh")
+# parakeet-tdt-0.6b-v3's 25 European languages: its model card's, the same list as speech.cpp 0.10.0's catalog entry
+PARAKEET_V3_LANGUAGES = ("bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hr", "hu", "it", "lt", "lv", "mt", "nl", "pl", "pt",
+                         "ro", "ru", "sk", "sl", "sv", "uk")
+CC_BY_4_0 = "https://creativecommons.org/licenses/by/4.0/"
 # The models this engine runs: only those whose licence allows commercial use, verified on the Hugging Face model
-# cards of the upstream weights and of speech.cpp's converted files on 2026-10-31 (ADR-035, docs/engines.md).
-# `timed`: speech.cpp gives token and segment times for it (`--timestamps`).
+# cards of the upstream weights and of speech.cpp's converted files on 2026-10-31, parakeet-tdt-0.6b-v3 on 2026-11-12
+# (ADR-035, ADR-040, docs/engines.md). `timed`: speech.cpp gives token and segment times for it (`--timestamps`).
+# `attribution`: the credit a CC-BY-4.0 model's licence requires of whoever shares the weights or adapted material.
+# `single_pass_s`: the longest audio the model card says one pass takes; this engine never sends more than one region
+# of speech (at most 10 s, VAD_FLAGS) at a time.
 MODELS: Dict[str, Dict[str, Any]] = {
     "reazonspeech-v2": {"languages": ("ja",), "timed": True, "licence": "Apache-2.0",
                         "card": "https://huggingface.co/reazon-research/reazonspeech-nemo-v2"},
     "parakeet-tdt_ctc-0.6b-ja": {"languages": ("ja",), "timed": True, "licence": "CC-BY-4.0",
-                                 "card": "https://huggingface.co/nvidia/parakeet-tdt_ctc-0.6b-ja"},
+                                 "card": "https://huggingface.co/nvidia/parakeet-tdt_ctc-0.6b-ja",
+                                 "attribution": "parakeet-tdt_ctc-0.6b-ja by NVIDIA (https://huggingface.co/nvidia/parakeet-tdt_ctc-0.6b-ja), "
+                                                f"licensed under CC-BY-4.0 ({CC_BY_4_0}); speech.cpp's GGUF files of it "
+                                                "(sakasegawa/parakeet-tdt_ctc-0.6b-ja-GGUF) change the weights' format and quantize them, "
+                                                "without retraining"},
+    "parakeet-tdt-0.6b-v3": {"languages": PARAKEET_V3_LANGUAGES, "timed": True, "licence": "CC-BY-4.0",
+                             "card": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3",
+                             "attribution": "parakeet-tdt-0.6b-v3 by NVIDIA (https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3), "
+                                            f"licensed under CC-BY-4.0 ({CC_BY_4_0}); speech.cpp's GGUF files of it "
+                                            "(sakasegawa/parakeet-tdt-0.6b-v3-GGUF) change the weights' format and quantize them, "
+                                            "without retraining",
+                             "single_pass_s": 24 * 60.0},   # full attention, on an A100 80 GB (3 h with local attention, not in speech.cpp)
     "haas-ja-v1.0": {"languages": ("ja",), "timed": True, "licence": "Apache-2.0",
                      "card": "https://huggingface.co/third-intelligence/Haas-ja-v1.0"},
     "qwen3-asr-0.6b": {"languages": QWEN3_LANGUAGES, "timed": False, "licence": "Apache-2.0",
@@ -181,9 +201,9 @@ class SpeechCppEngine(TranscriptionEngine):
     requires_network = False
     deterministic = False           # the device is speech.cpp's choice (`auto`); repeatability not verified (ADR-035)
     description = ("speech.cpp (C++ on ggml) through its `speech` command: ReazonSpeech v2, parakeet-tdt_ctc-0.6b-ja and "
-                   "Haas-ja-v1.0 for Japanese with word timestamps, and Qwen3-ASR in 30 languages, on Metal, Vulkan or the CPU "
-                   "with no Python and no CUDA. Optional engine: needs `speech` 0.10.0+ on PATH and models fetched with "
-                   "`speech pull`; recognizes by silero-vad regions; never downloads.")
+                   "Haas-ja-v1.0 for Japanese and parakeet-tdt-0.6b-v3 for 25 European languages, with word timestamps, and "
+                   "Qwen3-ASR in 30 languages, on Metal, Vulkan or the CPU with no Python and no CUDA. Optional engine: needs "
+                   "`speech` 0.10.0+ on PATH and models fetched with `speech pull`; recognizes by silero-vad regions; never downloads.")
     default_model = "reazonspeech-v2"
 
     def __init__(self, binary: Optional[Sequence[str]] = None):
@@ -222,6 +242,10 @@ class SpeechCppEngine(TranscriptionEngine):
 
     def supports_language_detection(self) -> bool:
         return False
+
+    def model_languages(self, model: str) -> Optional[List[str]]:
+        facts = MODELS.get(split_model(model)[0])
+        return list(facts["languages"]) if facts else None
 
     def unsupported_parameters(self, parameters: Dict[str, Any]) -> List[str]:
         out = [k for k in UNSUPPORTED_PARAMETERS if parameters.get(k)]
@@ -343,9 +367,7 @@ class SpeechCppEngine(TranscriptionEngine):
             raise TranscriptionError("MODEL_UNAVAILABLE", f"model {request.model!r}: {ms.detail}",
                                      {"availability": ms.availability, "model": request.model, "offline": request.offline})
         facts = MODELS[name]
-        if request.language not in facts["languages"]:
-            raise TranscriptionError("INVALID_INPUT", f"model {request.model} of engine {self.id} does not recognize language {request.language!r}",
-                                     {"engine": self.id, "model": request.model, "reason": "language_unsupported", "supported": list(facts["languages"])})
+        refuse_model_language(self.id, request.model, request.language, facts["languages"])
         model_file, _ = self._file(request.model)
         vad_file, _ = self._file(VAD_MODEL)
         assert model_file is not None and vad_file is not None

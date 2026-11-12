@@ -144,7 +144,9 @@ class AvailabilityTests(unittest.TestCase):
         self.assertEqual(sp.supported_models, list(S.MODEL_NAMES))
         self.assertIn(sp.default_model, sp.supported_models)
         self.assertIn("ja", sp.supported_languages)
-        self.assertIn("en", sp.supported_languages)               # Qwen3-ASR
+        self.assertIn("en", sp.supported_languages)               # Qwen3-ASR, parakeet-tdt-0.6b-v3
+        self.assertLessEqual(set(S.PARAKEET_V3_LANGUAGES), set(sp.supported_languages))
+        self.assertIn("uk", sp.supported_languages)               # parakeet-tdt-0.6b-v3 only
         self.assertEqual([m["availability"] for m in sp.models], ["MODEL_MISSING"] * len(S.MODEL_NAMES))
         self.assertTrue(all("speech pull" in m["detail"] for m in sp.models))
 
@@ -158,6 +160,15 @@ class AvailabilityTests(unittest.TestCase):
             self.assertEqual([c.id for c in sel.candidates], ["speechcpp"])
             sel = select_engines(EngineRequirements(engine_id="speechcpp", language="ja", model="qwen3-asr-0.6b", offline=True))
             self.assertEqual(next(r for r in sel.rejected if r.engine_id == "speechcpp").reasons, ["model_not_available_offline"])
+            # a named model's own languages (ADR-040): parakeet-tdt-0.6b-v3 has no Japanese, and German is not in reazonspeech-v2
+            sel = select_engines(EngineRequirements(engine_id="speechcpp", language="ja", model="parakeet-tdt-0.6b-v3"))
+            self.assertEqual(next(r for r in sel.rejected if r.engine_id == "speechcpp").reasons, ["language_unsupported"])
+            sel = select_engines(EngineRequirements(engine_id="speechcpp", language="de", model="parakeet-tdt-0.6b-v3", word_timestamps=True))
+            self.assertEqual([c.id for c in sel.candidates], ["speechcpp"])
+            sel = select_engines(EngineRequirements(engine_id="speechcpp", language="de", model="reazonspeech-v2"))
+            self.assertEqual(next(r for r in sel.rejected if r.engine_id == "speechcpp").reasons, ["language_unsupported"])
+            sel = select_engines(EngineRequirements(engine_id="speechcpp", language="de"))      # no model named: as before
+            self.assertEqual([c.id for c in sel.candidates], ["speechcpp"])
 
 
 class ModelTests(unittest.TestCase):
@@ -192,7 +203,46 @@ class ModelTests(unittest.TestCase):
             self.assertIn(facts["licence"], ("Apache-2.0", "CC-BY-4.0", "MIT"), name)
             self.assertTrue(facts["card"].startswith("https://huggingface.co/"), name)
             self.assertIsInstance(facts["timed"], bool)
-        self.assertEqual({n for n, f in S.MODELS.items() if f["timed"]}, {"reazonspeech-v2", "parakeet-tdt_ctc-0.6b-ja", "haas-ja-v1.0"})
+            if facts["licence"] == "CC-BY-4.0":         # the credit the licence requires: who, the licence, the change made
+                for needed in (name, "NVIDIA", facts["card"], "https://creativecommons.org/licenses/by/4.0/", "quantize"):
+                    self.assertIn(needed, facts["attribution"], name)
+        self.assertEqual({n for n, f in S.MODELS.items() if f["timed"]},
+                         {"reazonspeech-v2", "parakeet-tdt_ctc-0.6b-ja", "parakeet-tdt-0.6b-v3", "haas-ja-v1.0"})
+        self.assertEqual({n for n, f in S.MODELS.items() if f["licence"] == "CC-BY-4.0"}, {"parakeet-tdt_ctc-0.6b-ja", "parakeet-tdt-0.6b-v3"})
+
+    def test_parakeet_v3_languages_match_the_catalog_and_its_card(self):
+        # the 25 of nvidia/parakeet-tdt-0.6b-v3's card, as speech.cpp 0.10.0's catalog lists them (the fake copies that entry)
+        self.assertEqual(len(S.PARAKEET_V3_LANGUAGES), 25)
+        self.assertNotIn("ja", S.PARAKEET_V3_LANGUAGES)
+        entry = next(c for c in fake_speech.CATALOG if c[0] == "parakeet-tdt-0.6b-v3")
+        self.assertEqual(entry[2], list(S.PARAKEET_V3_LANGUAGES))
+        with FakeSpeech():
+            e = engine()
+        self.assertEqual(e.model_languages("parakeet-tdt-0.6b-v3"), list(S.PARAKEET_V3_LANGUAGES))
+        self.assertEqual(e.model_languages("parakeet-tdt-0.6b-v3:q4_k"), list(S.PARAKEET_V3_LANGUAGES))
+        self.assertEqual(e.model_languages("reazonspeech-v2"), ["ja"])
+        self.assertIsNone(e.model_languages("whisper-large"))
+
+    def test_regions_stay_inside_each_models_single_pass(self):
+        flag = lambda f: float(S.VAD_FLAGS[S.VAD_FLAGS.index(f) + 1])
+        longest = flag("--max-speech-duration-s") + 2 * flag("--speech-pad-ms") / 1000.0
+        limits = {n: f["single_pass_s"] for n, f in S.MODELS.items() if "single_pass_s" in f}
+        self.assertEqual(limits, {"parakeet-tdt-0.6b-v3": 1440.0})       # 24 min (its card), far above the 10 s regions sent
+        for name, limit in limits.items():
+            self.assertLess(longest, limit, name)
+
+    def test_european_model_status_names_its_default_file(self):
+        with FakeSpeech() as fs:
+            ms = engine().model_status("parakeet-tdt-0.6b-v3")
+            self.assertEqual(ms.availability, "MODEL_MISSING")
+            self.assertIn("speech pull parakeet-tdt-0.6b-v3", ms.detail)
+            self.assertIn("1.26 GB", ms.detail)                            # the catalog's default type is f16
+            fs.fetch("parakeet-tdt-0.6b-v3:q4_k", "silero-vad")
+            e = engine()
+            self.assertEqual(e.model_status("parakeet-tdt-0.6b-v3").availability, "MODEL_MISSING")
+            ms = e.model_status("parakeet-tdt-0.6b-v3:q4_k")
+            self.assertEqual(ms.availability, "MODEL_AVAILABLE")
+            self.assertIn("parakeet-tdt-0.6B-v3-Q4_K.gguf", ms.detail)
 
 
 class TranscribeTests(unittest.TestCase):
@@ -244,6 +294,36 @@ class TranscribeTests(unittest.TestCase):
         self.assertNotIn("--timestamps", asr)
         self.assertEqual([(s.start, s.end, s.text, s.words) for s in res.segments], [(0.5, 2.0, "Good morning.", None)])
         self.assertTrue(any("no word timestamps" in w for w in res.warnings))
+
+    def test_european_model_gives_timed_segments_and_spaced_words(self):
+        with FakeSpeech() as fs:
+            fs.fetch("parakeet-tdt-0.6b-v3", "silero-vad")
+            fs.configure(regions=[[0.5, 4.0], [4.5, 5.5]], texts={"r00001.wav": "Good morning everyone. Welcome.", "r00002.wav": "Guten Tag."})
+            res = engine().transcribe(ereq(self.wav, model="parakeet-tdt-0.6b-v3", language="en"))
+            asr = next(c for c in fs.calls() if c["argv"][0] == "asr")["argv"]
+        self.assertTrue(asr[1].endswith("parakeet-tdt-0.6B-v3-F16.gguf") and os.path.isabs(asr[1]))     # the catalog's default type
+        self.assertEqual(asr[2:], ["--format", "json", "--language", "en", "--timestamps", "r00001.wav", "r00002.wav"])
+        self.assertEqual([s.text for s in res.segments], ["Good morning everyone.", "Welcome.", "Guten Tag."])
+        self.assertEqual([[w.text for w in s.words] for s in res.segments], [["Good", "morning", "everyone."], ["Welcome."], ["Guten", "Tag."]])
+        for s in res.segments:
+            self.assertTrue(all(s.start - 1e-6 <= w.start < w.end <= s.end + 1e-6 for w in s.words), s)
+        self.assertGreaterEqual(res.segments[2].start, 4.5)
+        self.assertFalse(any("no word timestamps" in w for w in res.warnings))
+        self.assertEqual(res.model, "parakeet-tdt-0.6b-v3")
+
+    def test_european_model_takes_its_25_languages_and_no_other(self):
+        with FakeSpeech() as fs:
+            fs.fetch("parakeet-tdt-0.6b-v3", "silero-vad")
+            fs.configure(regions=[[0.5, 2.0]], texts={"r00001.wav": "Dobryi den."})
+            res = engine().transcribe(ereq(self.wav, model="parakeet-tdt-0.6b-v3", language="uk"))
+            self.assertEqual([s.text for s in res.segments], ["Dobryi den."])
+            for lang in ("ja", "zh", None):
+                with self.assertRaises(TranscriptionError, msg=lang) as cm:
+                    engine().transcribe(ereq(self.wav, model="parakeet-tdt-0.6b-v3", language=lang))
+                self.assertEqual(cm.exception.code, "INVALID_INPUT")
+                self.assertEqual(cm.exception.details["reason"], "language_unsupported" if lang else "language_detection_unsupported")
+                self.assertEqual(cm.exception.details["supported"], list(S.PARAKEET_V3_LANGUAGES))
+            self.assertEqual(len([c for c in fs.calls() if c["argv"][0] == "asr"]), 1)       # only the Ukrainian run
 
     def test_language_outside_the_model_is_refused_before_running(self):
         with FakeSpeech() as fs:
@@ -431,6 +511,31 @@ class ServiceTests(unittest.TestCase):
                 TranscriptionService(workspace=self.ws, engine=engine()).transcribe(self.doc(model="qwen3-asr-1.7b"))
             self.assertEqual((cm.exception.code, cm.exception.details["availability"]), ("MODEL_UNAVAILABLE", "MODEL_MISSING"))
 
+    def test_a_model_outside_the_language_is_refused_before_audio_work(self):
+        with FakeSpeech() as fs:
+            fs.fetch("reazonspeech-v2", "parakeet-tdt-0.6b-v3", "silero-vad")
+            for model, language in (("parakeet-tdt-0.6b-v3", "ja"), ("reazonspeech-v2", "de")):
+                svc = TranscriptionService(workspace=self.ws, engine=engine())
+                for run in (svc.dry_run, svc.transcribe):
+                    with self.assertRaises(TranscriptionError, msg=(model, language)) as cm:
+                        run(self.doc(model=model, language=language))
+                    self.assertEqual((cm.exception.code, cm.exception.details["reason"], cm.exception.details["model"]),
+                                     ("INVALID_INPUT", "language_unsupported", model))
+            self.assertFalse([c for c in fs.calls() if c["argv"][0] in ("vad", "asr")])
+        self.assertFalse(os.path.isdir(os.path.join(self.ws, "tmp")) and os.listdir(os.path.join(self.ws, "tmp")))
+
+    def test_european_model_gives_a_valid_english_transcript(self):
+        with FakeSpeech() as fs:
+            fs.fetch("parakeet-tdt-0.6b-v3:q8_0", "silero-vad")
+            fs.configure(regions=[[1.0, 4.0]], texts={"r00001.wav": "Good morning. Welcome to the conference."})
+            res = TranscriptionService(workspace=self.ws, engine=engine()).transcribe(self.doc(model="parakeet-tdt-0.6b-v3:q8_0", language="en"))
+        t = res["transcript"]
+        self.assertTrue(validate_transcript(t).ok, validate_transcript(t).errors)
+        self.assertEqual((t["language"], t["language_source"], t["provenance"]["model"]), ("en", "requested", "parakeet-tdt-0.6b-v3:q8_0"))
+        self.assertEqual([s["text"] for s in t["segments"]], ["Good morning.", "Welcome to the conference."])
+        self.assertEqual([w["text"] for s in t["segments"] for w in s["words"]], ["Good", "morning.", "Welcome", "to", "the", "conference."])
+        self.assertEqual([w["index"] for s in t["segments"] for w in s["words"]], list(range(6)))
+
 
 @unittest.skipUnless(HAVE_FFMPEG, "needs ffmpeg/ffprobe")
 class WorkerPathTests(unittest.TestCase):
@@ -494,6 +599,7 @@ class WorkerPathTests(unittest.TestCase):
 REAL = shutil.which("speech")
 REAL_TIMED = os.environ.get("TRANSCRIPTION_TEST_SPEECHCPP_TIMED", "parakeet-tdt_ctc-0.6b-ja:q4_k")
 REAL_UNTIMED = os.environ.get("TRANSCRIPTION_TEST_SPEECHCPP_UNTIMED", "qwen3-asr-0.6b:q4_k")
+REAL_EUROPEAN = os.environ.get("TRANSCRIPTION_TEST_SPEECHCPP_EUROPEAN", "parakeet-tdt-0.6b-v3:q4_k")
 
 
 def speech_span(path: str, level: int = 1000):
@@ -530,9 +636,9 @@ class RealSpeechCppTests(unittest.TestCase):
         if ms.availability != "MODEL_AVAILABLE":
             self.skipTest(f"{model}: {ms.detail}")
 
-    def transcribe(self, model):
+    def transcribe(self, model, fixture="ja_short.wav", language="ja"):
         ws = os.path.join(self.tmp, model.replace(":", "_"))
-        req = parse_request({"input": str(FX / "ja_short.wav"), "engine": "speechcpp", "model": model, "language": "ja", "workspace": ws,
+        req = parse_request({"input": str(FX / fixture), "engine": "speechcpp", "model": model, "language": language, "workspace": ws,
                              "word_timestamps": True, "cache": False})
         return TranscriptionService(workspace=ws).transcribe(req)["transcript"]
 
@@ -570,6 +676,20 @@ class RealSpeechCppTests(unittest.TestCase):
         self.assertLessEqual(_cer(REF["ja_short.wav"]["reference_text"], text), 0.3, text)
         self.assertTrue(all(s["words"] is None for s in t["segments"]))
         self.assertTrue(any("no word timestamps" in w for w in t["warnings"]))
+
+    def test_real_european_model_transcribes_english_with_word_timestamps(self):
+        self.need(REAL_EUROPEAN)
+        t = self.transcribe(REAL_EUROPEAN, fixture="en_short.wav", language="en")
+        self.assertTrue(validate_transcript(t).ok, validate_transcript(t).errors)
+        from test_integration import wer
+        text = " ".join(s["text"] for s in t["segments"])
+        self.assertLessEqual(wer(REF["en_short.wav"]["reference_text"], text), 0.3, text)
+        self.assertTrue(all(s["words"] for s in t["segments"]), t["segments"])
+        words = [w for s in t["segments"] for w in s["words"]]
+        self.assertTrue(all(" " not in w["text"].strip() for w in words), words)      # one spaced word each
+        onset, offset = speech_span(str(FX / "en_short.wav"))
+        self.assertLess(abs(words[0]["start"] - onset), 0.3, (onset, words[0]))
+        self.assertLess(abs(words[-1]["end"] - offset), 0.5, (offset, words[-1]))
 
     def test_real_doctor_reports_binary_backend_and_models(self):
         rows = {r["check"]: r for r in run_doctor(workspace=os.path.join(self.tmp, "doc"))["checks"]}

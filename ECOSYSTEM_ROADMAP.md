@@ -5,7 +5,7 @@ Written from a read-only audit of this repository on 2026-10-30. Each step below
 
 ## Where it stands
 
-0.9.0, version single-sourced from `pyproject.toml` (step 1). faster-whisper engine (plus optional haas_ja, speechcpp and whisperx), offline mode, cache, export json/srt/vtt/tsv/txt, batch, word index over the whole transcript and optional Japanese dictionary words (step 13). Unit CI runs on every pull request (#41); heavy jobs are manual.
+0.10.0, version single-sourced from `pyproject.toml` (step 1). faster-whisper engine (plus optional haas_ja, speechcpp and whisperx), offline mode, cache, export json/srt/vtt/tsv/txt, batch, word index over the whole transcript and optional Japanese dictionary words (step 13), English and European model options with per-model language limits (step 14). Unit CI runs on every pull request (#41); heavy jobs are manual.
 
 ## What this repository owns
 
@@ -51,6 +51,8 @@ Agent wires transcribe (ADR-024), with diarization-skill's turns as `speaker_tur
   - Done when: a 2-mic fixture with bleed gives each word once, under the right speaker
 - [x] **13. Word numbers and Japanese dictionary words** — every word gets `index` (0-based over the whole transcript) as the word-number base of editing plans; `word_segmentation: "dictionary"` (ja, optional `[ja]` extra) re-splits segments into dictionary words with engine timings mapped on (`timing: measured | interpolated`) and a coarse `pos` that qc-skill reads (`particle`, `auxiliary`), ADR-039
   - Done when: mapping, POS, fallback, refusal and cache-key unit tests, the real tokenizer in the unit matrix; a run on real Japanese recognition output still to do
+- [x] **14. English and European model options** — `parakeet-tdt-0.6b-v3` on `speechcpp` (25 European languages, word timestamps, CC-BY-4.0 with its attribution recorded) and `distil-large-v3.5` on `faster_whisper` (English only, MIT); a model limited to some languages refuses another language, or none, before audio work; defaults unchanged, ADR-040
+  - Done when: fake-binary and fake-module unit tests in the unit matrix; the European model on the English fixture in the manual `engines` job still to run
 
 ## Boundaries
 

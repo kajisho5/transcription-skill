@@ -30,9 +30,9 @@ jobs:
       - run: python evals/run.py
   engines:
     # The real speech.cpp (ADR-035): the Linux CPU build of release v0.10.0, checked against the SHA-256 its
-    # SHA256SUMS lists, and a small model of each kind (timed parakeet-ja, untimed Qwen3-ASR) plus the silero-vad
-    # detector, fetched here with `speech pull` (CI only; the skill itself never downloads). The real-engine tests
-    # that skip in every other job must run and pass here.
+    # SHA256SUMS lists, and a small model of each kind (timed parakeet-ja, untimed Qwen3-ASR, the European
+    # parakeet-tdt-0.6b-v3 of ADR-040) plus the silero-vad detector, fetched here with `speech pull` (CI only; the
+    # skill itself never downloads). The real-engine tests that skip in every other job must run and pass here.
     runs-on: ubuntu-latest
     env:
       SPEECH_VERSION: "0.10.0"
@@ -40,6 +40,7 @@ jobs:
       SPEECH_NO_UPDATE_CHECK: "1"
       TRANSCRIPTION_TEST_SPEECHCPP_TIMED: "parakeet-tdt_ctc-0.6b-ja:q4_k"
       TRANSCRIPTION_TEST_SPEECHCPP_UNTIMED: "qwen3-asr-0.6b:q4_k"
+      TRANSCRIPTION_TEST_SPEECHCPP_EUROPEAN: "parakeet-tdt-0.6b-v3:q4_k"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -58,7 +59,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: ~/.cache/speech.cpp/models
-          key: speechcpp-models-${{ env.SPEECH_VERSION }}-parakeet-ja-q4_k-qwen3-asr-0.6b-q4_k-silero-vad
+          key: speechcpp-models-${{ env.SPEECH_VERSION }}-parakeet-ja-q4_k-qwen3-asr-0.6b-q4_k-parakeet-v3-q4_k-silero-vad
       - name: The real CLI (the subcommands and flags ADR-035 builds on)
         run: |
           speech --version
@@ -66,7 +67,7 @@ jobs:
           speech vad --help
           speech devices --json
       - name: Fetch the test models (CI only)
-        run: speech pull "$TRANSCRIPTION_TEST_SPEECHCPP_TIMED" "$TRANSCRIPTION_TEST_SPEECHCPP_UNTIMED" silero-vad
+        run: speech pull "$TRANSCRIPTION_TEST_SPEECHCPP_TIMED" "$TRANSCRIPTION_TEST_SPEECHCPP_UNTIMED" "$TRANSCRIPTION_TEST_SPEECHCPP_EUROPEAN" silero-vad
       - run: pip install -e .
       - name: doctor reports the binary, its backend and the models
         run: |
@@ -78,13 +79,16 @@ jobs:
           python -m unittest -v tests/test_speechcpp.py 2>&1 | tee test.log
           ! grep -E "\.\.\. skipped" test.log
           for t in test_real_cli_has_the_subcommands_and_flags_the_engine_uses test_real_timed_model_transcribes_japanese_with_word_timestamps \
-                   test_real_untimed_model_gives_region_segments_with_null_words test_real_doctor_reports_binary_backend_and_models; do
+                   test_real_untimed_model_gives_region_segments_with_null_words test_real_european_model_transcribes_english_with_word_timestamps \
+                   test_real_doctor_reports_binary_backend_and_models; do
             grep -E "^$t .*\.\.\. ok$" test.log || { echo "::error::$t did not run and pass"; exit 1; }
           done
-      - name: The Japanese fixture through the CLI (job summary)
+      - name: The Japanese and English fixtures through the CLI (job summary)
         run: |
-          for m in "$TRANSCRIPTION_TEST_SPEECHCPP_TIMED" "$TRANSCRIPTION_TEST_SPEECHCPP_UNTIMED"; do
-            transcription transcribe tests/fixtures/ja_short.wav --engine speechcpp --model "$m" --language ja --word-timestamps --no-cache -o out.json
+          for run in "ja_short.wav ja $TRANSCRIPTION_TEST_SPEECHCPP_TIMED" "ja_short.wav ja $TRANSCRIPTION_TEST_SPEECHCPP_UNTIMED" \
+                     "en_short.wav en $TRANSCRIPTION_TEST_SPEECHCPP_EUROPEAN"; do
+            set -- $run
+            transcription transcribe "tests/fixtures/$1" --engine speechcpp --model "$3" --language "$2" --word-timestamps --no-cache -o out.json
             transcription check out.json
-            python -c "import json,sys; d=json.load(open('out.json')); print('|', sys.argv[1], '|', ' '.join(s['text'] for s in d['segments']), '|', [(s['start'], s['end'], len(s['words'] or [])) for s in d['segments']], '|')" "$m" | tee -a "$GITHUB_STEP_SUMMARY"
+            python -c "import json,sys; d=json.load(open('out.json')); print('|', sys.argv[1], '|', ' '.join(s['text'] for s in d['segments']), '|', [(s['start'], s['end'], len(s['words'] or [])) for s in d['segments']], '|')" "$3" | tee -a "$GITHUB_STEP_SUMMARY"
           done

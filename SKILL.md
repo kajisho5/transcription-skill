@@ -41,9 +41,11 @@ stdout) and `transcribe` accepts `--dry-run` (plan only, no ASR).
 | "is this transcript file valid" | `check t.json` |
 | "what would it do / how long is it" | `transcribe input.mp4 --dry-run` |
 | "use a bigger / better model" | `--model small` (or `medium`, `large-v3`); doctor shows which are cached |
+| "English, a faster large Whisper model" | `transcribe input.mp4 --language en --model distil-large-v3.5`; English only, so `--language en` is required (another language, or none, is refused); needs faster-whisper 1.2.0+ |
 | "these names / terms keep coming out wrong" | `--initial-prompt "名前, 用語, ..."` (a vocabulary hint to the decoder, not an instruction); with `--engine haas_ja`: `--vocabulary terms.json` (`{"written form": ["reading", ...]}`) |
 | "Japanese conference / medical talk, need better accuracy", GPU machine | `transcribe input.mp4 --engine haas_ja --language ja [--vocabulary terms.json]`; `doctor` shows whether `haas_ja` is usable here and why not |
 | "Japanese, better than Whisper, on a Mac / no NVIDIA GPU" | `transcribe input.mp4 --engine speechcpp --language ja [--model parakeet-tdt_ctc-0.6b-ja] --word-timestamps`; needs speech.cpp's `speech` on PATH and `speech pull <model> silero-vad` done once by the user (the skill never downloads these); `doctor` shows the binary, backend and models |
+| "English / German / French / another European language, word timings, no Python ML stack or on a Mac" | `transcribe input.mp4 --engine speechcpp --model parakeet-tdt-0.6b-v3 --language de --word-timestamps` (25 languages: `bg cs da de el en es et fi fr hr hu it lt lv mt nl pl pt ro ru sk sl sv uk`; no Japanese); the user runs `speech pull parakeet-tdt-0.6b-v3 silero-vad` once (1.26 GB; `:q8_0` 0.67 GB) |
 | "word timings must sit exactly on the speech" (English or Japanese) | `transcribe input.mp4 --engine whisperx --language en --word-timestamps`; needs `pip install whisperx` (Python 3.10+) and the models once (`models pull large-v3 --engine whisperx`); `doctor` shows whether it is usable. It does no diarization: use `--speaker-turns` |
 | "don't reuse the old result" | `--no-cache` |
 | "no internet here", "air-gapped", "must not upload the audio" | `transcribe ... --offline` (refuses remote engines and any model download); `doctor --offline` first |
@@ -93,6 +95,13 @@ never "fix" the transcript text yourself when the user asked for the transcript.
   do not offer a cloud engine or whisper.cpp, they are not implemented.
 - With `--engine speechcpp`, `qwen3-asr-*` models give `words: null` (each segment is one speech region);
   `MODEL_MISSING` means the user must run `speech pull <model> silero-vad` once; never run it for them unasked.
+- A model can know fewer languages than its engine: `INVALID_INPUT` with `reason: language_unsupported` and
+  `details.supported` means pick a model from that list or another model; `reason: language_detection_unsupported`
+  with `details.model` means that model needs `--language`. `parakeet-tdt-0.6b-v3` only checks `--language`: it writes
+  the language it hears, so ask the user which language is spoken rather than guessing.
+- The parakeet models (`parakeet-tdt-0.6b-v3`, `parakeet-tdt_ctc-0.6b-ja`) are CC-BY-4.0: whoever redistributes their
+  weights credits NVIDIA. Every other model's licence (all allow commercial use; `distil-large-v3.5` is MIT) is in
+  docs/engines.md.
 - `BUDGET_EXCEEDED` means the media is longer than `--max-audio-seconds`; raise the budget on purpose,
   or transcribe a cut made by ffmpeg-skill. `TRANSCRIPTION_TIMEOUT` means the engine was stopped; a
   smaller model or a longer `--timeout` are the options.

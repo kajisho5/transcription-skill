@@ -378,9 +378,9 @@
   | `silero-vad` (detector) | snakers4/silero-vad (GitHub `LICENSE`) | MIT | sakasegawa/silero-vad-GGUF `7fcb7aa` (MIT) |
 
   Not registered: the rest of speech.cpp's catalog (parakeet-tdt-0.6b-v3, Nemotron 3.5 Transcribe under the OpenMDW
-  License, the synthesis models), which nobody asked for; the licences of training data are not part of the model
-  licences and were not assessed. Weight types: `NAME` means the catalog's default file, `NAME:TYPE` another
-  (`f16`, `q8_0`, `q6_k`, `q5_k`, `q4_k`, where the catalog has it).
+  License, the synthesis models), which nobody asked for (parakeet-tdt-0.6b-v3 was registered later, ADR-040); the
+  licences of training data are not part of the model licences and were not assessed. Weight types: `NAME` means the
+  catalog's default file, `NAME:TYPE` another (`f16`, `q8_0`, `q6_k`, `q5_k`, `q4_k`, where the catalog has it).
 - Spec: `execution_mode` local, `requires_network` false, `deterministic` false (speech.cpp picks the device, `auto`,
   and repeatability was not verified), capabilities `local_execution`, `local_model`, `word_timestamps`; no
   `language_detection` (the language is required; Qwen3-ASR is steered by it, the FastConformer models only check
@@ -587,3 +587,77 @@
   (`tests/fixtures/ja_short.wav`, faster-whisper `base`, SudachiDict small 20261015): one segment, 26 dictionary words,
   no fallback, 18 measured and 8 interpolated. Not verified: the fallback rate on long real recordings, and the timing
   error of interpolated boundaries against forced alignment.
+
+## ADR-040 parakeet-tdt-0.6b-v3 on `speechcpp`, `distil-large-v3.5` on `faster_whisper`, and per-model language limits
+- Need: two optional engine choices for English and other European languages, with the defaults unchanged
+  (`faster_whisper` `base`, `speechcpp` `reazonspeech-v2`). On `speechcpp`, a timed model for English and the European
+  languages (Qwen3-ASR covers English but gives no word times in speech.cpp). On `faster_whisper`, a faster English
+  checkpoint than `large-v3`. ADR-035 left parakeet-tdt-0.6b-v3 unregistered because nobody had asked for it.
+- parakeet-tdt-0.6b-v3, read from the primary sources on 2026-11-12:
+  - speech.cpp 0.10.0's catalog (`tools/catalog/catalog.json` at commit `06590811a90041f935a470ba0e2b85346d2fc041`, the
+    commit ADR-035 pins) has it: name `parakeet-tdt-0.6b-v3`, task `recognition`, repository
+    `sakasegawa/parakeet-tdt-0.6b-v3-GGUF` at `b7ed82dbfba6e63da0ef9cf5104f5fc67da44414`, default type `f16`
+    (`parakeet-tdt-0.6B-v3-F16.gguf`, 1.26 GB), also `q8_0` (0.67 GB), `q6_k`, `q5_k`, `q4_k` (0.36 GB), and 25 languages:
+    `bg cs da de el en es et fi fr hr hu it lt lv mt nl pl pt ro ru sk sl sv uk`.
+  - speech.cpp's `docs/models/fastconformer.md` (same commit): the 25 languages are the model card's; `speech asr
+    parakeet-tdt-0.6b-v3 --timestamps` gives tokens and segments with times, a segment ending at a full stop, question
+    mark or exclamation mark; "parakeet-v3 finds the language of the audio itself. None of the models takes a language:
+    a request's `language` is only checked against the model's languages"; the parakeet models attend over the whole
+    request, so time and memory grow with its square.
+  - Upstream card [nvidia/parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) (revision
+    `541d1f99c6b0c3cd0b11a95167540bb8edefd82b`, the one speech.cpp converted): `license: cc-by-4.0`, "ready for
+    commercial/non-commercial use", the same 25 languages, word- and segment-level timestamps, and long audio "up to 24
+    minutes long with full attention (on A100 80GB) or up to 3 hours with local attention".
+  - Converted files' card (`sakasegawa/parakeet-tdt-0.6b-v3-GGUF` at the catalog revision): `license: cc-by-4.0`; "The
+    weights are NVIDIA's, under the Creative Commons Attribution 4.0 International license (CC-BY-4.0) ... These files
+    change the format of the weights and quantize them; they do not retrain them."
+- Decision 1: register `parakeet-tdt-0.6b-v3` in `speechcpp`'s `MODELS` as a timed model with those 25 languages
+  (`PARAKEET_V3_LANGUAGES`). It goes through the FastConformer path that ADR-035 already built (regions, `--timestamps`,
+  words from tokens); speech.cpp's protocol, flags and output shapes are unchanged. The language is still required
+  (no `language_detection`) and only checked: a German recording requested as `en` comes out German, recorded as
+  `language: en` (`requested`). Long form: the engine sends regions of at most 10 s (plus a 300 ms pad on each side),
+  far inside the card's 24-minute single pass, so `single_pass_s` (1440) is recorded and tested, not enforced.
+- Licence record: CC-BY-4.0 requires credit. `MODELS` entries with that licence now carry `attribution` (who made the
+  model, its card, the licence link, and that speech.cpp's files change the format and quantize without retraining),
+  for parakeet-tdt-0.6b-v3 and, so both CC-BY-4.0 entries read alike, for parakeet-tdt_ctc-0.6b-ja; docs/engines.md's
+  licence table has the row. The skill does not redistribute weights (`speech pull` fetches them), so nothing is
+  printed at run time.
+- distil-large-v3.5, read on 2026-11-12: the card [distil-whisper/distil-large-v3.5](https://huggingface.co/distil-whisper/distil-large-v3.5)
+  (revision `728a7691f3ff1d3d971528d3203a6e9559165d41`) and its CTranslate2 files `distil-whisper/distil-large-v3.5-ct2`
+  (`9793ccc07920e0f830e1dba0343efcdf0ef8c903`) both say `language: en`, `license: mit` ("inherits the MIT license from
+  OpenAI's Whisper model"), and call it part of the "Distil-Whisper English family". faster-whisper resolves the name
+  to that repository from release 1.2.0 (`faster_whisper/utils.py` `_MODELS` at tags `v1.1.1`, `v1.2.0`, `v1.2.1`);
+  1.1.1 does not know it.
+- Decision 2: `faster_whisper.MODEL_NAMES` is an allowlist (any other name is `MODEL_UNKNOWN` and refused), so
+  `distil-large-v3.5` is appended to it, with `MODEL_FACTS` recording its languages (`en`), licence, card, repository and
+  `since` (1.2.0). On a faster-whisper that does not know the name, `model_status` is `MODEL_MISSING` with the upgrade
+  line instead of promising a download that would fail. `whisperx` uses the same checkpoint names, so it lists the model
+  too and applies the same limit. The package extra stays `faster-whisper>=1.0`.
+- Decision 3, per-model languages: `TranscriptionEngine.model_languages(model)` (default `None`) names the languages a
+  model is limited to: `faster_whisper` / `whisperx` from `MODEL_FACTS`, `speechcpp` from `MODELS`. The service checks
+  it right after the engine-wide language checks, before audio extraction and the cache: a language outside the list is
+  `INVALID_INPUT` with `reason: language_unsupported`, and no language is `INVALID_INPUT` with `reason:
+  language_detection_unsupported` (ADR-023: the skill never supplies a language; an English-only checkpoint's
+  detection is not a fact to record), both with `details.engine`, `details.model` and `details.supported`. No new error
+  code or reason code. The engines keep their own check for direct use. `dry_run` refuses the same way. The selector
+  applies the same two reasons when the requirement names the model; a requirement that names no model is filtered as
+  before (the default model is not checked), so no existing selection changes.
+- What changes for existing requests: none for the defaults. A `speechcpp` request whose named model lacks the language
+  (e.g. `reazonspeech-v2` with `en`) was already refused by the engine with the same code and reason; it is now refused
+  before audio extraction, and the selector rejects it when the model is named. The other English-only Whisper names
+  (`*.en`, `distil-large-v2`, `distil-large-v3`, `distil-medium.en`, `distil-small.en`) get no limit here: requests with
+  them work today and would be refused; that is a separate decision.
+- Contract: additive. `speechcpp`'s description names the new model; where `speech` is installed its `supported_models`
+  gains `parakeet-tdt-0.6b-v3` and its `supported_languages` gain `bg et hr lt lv mt sk sl uk`; where faster-whisper is
+  installed, `faster_whisper`'s and `whisperx`'s `supported_models` gain `distil-large-v3.5`. Tools, capability names,
+  schemas and `CONTRACT_VERSION` 1.0 are unchanged. video-production-agent pins this skill's exact version and contract,
+  so it needs a re-pin. Version 0.10.0 (minor: a capability change), bumped by hand in `pyproject.toml`.
+- Tests: the fake `speech` catalog carries the new entry as speech.cpp's catalog has it, and its segments end at `.`
+  too; `tests/test_speechcpp.py` covers the default file, English segments and spaced words, the 25 languages and the
+  refusals, the attribution record, the single-pass bound, and the service refusing before audio work.
+  `tests/test_unit.py` drives `faster_whisper` against a fake faster_whisper package (allowlist, licence, the 1.2.0
+  floor, refusal before loading the model) and the service and selector against a `FakeEngine` with a limited model;
+  `tests/test_whisperx.py` the same limit through whisperX. The manual `engines` job (heavy-tests.yml) now also pulls
+  `parakeet-tdt-0.6b-v3:q4_k` and requires `test_real_european_model_transcribes_english_with_word_timestamps` on the
+  English fixture (WER <= 0.3, words on the speech). Not verified here: a real run of either model (no download in the
+  authoring environment); the `engines` job has not been run with the new model yet.
