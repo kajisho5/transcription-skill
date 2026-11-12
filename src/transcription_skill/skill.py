@@ -34,6 +34,8 @@ CAPABILITIES = [
     "output_path_policy",       # allowed_output_roots: outputs confined the same way; inputs are never overwritten
     "custom_vocabulary",        # request `vocabulary` for engines declaring the custom_vocabulary engine capability (haas_ja)
     "speaker_merge",            # speaker_id filled from diarization-skill turns (`transcription/speakers`, transcribe `speaker_turns`); ADR-037
+    "word_index",               # every word carries `index`, 0-based and contiguous over the whole transcript; ADR-039
+    "dictionary_word_segmentation",   # request `word_segmentation: "dictionary"` (ja, optional [ja] extra): dictionary words with `timing`, `pos`; ADR-039
 ]
 
 TOOLS: List[Dict[str, Any]] = [
@@ -43,6 +45,7 @@ TOOLS: List[Dict[str, Any]] = [
                "budget": {"timeout": "seconds", "max_audio_seconds": "seconds"}, "cache": "bool", "workspace": "path | null", "offline": "bool",
                "allowed_input_roots": "list[dir] | null", "dry_run": "bool", "vad_filter": "bool",
                "vocabulary": "{written form: list[reading]} | null",
+               "word_segmentation": "engine | dictionary (dictionary: language ja and word_timestamps true; needs the optional [ja] extra)",
                "speaker_turns": "diarization-skill/turns@1 document | path | null (merged after recognition, never cached)"},
      "output": {"transcript": "Transcript", "cache_hit": "bool", "cache_key": "sha256 hex", "warnings": "list[str]"}, "deterministic": True,
      "side_effects": ["writes cache under workspace"]},

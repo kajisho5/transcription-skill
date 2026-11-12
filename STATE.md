@@ -68,8 +68,17 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   rule, recorded under `speaker_assignment`; checked against `diarization assign` on 490 random layouts (identical).
   Not part of the cache key; this skill still does no diarization. Not yet run on a real diarization of real audio
   (that needs diarization-skill's gated pyannote weights)
+- Word index (ADR-039): every word carries `index`, 0-based and contiguous over the whole transcript; validator checks it
+  (on every word or on none, so older documents stay valid); old cache entries are numbered on read
+- Dictionary word segmentation (ADR-039) — EXPERIMENTAL: request `word_segmentation: "dictionary"` / `--word-segmentation
+  dictionary`, Japanese only (`language: "ja"` + `word_timestamps` required), SudachiPy split mode C via the optional
+  `[ja]` extra. Engine timings mapped onto dictionary words: `timing` `measured` | `interpolated` (character share inside
+  an engine word), coarse `pos` from a fixed 13-value set; segments that cannot be mapped keep engine words with a
+  warning. Segmenter identity in `provenance.parameters` and the cache key. Real tokenizer tested in the Linux / 3.11 unit
+  job; run once by hand on `ja_short.wav` with faster-whisper `base` (26 words, no fallback); fallback rate on long real
+  recordings and interpolation error UNKNOWN
 - Output boundary: opt-in `allowed_output_roots` / `--allowed-output` (transcribe, segments, export); inputs never overwritten
-- Tests: unit / security / paths / conformance (SKILL_SPEC §8, all eight checks) / integration (real engine) ; evals 30 cases
+- Tests: unit / security / paths / conformance (SKILL_SPEC §8, all eight checks) / words (ADR-039) / integration (real engine) ; evals 30 cases
 
 ## OS integration status
 - `kajisho5/AI-video-production-OS` (branch `claude/ai-video-production-os-arch-fck6fy`, docs + `registry/`): this Skill is
@@ -248,3 +257,7 @@ two steps run this way in video-editing-skill and color-grading-skill.
   `.github/`, `docs/`, `tests/`, `scripts/release/` or Markdown other than `SKILL.md` (`scripts/release/release_scope.py`,
   tested in `scripts/release/tests/`); `tests.yml` runs the unit matrix on `pull_request` and `push` to `main`, the heavy
   jobs moved to the manual `heavy-tests.yml`.
+- 2026-11-12: word index and optional Japanese dictionary words (ADR-039): `index` on every word over the whole transcript;
+  request `word_segmentation` (`engine` default | `dictionary`, ja only, SudachiPy `[ja]` extra) with `timing` and `pos` on
+  dictionary words; capabilities `word_index`, `dictionary_word_segmentation`; version 0.9.0 bumped in `pyproject.toml`.
+  Contract additive (`contract_version` 1.0); video-production-agent needs a re-pin.

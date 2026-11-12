@@ -9,6 +9,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from .models import LANGUAGE_SOURCES, LANGUAGE_UNKNOWN, TRANSCRIPT_SCHEMA
+from .words import POS_VALUES as WORD_POS_VALUES, TIMING_VALUES as WORD_TIMING_VALUES   # word fields of ADR-039
 
 END_TOLERANCE = 0.5          # seconds a segment may overrun the media duration (engine rounding)
 CONTAINMENT_TOLERANCE = 0.01  # seconds a word may sit outside its segment
@@ -176,6 +177,8 @@ def validate_transcript(doc: Any, expected_asset_id: Optional[str] = None, expec
         rep.errors.append("segments must be a list")
         segs = []
     seen_ids = set()
+    indexed: List[bool] = []   # per word: does it carry `index`
+    next_index = 0
     prev_end: Optional[float] = None
     prev_start: Optional[float] = None
     for i, seg in enumerate(segs):
@@ -241,6 +244,20 @@ def validate_transcript(doc: Any, expected_asset_id: Optional[str] = None, expec
             if w.get("speaker_id") is not None and (not isinstance(w["speaker_id"], str) or not w["speaker_id"]):
                 rep.errors.append(f"{ww}: speaker_id must be null or a non-empty string")
             _check_conf(w["confidence"], ww, rep)
+            if "index" in w:
+                indexed.append(True)
+                if not isinstance(w["index"], int) or isinstance(w["index"], bool) or w["index"] != next_index:
+                    rep.errors.append(f"{ww}: index must be {next_index} (0-based, contiguous over the whole transcript), got {w['index']!r}")
+            else:
+                indexed.append(False)
+            next_index += 1
+            if "timing" in w and w["timing"] not in WORD_TIMING_VALUES:
+                rep.errors.append(f"{ww}: timing must be one of {WORD_TIMING_VALUES}, got {w['timing']!r}")
+            if "pos" in w and w["pos"] not in WORD_POS_VALUES:
+                rep.errors.append(f"{ww}: pos must be one of {WORD_POS_VALUES}, got {w['pos']!r}")
+
+    if any(indexed) and not all(indexed):
+        rep.errors.append("words: index must be on every word or on none (documents written before word indices carry none)")
 
     _scan_leakage(doc, "", rep)
     return rep

@@ -37,10 +37,17 @@ The validator in `validate.py` is the executable form of this document; `transcr
 
 | field | type | meaning |
 |-------|------|---------|
+| `index` | integer ≥ 0 | word number, 0-based and contiguous over the **whole transcript** (not per segment), in document order: segments by start, words by start inside a segment (ADR-039). On every word of a document written by 0.9.0 or later; documents written earlier carry none and stay valid |
 | `start`, `end` | seconds | `start < end`, contained in the segment (±0.01 s), ordered |
 | `text` | string | whitespace-trimmed token text |
-| `confidence` | number in [0,1] \| null | engine word probability when available |
+| `confidence` | number in [0,1] \| null | engine word probability when available; for a dictionary word, the lowest confidence of the engine words it overlaps (`null` if any of them has none) |
+| `timing` | `measured` \| `interpolated`, optional | dictionary words only (below). Absent on engine words, whose times are what the engine reported |
+| `pos` | enum, optional | dictionary words only: coarse part of speech, one of the fixed set below |
 | `speaker_id` | string \| null, optional | present only after a speaker merge (ADR-037): the word's own speaker or `null` |
+
+`index` is deterministic: it depends only on the order of the words, so the same computation (same cache key)
+always numbers the same words the same way. A segment with `words: null` contributes no numbers. A cache entry
+written before word indices existed gets them on read (and is stored back with them); nothing else in it changes.
 
 One exception (ADR-032) comes first. faster-whisper rounds word times to 0.01 s, so a very short word can
 come back with `end <= start` by less than 0.01 s. Such a word is widened to exactly 0.01 s. It becomes
@@ -55,6 +62,54 @@ empty text), the whole segment's `words` becomes `null` and a warning names the 
 0.01 s widening above, word data is never repaired or invented. The validator stays strict: no output word
 has `end <= start`.
 
+## Dictionary words (ADR-039)
+
+Request `word_segmentation`: `"engine"` (default: words as the engine returns them) or `"dictionary"`. Dictionary
+segmentation is Japanese only and opt-in: it needs `language: "ja"` and `word_timestamps: true`, and SudachiPy with a
+SudachiDict dictionary (`pip install "transcription-skill[ja]"`; the first installed of `core`, `small`, `full` is
+used, split mode `C`). Other languages are refused (`INVALID_INPUT`, `reason: dictionary_segmentation_language`):
+their engine words are already words, and no tokenizer is invented for them.
+
+Each segment's `text` is tokenized into dictionary words, which replace the segment's engine words. Times come from
+the engine words ("units"):
+
+- Whitespace is not part of any word. Both sides are compared on the segment text with every whitespace character
+  removed; a whitespace-only dictionary token is dropped.
+- A dictionary word boundary that coincides with a unit boundary takes that unit's time. A dictionary word made of
+  whole units starts at the first unit's start and ends at the last unit's end: `timing: "measured"`.
+- A boundary that falls inside a unit splits the unit's time by character share: in a unit `[s, e]` of `n`
+  characters, the boundary after its `k`-th character is at `s + (e - s) * k / n` (rounded to 1 µs). A word with at
+  least one such boundary is `timing: "interpolated"`: an estimate, never a measurement.
+- If the units, or the dictionary words, do not reproduce the segment text exactly (whitespace aside), or a word would
+  get a non-positive duration, or the tokenizer fails on that segment, the segment keeps its engine words (no
+  `timing`, no `pos`) and `warnings` gets `seg_NNNN: dictionary word segmentation skipped (<reason>); engine words kept`.
+
+`pos` is taken from the dictionary's top-level part of speech:
+
+| SudachiDict | `pos` |
+|-------------|-------|
+| 名詞 | `noun` |
+| 代名詞 | `pronoun` |
+| 動詞 | `verb` |
+| 形容詞, 形状詞 | `adjective` |
+| 副詞 | `adverb` |
+| 助詞 (every subcategory) | `particle` |
+| 助動詞 | `auxiliary` |
+| 接続詞 | `conjunction` |
+| 感動詞 (fillers included) | `interjection` |
+| 接頭辞 | `prefix` |
+| 接尾辞 | `suffix` |
+| 補助記号, 記号, 空白 | `symbol` |
+| 連体詞 and anything else | `other` |
+
+The set `noun, pronoun, verb, adjective, adverb, particle, auxiliary, conjunction, interjection, prefix, suffix,
+symbol, other` is fixed; nothing outside it is written. Punctuation becomes its own `symbol` word.
+
+The segmenter identity is part of `provenance.parameters` and so of the cache key: `word_segmentation: "dictionary"`
+and `word_segmenter: {segmenter: "sudachipy", segmenter_version, dictionary, dictionary_version, split_mode: "C"}`.
+A different SudachiPy or dictionary release can split differently, so it is a different computation. With the
+default `engine`, neither key appears and existing cache keys are unchanged.
+
 ## Source
 
 `filename` (bare name, never a path), `fingerprint` (`sha256:<64 hex>` of the file bytes),
@@ -67,7 +122,7 @@ has `end <= start`.
 | `engine`, `engine_version` | same as the top level |
 | `execution_mode` | `local` or `remote`: where recognition ran (from the engine's spec) |
 | `model`, `model_version` | model name; snapshot/commit id when the engine can report one, else `null` |
-| `parameters` | `language`, `word_timestamps`, `temperature`, `initial_prompt`, `beam_size`, `audio_stream` (0-based index actually used; `0` when the request left it unset), `vad_filter`; `vocabulary` (`{written form: [readings]}`) only when the request carried one (ADR-033) |
+| `parameters` | `language`, `word_timestamps`, `temperature`, `initial_prompt`, `beam_size`, `audio_stream` (0-based index actually used; `0` when the request left it unset), `vad_filter`; `vocabulary` (`{written form: [readings]}`) only when the request carried one (ADR-033); `word_segmentation` and `word_segmenter` only for dictionary segmentation (ADR-039) |
 | `parameters_hash` | sha256 of the canonical parameters JSON |
 | `cache_key` | sha256 identity of (fingerprint, {engine id, version, execution_mode}, {model, model_version}, parameters) |
 | `created_at`, `processing_seconds` | when, and total wall clock of the run (probe + extraction + engine) |
@@ -103,6 +158,8 @@ cached document stays byte-identical and its provenance stays true.
 9. source: bare non-empty `filename`, non-negative integer `size_bytes`, positive `media_duration`, boolean `has_video`
 10. provenance: `execution_mode` in {local, remote}; `skill`, `tool` (a `transcription/*` name), `model` non-empty
 11. numbers must be finite (NaN / ±inf are rejected everywhere a number is expected)
+12. word `index`: on every word or on none; when present, an integer equal to the word's 0-based position over the
+    whole transcript. `timing` and `pos`, when present, are values of their fixed sets (ADR-039)
 
 ### Language
 

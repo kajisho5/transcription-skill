@@ -77,7 +77,9 @@ transcription doctor
 # transcribe
 transcription transcribe lecture.mp4                       # auto language, writes lecture.transcript.json
 transcription transcribe lecture.mp4 --language ja         # Japanese, no detection
-transcription transcribe lecture.mp4 --word-timestamps     # per-word timing
+transcription transcribe lecture.mp4 --word-timestamps     # per-word timing; every word numbered (`index`)
+transcription transcribe lecture.mp4 --language ja --word-timestamps --word-segmentation dictionary
+                                                           # Japanese dictionary words + part of speech (pip install "transcription-skill[ja]")
 transcription transcribe lecture.mp4 --offline             # hard no-network constraint
 transcription transcribe dubbed.mkv --audio-stream 1       # multi-track input: decode the 2nd audio stream, not ffmpeg's default pick
 transcription transcribe meeting.wav --vad-filter           # skip non-speech before decoding (long recordings with real silence)
@@ -349,7 +351,7 @@ or non-JSON stdin still yields an error document (exit 2), never a traceback. Di
   "duration": 9.606,
   "segments": [
     {"id": "seg_0001", "start": 0.0, "end": 8.36, "text": "本日の公園を始めます ...", "raw_text": "本日の公園を始めます ...",
-     "confidence": 0.728, "words": [{"start": 0.0, "end": 0.5, "text": "本", "confidence": 0.986}], "speaker_id": null}
+     "confidence": 0.728, "words": [{"index": 0, "start": 0.0, "end": 0.5, "text": "本", "confidence": 0.986}], "speaker_id": null}
   ],
   "source": {"filename": "ja_short.wav", "fingerprint": "sha256:497b…", "size_bytes": 307470, "media_duration": 9.606, "has_video": false},
   "engine": "faster_whisper", "engine_version": "1.2.1",
@@ -363,6 +365,28 @@ or non-JSON stdin still yields an error document (exit 2), never a traceback. Di
 
 Full definition, validation rules and the SpeechEvent record: [docs/transcript.md](docs/transcript.md).
 JSON Schemas: [schemas/](schemas/).
+
+### Word numbers and Japanese dictionary words (ADR-039)
+
+Every word carries `index`: 0-based and contiguous over the whole transcript (not per segment), in time order, so an
+editing plan can say "words 12-17". Whisper-family engines often return Japanese "words" that are sub-word pieces
+(`本`, `日の`). `word_segmentation: "dictionary"` (CLI `--word-segmentation dictionary`, Japanese only, with
+`language: "ja"` and `word_timestamps: true`) re-splits each segment's text into dictionary words with SudachiPy and
+maps the engine timings onto them:
+
+```json
+{"index": 0, "start": 1.0, "end": 1.4, "text": "本日", "confidence": 0.95, "timing": "interpolated", "pos": "noun"},
+{"index": 1, "start": 1.4, "end": 1.6, "text": "の",   "confidence": 0.95, "timing": "interpolated", "pos": "particle"}
+```
+
+- `timing: "measured"`: both boundaries are engine word boundaries. `"interpolated"`: a boundary fell inside an engine
+  word and was placed by character share, an estimate.
+- `pos` is one of `noun, pronoun, verb, adjective, adverb, particle, auxiliary, conjunction, interjection, prefix,
+  suffix, symbol, other` (mapping table in [docs/transcript.md](docs/transcript.md#dictionary-words-adr-039)).
+- SudachiPy is an optional extra: `pip install "transcription-skill[ja]"`. Without it the request is refused with
+  `INVALID_INPUT`, reason `dictionary_segmentation_unavailable`, and the install line. Other languages are refused
+  (`dictionary_segmentation_language`): their engine words are already words.
+- A segment whose words cannot be mapped faithfully keeps its engine words and the transcript carries a warning.
 
 ## Input boundary (allowed roots)
 

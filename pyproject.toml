@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "transcription-skill"
-version = "0.8.0"
+version = "0.9.0"
 description = "Speech recognition skill: audio/video in, structured Transcript (segments, word timestamps, SpeechEvent candidates) out. Not a video editing agent."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -15,6 +15,8 @@ dependencies = []
 
 [project.optional-dependencies]
 faster-whisper = ["faster-whisper>=1.0"]
+# Japanese dictionary word segmentation (request word_segmentation "dictionary", ADR-039); never needed otherwise
+ja = ["sudachipy>=0.6.8", "sudachidict_core>=20230927"]
 
 [project.scripts]
 transcription = "transcription_skill.cli:main"

@@ -44,6 +44,8 @@ def _transcribe_params(args: argparse.Namespace) -> Dict[str, Any]:
         p["vocabulary"] = _load_vocabulary_file(args.vocabulary)
     if args.audio_stream is not None:
         p["audio_stream"] = args.audio_stream
+    if args.word_segmentation:
+        p["word_segmentation"] = args.word_segmentation
     if args.initial_prompt:
         p["initial_prompt"] = args.initial_prompt
     if args.asset_id:
@@ -397,6 +399,9 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--engine", default="faster_whisper")
     t.add_argument("--model", help="model name (default: the engine's default; faster_whisper: base, haas_ja: Haas-ja-v1.0, speechcpp: reazonspeech-v2, whisperx: large-v3)")
     t.add_argument("--word-timestamps", action="store_true", help="also record per-word timestamps")
+    t.add_argument("--word-segmentation", choices=["engine", "dictionary"],
+                   help="engine (default): words as the engine gives them; dictionary: Japanese dictionary words with engine timings "
+                        "mapped onto them (needs --language ja, --word-timestamps and the optional [ja] extra)")
     t.add_argument("--temperature", type=float, default=0.0)
     t.add_argument("--beam-size", type=int, default=5)
     t.add_argument("--audio-stream", type=int, help="0-based index of the audio stream to decode on a multi-track input (default: 0, the first)")
