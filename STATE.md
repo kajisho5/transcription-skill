@@ -93,6 +93,15 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   warning. Segmenter identity in `provenance.parameters` and the cache key. Real tokenizer tested in the Linux / 3.11 unit
   job; run once by hand on `ja_short.wav` with faster-whisper `base` (26 words, no fallback); fallback rate on long real
   recordings and interpolation error UNKNOWN
+- Long recordings (ADR-042, roadmap step 10) — EXPERIMENTAL: request `chunk_seconds` (30-3600, `language` required) /
+  `--chunk-seconds` cuts the prepared WAV at pauses (media-analysis-skill `speech_regions` via `speech_regions` /
+  `--speech-regions` when given, else the quietest 0.3 s near each cut; a cut louder than -40 dBFS is warned), runs
+  `parallel` (1-8) chunks at a time in worker processes, caches each chunk under `<workspace>/chunks/` as soon as it is
+  done and resumes from them after a stop or a kill; `provenance.chunking` records the chunks, device and realtime factor.
+  Unit-tested with an exact tone fixture (join, parallel limit, resume after a real kill); faster-whisper `tiny` on a
+  188 s concatenated fixture (`LongRecordingTests`) gives the one-pass words at every join and resumes after a CLI kill.
+  Not run on a real multi-hour recording, on a GPU, with another engine, or with real media-analysis speech regions
+  (that kind is not shipped yet)
 - Output boundary: opt-in `allowed_output_roots` / `--allowed-output` (transcribe, segments, export); inputs never overwritten
 - Tests: unit / security / paths / conformance (SKILL_SPEC §8, all eight checks) / words (ADR-039) / integration (real engine) ; evals 30 cases
 

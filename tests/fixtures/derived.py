@@ -52,3 +52,14 @@ def multi_track(sources: List[str], out_dir: Optional[str] = None, name: str = "
     argv += ["-c:a", "pcm_s16le", dst]
     subprocess.run(argv, check=True)
     return dst
+
+
+def repeated(src: str, times: int, out_dir: Optional[str] = None) -> str:
+    """Return the path of a 16 kHz mono WAV holding `src` `times` times back to back (its own lead-in and tail silence
+    are the pause between two copies): a long same-language recording with known pauses, built from a short fixture."""
+    out_dir = out_dir or tempfile.mkdtemp(prefix="ts_derived_")
+    os.makedirs(out_dir, exist_ok=True)
+    dst = os.path.join(out_dir, f"{os.path.splitext(os.path.basename(src))[0]}_x{times}.wav")
+    subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-stream_loop", str(times - 1), "-i", src, "-ac", "1", "-ar", "16000",
+                    "-c:a", "pcm_s16le", dst], check=True)
+    return dst

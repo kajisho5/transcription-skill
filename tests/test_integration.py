@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from transcription_skill.speech_events import speech_events
 from transcription_skill.validate import validate_transcript
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "fixtures"))
-from derived import media_duration, multi_track, second_onset, twice  # noqa: E402
+from derived import media_duration, multi_track, repeated, second_onset, twice  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 FX = ROOT / "tests" / "fixtures"
@@ -33,6 +34,7 @@ REF = json.loads((FX / "fixtures.json").read_text(encoding="utf-8"))
 HAVE_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 ENGINE_OK = get_engine("faster_whisper").available()
 MODEL = os.environ.get("TRANSCRIPTION_TEST_MODEL", "base")
+LONG_MODEL = os.environ.get("TRANSCRIPTION_LONG_TEST_MODEL", "tiny")    # chunked long recordings (ADR-042): the smallest model
 
 
 def cer(ref: str, hyp: str) -> float:
@@ -298,6 +300,78 @@ class RealMediaTests(unittest.TestCase):
         p = subprocess.run([sys.executable, "-m", "transcription_skill.cli", "doctor"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
         self.assertEqual(p.returncode, 0, p.stdout)
         self.assertIn("ready to transcribe", p.stdout)
+
+
+def _tokens(text: str):
+    return [t for t in (re.sub(r"[^\w']", "", w.lower()) for w in text.split()) if t]
+
+
+@unittest.skipUnless(HAVE_FFMPEG and ENGINE_OK, "needs ffmpeg and faster-whisper (pip install faster-whisper)")
+class LongRecordingTests(unittest.TestCase):
+    """Chunked transcription (ADR-042) with the real engine and the smallest model on a concatenated fixture: en_short.wav
+    24 times (about 188 s, a 1.5 s pause between copies), cut into 30 s chunks: five joins. At each join, the words of the
+    two copies around it must equal those of one pass over the whole file (segment text, so a segment whose word times
+    were discarded still counts)."""
+    COPIES = 24
+    CHUNK = 30.0
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="ts_long_")
+        cls.wav = repeated(str(FX / "en_short.wav"), cls.COPIES, cls.tmp)
+        cls.copy_seconds = media_duration(str(FX / "en_short.wav"))
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def doc(self, **kw):
+        return dict({"input": self.wav, "model": LONG_MODEL, "language": "en", "chunk_seconds": self.CHUNK}, **kw)
+
+    def window_tokens(self, doc, lo: float, hi: float):
+        return [t for s in doc["segments"] if lo <= (s["start"] + s["end"]) / 2 < hi for t in _tokens(s["text"])]
+
+    def test_chunked_joins_match_one_pass_and_resume_after_a_kill(self):
+        ws = os.path.join(self.tmp, "ws_full")
+        full = TranscriptionService(workspace=ws).transcribe(parse_request(self.doc(parallel=2, workspace=ws)))["transcript"]
+        self.assertTrue(validate_transcript(full).ok)
+        ck = full["provenance"]["chunking"]
+        self.assertEqual(ck["device"], "cpu")
+        self.assertGreater(ck["realtime_factor"], 0)
+        joins = [c["end"] for c in ck["chunks"][:-1]]
+        self.assertGreaterEqual(len(joins), 5)
+        one = TranscriptionService(workspace=os.path.join(self.tmp, "ws_ref")).transcribe(
+            parse_request({"input": self.wav, "model": LONG_MODEL, "language": "en", "cache": False}))["transcript"]
+        per_copy = len(_tokens(REF["en_short.wav"]["reference_text"]))
+        for j in joins:
+            m = int(round(j / self.copy_seconds))                # the join lies in the pause between copy m-1 and copy m
+            self.assertLess(abs(j - m * self.copy_seconds), 1.5, j)
+            lo, hi = (m - 1) * self.copy_seconds, (m + 1) * self.copy_seconds
+            ref = self.window_tokens(one, lo, hi)
+            self.assertEqual(self.window_tokens(full, lo, hi), ref, f"join at {j:.2f} s")   # no lost or doubled word at the join
+            self.assertEqual(len(ref), 2 * per_copy, f"join at {j:.2f} s")
+
+        # a run killed after two chunks resumes from them and gives the same transcript
+        ws2 = os.path.join(self.tmp, "ws_kill")
+        env = dict(os.environ, PYTHONUTF8="1")
+        cmd = [sys.executable, "-m", "transcription_skill.cli", "transcribe", self.wav, "--language", "en", "--model", LONG_MODEL,
+               "--chunk-seconds", str(self.CHUNK), "--workspace", ws2, "-o", os.path.join(self.tmp, "killed.json")]
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env)
+        chunks_dir = os.path.join(ws2, "chunks")
+        count = lambda: len([n for n in os.listdir(chunks_dir) if n.endswith(".json")]) if os.path.isdir(chunks_dir) else 0  # noqa: E731
+        deadline = time.time() + 600
+        while count() < 2 and proc.poll() is None and time.time() < deadline:
+            time.sleep(0.1)
+        proc.kill()
+        _, err = proc.communicate()
+        done = count()
+        self.assertGreaterEqual(done, 2, err.decode("utf-8", "replace")[-2000:])
+        self.assertLess(done, ck["chunk_count"])
+        resumed = TranscriptionService(workspace=ws2).transcribe(parse_request(self.doc(workspace=ws2)))["transcript"]
+        rk = resumed["provenance"]["chunking"]
+        self.assertEqual(rk["chunks_from_cache"], done)
+        self.assertEqual(rk["chunks_recognized"], rk["chunk_count"] - done)
+        self.assertEqual([(s["start"], s["end"], s["text"]) for s in resumed["segments"]], [(s["start"], s["end"], s["text"]) for s in full["segments"]])
 
 
 @unittest.skipUnless(ENGINE_OK, "needs faster-whisper (pip install faster-whisper)")

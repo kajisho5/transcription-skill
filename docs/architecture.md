@@ -25,6 +25,8 @@ fingerprint + cache key                cache.py       sha256(file) ; key = H(fin
         ↓  hit → return cached Transcript (validated again; CACHE_INVALID → warning + recompute)
 make_run_dir + extract_audio           paths.py/media.py   exclusive <workspace>/tmp/<uuid>/ verified inside the workspace; fixed ffmpeg argv, explicit `-map 0:a:N` → mono 16 kHz PCM WAV
         ↓
+        ↓  chunk_seconds (ADR-042): chunking.py cuts the WAV at pauses; each chunk not in <workspace>/chunks/ goes to its own worker,
+        ↓  `parallel` at a time, and is cached as soon as it is done; the results are joined on the recording's timeline
 engine worker subprocess               engines/worker.py   python -m transcription_skill.engines.worker req.json result.json
         ↓  Budget: timeout → process group killed → TRANSCRIPTION_TIMEOUT
 EngineResult (raw)                     engines/base.py

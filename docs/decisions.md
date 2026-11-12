@@ -788,3 +788,66 @@
   applies where a repaired timestamp is dropped, so a repaired boundary is still never used. The word rule's version
   (`words: 2`) is part of the engine identity in the cache key, so transcripts cached under the old rule are
   computed again rather than served with words grouped the old way.
+
+## ADR-042 Long recordings: cut at pauses, chunks in parallel, cached per chunk, resumable
+- Need: 2-8 h recordings (an all-day conference) transcribed within the day, and a run that stops (a crash, a kill, a
+  closed laptop) must not start over. One pass over such a file is one worker process for hours: nothing survives a stop.
+- Opt-in, defaults unchanged: request `chunk_seconds` (30-3600; CLI `--chunk-seconds`). Without it nothing changes, the
+  parameters and every cache key are what they were. `language` is required with it: each chunk is recognized on its own
+  and a transcript has one language (refused before any audio work, reason `language_required_for_chunking`).
+- Cuts (`chunking.py`), on the prepared WAV (mono 16 kHz PCM, the one extraction recipe), consecutive with no gap and no
+  overlap. Cut n is searched for in a window of ±20 % of `chunk_seconds` (at most ±60 s) around its target, one
+  `chunk_seconds` after the previous cut; the last chunk takes the rest (at most `chunk_seconds` + the window).
+  - With `speech_regions` (media-analysis-skill's kind of that name, roadmap step 4 there; passed in by the caller as its
+    response, one result or one observation, or a path to one): the middle of the longest pause between two regions whose
+    middle is in the window (a tie goes to the one nearest the target). Only `data.regions` (or `data.segments`)
+    `{start, end}` is read; probabilities are ignored. When the document names the measured file (`asset.fingerprint`),
+    it must be the input (`speech_regions_source_mismatch`). The regions' sha256 is in `parameters.chunking`.
+    media-analysis-skill has not shipped that kind yet; the shape read here is the one its roadmap announces (time ranges
+    with a probability). If it ships with other field names, this reader follows it.
+  - Without regions, or with no pause between regions in the window: a level measure, not a speech model. The window is
+    read in 20 ms frames and the cut is the centre of the quietest 0.3 s; a tie goes to the stretch nearest the target.
+    Energies are integer sums, so the choice is the same on every platform. A quietest stretch above -40 dBFS is not a
+    pause: the cut is made there anyway and a warning names the time, since a word may be split there. haas-asr's 30 s
+    rule (`engines/longform.py`, ADR-041) is not reused: its 0.1 s window finds gaps inside words, and engines that
+    already cut internally (qwen3_asr, haas_ja, speechcpp's VAD) still get whole minutes, not 30 s pieces.
+- The join (`join_results`): each chunk's segment and word times are relative to the chunk; the chunk's offset is added
+  and every end is clamped to its chunk (an engine may report an end a little past the audio it got), so no word of one
+  chunk reaches into the next. A segment or word starting at or after its chunk's end is dropped with a warning. The
+  joined result then goes through the same `build_transcript` as a one-pass result (segment ids, word indices,
+  dictionary segmentation, validation).
+- Parallel: `parallel` (1-8, default 1) chunks at a time, each in its own engine worker process (the timeout boundary of
+  every engine run, unchanged), with `budget.timeout` as one deadline for the whole run. Each worker loads the model
+  again: chunks of minutes amortise that, chunks of 30 s do not (measured below). `parallel` does not change the result
+  and is not in the cache key.
+- Per-chunk cache and resume: `<workspace>/chunks/<key>.json` holds one chunk's engine result, written atomically as soon
+  as that chunk is recognized. Key: the existing `cache_key` over the sha256 of the chunk's PCM samples, the engine
+  identity, the model and the request parameters minus what is applied after the join (`chunking`, word segmentation),
+  plus `unit: "chunk"`. The same request after a stop finds the cut points again (they depend only on the audio and the
+  request) and recognizes only the chunks that are not cached; an unreadable entry is a miss and is overwritten. A changed
+  parameter or engine version misses every chunk. With `cache: false` nothing is read or written and nothing resumes.
+  `cache clear` removes chunk entries too; `cache size` reports them. The whole transcript is cached as before.
+  Not handled: a killed run leaves its extracted WAV under `<workspace>/tmp/` (as a killed one-pass run always has), and
+  a worker that was running at the kill finishes its chunk and exits without its result being kept.
+- Result: `provenance.chunking` (only on a chunked run): the chunks with their cut source, `from_cache` and
+  `engine_seconds`, `chunks_from_cache`, `chunks_recognized`, `device` (the engine's own name for it through the new
+  `run_device()` hook: faster_whisper / whisperx `cpu`, haas_ja `cuda`, qwen3_asr `cuda:0` or `cpu`; `unknown` when the
+  engine cannot tell, e.g. speechcpp, whose backend speech.cpp picks), `engine_seconds`, `wall_seconds` and
+  `realtime_factor` = this run's wall seconds / media seconds (a resumed run counts only its own time).
+- Contract: additive. New request fields `chunk_seconds`, `parallel`, `speech_regions` (tool input of
+  `transcription/transcribe` and batch items), capability `chunked_long_recordings`, the optional `provenance.chunking`
+  object in the transcript schema, `chunk_entries` / `removed_chunks` in `cache --json` output. `CONTRACT_VERSION` 1.0
+  unchanged; video-production-agent needs a re-pin.
+- Tests. Unit (`tests/test_chunking.py`, unit matrix): a synthetic recording of tone bursts, each "word" with its own
+  amplitude, read back by a fake engine from whatever chunk it is given, so a lost, doubled or moved word at a join is
+  seen exactly; one pass against chunked at three chunk lengths, cuts from regions and from the level, the no-pause
+  warning, the join arithmetic, plan bounds, the parallel limit (never more than `parallel` at once), resume after a
+  failure and after a real kill of the process, cache misses on a changed parameter, a corrupt chunk entry. Integration
+  (`LongRecordingTests`, faster-whisper `tiny`): `en_short.wav` 24 times back to back (188 s, 1.5 s pauses), 30 s
+  chunks, five joins; at each join the words of the two copies around it equal those of one pass over the whole file,
+  and a CLI run killed after two chunks resumes from them and gives the same segments as the uninterrupted run. The
+  fixture is about 3 minutes, not 1 h: the join logic does not depend on the length, and a 1 h WAV is 115 MB.
+- Measured on this host (4 CPU cores, faster-whisper 1.2.1 `tiny` int8, the 188 s fixture, 30 s chunks): one pass
+  13.1 s; chunked 20.1 s with `parallel` 1 (realtime factor 0.107), 13.4 s with 2 (0.071), 14.7 s with 4 (0.078); 60 s
+  chunks with `parallel` 1: 16.2 s. Every run returned all 384 words of the 24 copies. Not measured: a real 2-8 h
+  recording, a GPU, other engines chunked, the media-analysis-skill speech regions of a real file.

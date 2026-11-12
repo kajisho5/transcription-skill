@@ -25,7 +25,7 @@ MAX_VOCABULARY_CHARS = 100
 
 ALLOWED_KEYS = {"input", "language", "engine", "model", "word_timestamps", "temperature", "initial_prompt", "beam_size", "audio_stream",
                 "asset_id", "budget", "cache", "workspace", "offline", "allowed_input_roots", "vad_filter", "vocabulary",
-                "word_segmentation"}
+                "word_segmentation", "chunk_seconds", "parallel", "speech_regions"}
 FORBIDDEN_KEYS = {"command", "argv", "cmd", "shell", "exec", "args", "script", "binary", "api_key", "apikey", "token",
                   "secret", "password", "credentials", "env"}
 BUDGET_KEYS = {"timeout", "max_audio_seconds"}
@@ -68,6 +68,10 @@ class TranscribeRequest:
     vad_filter: bool = False             # skip non-speech before decoding (faster-whisper's own VAD filter; opt-in, unchanged default)
     vocabulary: Optional[Dict[str, List[str]]] = None   # custom vocabulary {written form: [readings]}; engines with custom_vocabulary only
     word_segmentation: str = WORD_SEGMENTATION_ENGINE   # "engine" (words as the engine gives them) | "dictionary" (ja only, ADR-039)
+    chunk_seconds: Optional[float] = None   # long recordings: cut into chunks of about this length at pauses (ADR-042); None = one pass
+    parallel: int = 1                       # chunks recognized at the same time (chunk_seconds only)
+    speech_regions: Optional[List[List[float]]] = None   # [[start, end], ...] from media-analysis-skill speech_regions (chunk_seconds only)
+    speech_regions_fingerprint: Optional[str] = None     # the file those regions were measured on, when the document names it
 
     def parameters(self) -> Dict[str, Any]:
         """The parameters that shape the ASR output. Part of provenance and of the cache identity.
@@ -83,6 +87,10 @@ class TranscribeRequest:
             p["vocabulary"] = self.vocabulary
         if self.word_segmentation != WORD_SEGMENTATION_ENGINE:
             p["word_segmentation"] = self.word_segmentation
+        if self.chunk_seconds is not None:   # where the cuts fall shapes the result; `parallel` does not (ADR-042)
+            from .chunking import regions_digest
+            p["chunking"] = {"chunk_seconds": self.chunk_seconds,
+                             "speech_regions": None if self.speech_regions is None else regions_digest([tuple(r) for r in self.speech_regions])}
         return p
 
     def parameters_hash(self) -> str:
@@ -201,6 +209,8 @@ def parse_request(doc: Any) -> TranscribeRequest:
             raise _bad("word_segmentation 'dictionary' maps word timings onto dictionary words and needs \"word_timestamps\": true",
                        reason="word_timestamps_required")
 
+    chunk_seconds, parallel, regions, regions_fp = _parse_chunking(doc, lang)
+
     budget = Budget()
     b = doc.get("budget")
     if b is not None:
@@ -216,7 +226,34 @@ def parse_request(doc: Any) -> TranscribeRequest:
     return TranscribeRequest(input=inp, language=lang, engine=engine, model=model, word_timestamps=wt, temperature=float(temp),
                              initial_prompt=prompt, beam_size=beam, audio_stream=audio_stream, asset_id=asset_id, budget=budget, cache=cache,
                              workspace=ws, offline=offline, allowed_input_roots=roots, vad_filter=vad_filter,
-                             vocabulary=vocabulary, word_segmentation=segmentation)
+                             vocabulary=vocabulary, word_segmentation=segmentation, chunk_seconds=chunk_seconds, parallel=parallel,
+                             speech_regions=regions, speech_regions_fingerprint=regions_fp)
+
+
+def _parse_chunking(doc: Dict[str, Any], lang: Optional[str]) -> Any:
+    """`chunk_seconds`, `parallel`, `speech_regions` (ADR-042). Chunking needs an explicit language: each chunk is
+    recognized on its own, and one transcript has one language."""
+    from .chunking import MAX_CHUNK_SECONDS, MAX_PARALLEL, MIN_CHUNK_SECONDS, parse_speech_regions
+    cs = doc.get("chunk_seconds")
+    if cs is not None:
+        if isinstance(cs, bool) or not isinstance(cs, (int, float)) or not (MIN_CHUNK_SECONDS <= float(cs) <= MAX_CHUNK_SECONDS):
+            raise _bad(f"'chunk_seconds' must be a number of seconds in [{MIN_CHUNK_SECONDS:g}, {MAX_CHUNK_SECONDS:g}]")
+        cs = float(cs)
+        if lang is None:
+            raise _bad("chunked transcription needs \"language\": each chunk is recognized on its own and a transcript has one "
+                       "language", reason="language_required_for_chunking")
+    parallel = doc.get("parallel", 1)
+    if isinstance(parallel, bool) or not isinstance(parallel, int) or not (1 <= parallel <= MAX_PARALLEL):
+        raise _bad(f"'parallel' must be an integer in [1, {MAX_PARALLEL}]")
+    regions_value = doc.get("speech_regions")
+    if cs is None and (parallel != 1 or regions_value is not None):
+        raise _bad("'parallel' and 'speech_regions' apply to chunked transcription only; set 'chunk_seconds'",
+                   reason="chunk_seconds_required")
+    regions, fp = None, None
+    if regions_value is not None:
+        parsed, fp = parse_speech_regions(regions_value)
+        regions = [[s, e] for s, e in parsed]
+    return cs, parallel, regions, fp
 
 
 def _vocab_text(value: Any, what: str) -> str:
@@ -272,4 +309,6 @@ def summarize_for_display(req: TranscribeRequest) -> Dict[str, Any]:
     """Request as shown in dry-run / logs: same fields, nothing secret to hide because none is accepted."""
     d = req.to_dict()
     d["input"] = os.path.basename(req.input)
+    if req.speech_regions is not None:
+        d["speech_regions"] = f"{len(req.speech_regions)} regions"
     return d

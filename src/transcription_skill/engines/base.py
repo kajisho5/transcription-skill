@@ -221,6 +221,13 @@ class TranscriptionEngine:
         not empty: an engine that returns nothing keeps every cache key it had. Default: {}."""
         return {}
 
+    def run_device(self) -> Optional[str]:
+        """Where recognition runs, as the engine names it ("cpu", "cuda", "cuda:0"), for the performance record of a
+        chunked run (ADR-042); None when the engine cannot tell without running. Must not load a model. Default: the
+        engine's `device` attribute when it has one."""
+        device = getattr(self, "device", None)
+        return device if isinstance(device, str) and device else None
+
     def doctor_rows(self) -> List[Dict[str, Any]]:
         """Extra `doctor` rows ({check, status, detail, ...}) about what the engine runs on: for an engine that
         wraps a program, its path, version and backend. Must not run recognition or download anything.

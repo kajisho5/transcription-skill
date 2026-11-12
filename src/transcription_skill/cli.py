@@ -56,6 +56,12 @@ def _transcribe_params(args: argparse.Namespace) -> Dict[str, Any]:
         p["allowed_input_roots"] = list(args.allowed_input)
     if args.speaker_turns:
         p["speaker_turns"] = args.speaker_turns
+    if args.chunk_seconds is not None:
+        p["chunk_seconds"] = args.chunk_seconds
+    if args.parallel is not None:
+        p["parallel"] = args.parallel
+    if args.speech_regions:
+        p["speech_regions"] = args.speech_regions
     budget: Dict[str, Any] = {}
     if args.timeout is not None:
         budget["timeout"] = args.timeout
@@ -99,6 +105,10 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
             if vocab:
                 print(f"  vocabulary {len(vocab)} word(s)")
             print(f"  budget    timeout {res['budget']['timeout']:g}s, max audio {res['budget']['max_audio_seconds']:g}s")
+            ck = res.get("chunking")
+            if ck:
+                print(f"  chunking  about {ck['approximate_chunks']} chunk(s) of {ck['chunk_seconds']:g}s, {ck['parallel']} at a time, "
+                      f"cuts from {ck['cuts_from']}")
             print(f"  cache     {c['status']} ({c['key'][:16]}...)   workspace {res['workspace']}")
             pp = res["path_policy"]
             print(f"  input policy {pp['mode']}" + (f": {', '.join(pp['allowed_roots'])}" if pp["allowed_roots"] else ""))
@@ -116,6 +126,10 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
           f"engine {doc['engine']} {doc['engine_version']} model {doc['provenance']['model']}{' [cache hit]' if res['cache_hit'] else ''}")
     for seg in doc["segments"]:
         print(f"  {_fmt_time(seg['start'])} --> {_fmt_time(seg['end'])}  {seg['text']}")
+    ck = doc["provenance"].get("chunking")
+    if ck:
+        print(f"chunks: {ck['chunk_count']} ({ck['chunks_from_cache']} from the chunk cache), device {ck['device']}, "
+              f"realtime factor {ck['realtime_factor']}")
     for w in list(res["warnings"]) + list(doc["warnings"]):
         sys.stderr.write(f"warning: {w}\n")
     print(f"wrote {out}")
@@ -279,14 +293,17 @@ def cmd_cache(args: argparse.Namespace) -> int:
     poking at the workspace directory by hand (useful on a field machine where the cache accumulates
     across many jobs and disk space is limited)."""
     from .cache import TranscriptCache
+    from .chunking import ChunkCache
     cache = TranscriptCache(args.workspace or default_workspace())
+    chunks = ChunkCache(args.workspace or default_workspace())
     if args.cache_action == "size":
         size = cache.size_bytes()
         count = cache.count()
         if args.json:
-            _print_json({"entries": count, "size_bytes": size})
+            _print_json({"entries": count, "size_bytes": size, "chunk_entries": chunks.count(), "chunk_size_bytes": chunks.size_bytes()})
         else:
-            print(f"{count} entries, {size} bytes ({size / (1024 * 1024):.1f} MiB)")
+            print(f"{count} entries, {size} bytes ({size / (1024 * 1024):.1f} MiB); {chunks.count()} chunk entries, "
+                  f"{chunks.size_bytes()} bytes")
         return 0
     if args.cache_action == "list":
         entries = cache.list_entries()
@@ -298,10 +315,11 @@ def cmd_cache(args: argparse.Namespace) -> int:
             print(f"{len(entries)} entries")
         return 0
     removed = cache.clear()
+    removed_chunks = chunks.clear()
     if args.json:
-        _print_json({"removed": removed})
+        _print_json({"removed": removed, "removed_chunks": removed_chunks})
     else:
-        print(f"removed {removed} cache entries")
+        print(f"removed {removed} cache entries and {removed_chunks} chunk entries")
     return 0
 
 
@@ -419,6 +437,11 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--allowed-output", action="append", metavar="DIR", help="only write the transcript JSON inside DIR (repeatable); default: anywhere writable")
     t.add_argument("--speaker-turns", metavar="FILE", help="diarization-skill turns JSON (diarization-skill/turns@1) of the same file: fill "
                    "speaker_id after recognition (ADR-037); not part of the cache key")
+    t.add_argument("--chunk-seconds", type=float, metavar="S", help="long recordings: cut into chunks of about S seconds (30-3600) at "
+                   "pauses, cache each chunk, resume after a stop (ADR-042); needs --language")
+    t.add_argument("--parallel", type=int, metavar="N", help="with --chunk-seconds: recognize up to N chunks at a time (1-8, default 1)")
+    t.add_argument("--speech-regions", metavar="FILE", help="with --chunk-seconds: media-analysis-skill speech_regions JSON of the same "
+                   "file; cuts go in its pauses (default: the quietest point near each cut)")
     t.add_argument("-o", "--output", help="transcript JSON path (default <input>.transcript.json)")
     t.add_argument("--dry-run", action="store_true", help="show what would run (engine, model, language, budget, cache status) without running ASR")
     t.add_argument("--json", action="store_true", help="print one JSON document on stdout")
