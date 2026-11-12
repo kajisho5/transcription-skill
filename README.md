@@ -312,6 +312,7 @@ echo '{"tool":"transcription/transcribe","params":{"input":"lecture.mp4","langua
 transcription transcribe lecture.mp4 --offline         # hard no-network constraint (local engine + local model only)
 transcription engines --offline --language ja          # which engines satisfy these constraints
 transcription batch manifest.json                      # many requests, one process; one item's failure doesn't stop the rest
+transcription transcribe day1.mp4 --language en --chunk-seconds 600 --parallel 2   # long recording: chunked at pauses, resumable (ADR-042)
 ```
 
 `manifest.json` for `batch`: `{"items": [{"input": "a.mp4", "language": "ja"}, {"input": "b.mp4", "output": "b.transcript.json"}]}` --
@@ -418,6 +419,29 @@ maps the engine timings onto them:
   `INVALID_INPUT`, reason `dictionary_segmentation_unavailable`, and the install line. Other languages are refused
   (`dictionary_segmentation_language`): their engine words are already words.
 - A segment whose words cannot be mapped faithfully keeps its engine words and the transcript carries a warning.
+
+## Long recordings: chunked, parallel, resumable (ADR-042)
+
+For 2-8 h inputs (an all-day conference), `chunk_seconds` (CLI `--chunk-seconds`, 30-3600; `language` required) cuts the
+prepared audio into chunks of about that length and recognizes them separately:
+
+- Cuts go in pauses. With `speech_regions` (CLI `--speech-regions FILE`: a media-analysis-skill `speech_regions`
+  response, result or observation of the same file; `data.regions[] {start, end}`), each cut is the middle of the
+  longest pause between regions within ±20 % of `chunk_seconds` (at most ±60 s) of its target. Without it, or where no
+  pause between regions is in reach, the cut is the centre of the quietest 0.3 s in that window (a level measure); one
+  louder than -40 dBFS is recorded as a warning, since a word there may be split. Chunks cover the audio with no gap and
+  no overlap, so a cut in a pause cannot lose or double a word.
+- `parallel` (CLI `--parallel`, 1-8, default 1) chunks are recognized at a time, each in its own worker process.
+  It does not change the result or the cache key.
+- Each chunk's result is cached under `<workspace>/chunks/` as soon as it is done (keyed by the chunk's samples, the
+  engine, model and parameters). After a stop, a crash or a kill, the same request recognizes only the chunks that are
+  missing. `cache clear` removes chunk entries too. With `cache: false` nothing is cached and nothing resumes.
+- `provenance.chunking` records the chunks (start, end, how each cut was chosen, whether it came from the cache), the
+  `device` (`cpu`, `cuda`, ...), `engine_seconds`, `wall_seconds` and `realtime_factor` (wall seconds / media seconds).
+
+Measured with faster-whisper `tiny` on CPU (4 cores), on `en_short.wav` 24 times (188 s, 30 s chunks, six chunks): one
+pass 13.1 s; chunked 20.1 s (`parallel` 1), 13.4 s (2), 14.7 s (4); every run gave all 384 words. Each chunk loads the
+model again in its own worker, so short chunks cost more; use minutes, not seconds, on real recordings.
 
 ## Input boundary (allowed roots)
 

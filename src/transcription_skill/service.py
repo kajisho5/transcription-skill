@@ -14,10 +14,13 @@ import sys
 import threading
 import time
 import uuid
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import __version__
 from .cache import TranscriptCache, cache_key
+from .chunking import (ChunkCache, cut_warnings, join_results, pcm_fingerprint, plan_chunks, read_samples, same_fingerprint, wav_info,
+                       write_chunk)
 from .engines import TranscriptionEngine, get_engine
 from .engines.base import MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED, EngineRequest, EngineResult, refuse_model_language
 from .engines.faster_whisper import LANGUAGE_DETECTION_MIN_PROBABILITY
@@ -118,6 +121,9 @@ class TranscriptionService:
                                      {"engine": engine.id, "model": req.model, "availability": model.availability, "offline": req.offline})
         segmenter = get_segmenter() if req.word_segmentation == WORD_SEGMENTATION_DICTIONARY else None
         fp = fingerprint_file(path)
+        if req.speech_regions_fingerprint is not None and not same_fingerprint(req.speech_regions_fingerprint, fp):
+            raise TranscriptionError("INVALID_INPUT", f"speech_regions were measured on another file than {display_name}",
+                                     {"reason": "speech_regions_source_mismatch"})
         parameters = req.parameters()
         if segmenter is not None:   # a different SudachiPy / dictionary release can split words differently (ADR-039)
             parameters = dict(parameters, word_segmenter=segmenter.identity)
@@ -158,6 +164,11 @@ class TranscriptionService:
             "network_use": "none" if (req.offline or (not eng.requires_network and prep["model"].availability == MODEL_AVAILABLE))
                            else ("model download" if prep["model"].availability == MODEL_DOWNLOAD_REQUIRED else "recognition"),
             "budget": req.budget.to_dict(),
+            "chunking": None if req.chunk_seconds is None else
+                        {"chunk_seconds": req.chunk_seconds, "parallel": req.parallel,
+                         "cuts_from": "speech_regions" if req.speech_regions is not None else "level",
+                         "speech_regions": None if req.speech_regions is None else len(req.speech_regions),
+                         "approximate_chunks": max(1, int(round(prep["meta"]["duration"] / req.chunk_seconds)))},
             "cache": {"status": cache_status, "key": prep["cache_key"]},
             "workspace": ws,
             "would_run": cache_status != "hit",
@@ -194,18 +205,98 @@ class TranscriptionService:
                                  temperature=req.temperature, initial_prompt=req.initial_prompt, beam_size=req.beam_size, offline=req.offline,
                                  vad_filter=req.vad_filter, vocabulary=req.vocabulary, timeout=req.budget.timeout)
             t_engine = time.time()
-            result = self._run_engine(engine, ereq, req.budget.timeout, run_dir)
+            chunking: Optional[Dict[str, Any]] = None
+            if req.chunk_seconds is not None:
+                result, chunking = self._transcribe_chunked(req, prep, ereq, run_dir, ws, deadline=t0 + req.budget.timeout)
+            else:
+                result = self._run_engine(engine, ereq, req.budget.timeout, run_dir)
             engine_seconds = time.time() - t_engine
         finally:
             shutil.rmtree(run_dir, ignore_errors=True)
 
-        doc = build_transcript(req, prep, result, extraction, processing_seconds=time.time() - t0, engine_seconds=engine_seconds, warnings=warnings)
+        processing_seconds = time.time() - t0
+        doc = build_transcript(req, prep, result, extraction, processing_seconds=processing_seconds, engine_seconds=engine_seconds, warnings=warnings)
+        if chunking is not None:
+            duration = float(prep["meta"]["duration"])
+            chunking["wall_seconds"] = round(processing_seconds, 3)
+            chunking["realtime_factor"] = round(processing_seconds / duration, 4) if duration > 0 else None
+            doc["provenance"]["chunking"] = chunking
         rep = validate_transcript(doc, expected_fingerprint=prep["fingerprint"])
         if not rep.ok:
             raise TranscriptionError("INVALID_RESULT", "engine output failed transcript validation; no transcript returned", {"errors": rep.errors[:10]})
         if req.cache:
             cache.put(prep["cache_key"], doc)
         return {"transcript": doc, "cache_hit": False, "cache_key": prep["cache_key"], "warnings": warnings}
+
+    # ---- long recordings (ADR-042) ------------------------------------------------------------
+    def _transcribe_chunked(self, req: TranscribeRequest, prep: Dict[str, Any], ereq: EngineRequest, run_dir: str, ws: str,
+                            deadline: float) -> Tuple[EngineResult, Dict[str, Any]]:
+        """Cut the prepared WAV at pauses, recognize the chunks that are not cached yet (up to `req.parallel` at a time),
+        cache each one as soon as it is done, and join them on the recording's timeline."""
+        engine: TranscriptionEngine = prep["engine"]
+        wav = ereq.audio_path
+        frames, rate = wav_info(wav)
+        regions = None if req.speech_regions is None else [(float(a), float(b)) for a, b in req.speech_regions]
+        chunks = plan_chunks(frames, rate, req.chunk_seconds or 0.0, regions, lambda lo, hi: read_samples(wav, lo, hi))
+        # what shapes one chunk's recognition: the request's engine parameters, not how the recording was cut or what is
+        # done with the words after the join (dictionary segmentation)
+        params = {k: v for k, v in prep["parameters"].items() if k not in ("chunking", "word_segmentation", "word_segmenter")}
+        store = ChunkCache(ws) if req.cache else None
+        results: Dict[int, EngineResult] = {}
+        todo: List[Dict[str, Any]] = []
+        for c in chunks:
+            c["key"] = cache_key(pcm_fingerprint(wav, c["start_sample"], c["end_sample"]), engine.id, engine.version or "unknown",
+                                 engine.execution_mode, req.model, None, dict(params, unit="chunk"))
+            hit = store.get(c["key"]) if store is not None else None
+            c["from_cache"] = hit is not None
+            if hit is not None:
+                results[c["index"]] = hit["result"]
+                c["engine_seconds"] = hit["engine_seconds"]
+            else:
+                todo.append(c)
+
+        def run(c: Dict[str, Any]) -> None:
+            left = deadline - time.time()
+            if left <= 0:
+                raise TranscriptionError("TRANSCRIPTION_TIMEOUT", f"budget.timeout ({req.budget.timeout:g}s) used up before chunk {c['index']}",
+                                         {"timeout": req.budget.timeout, "chunk": c["index"]})
+            cdir = os.path.join(run_dir, f"chunk_{c['index']:05d}")
+            os.mkdir(cdir)
+            try:
+                cwav = os.path.join(cdir, "audio.wav")
+                write_chunk(wav, c["start_sample"], c["end_sample"], cwav)
+                creq = EngineRequest.from_dict(dict(ereq.to_dict(), audio_path=cwav, timeout=left))
+                t = time.time()
+                res = self._run_engine(engine, creq, left, cdir)
+                c["engine_seconds"] = round(time.time() - t, 3)
+            finally:
+                shutil.rmtree(cdir, ignore_errors=True)
+            if store is not None:
+                store.put(c["key"], res, c["engine_seconds"])
+            results[c["index"]] = res
+
+        if todo:
+            pool = ThreadPoolExecutor(max_workers=min(req.parallel, len(todo)))
+            try:
+                futures = [pool.submit(run, c) for c in todo]
+                done, _ = wait(futures, return_when=FIRST_EXCEPTION)
+                failed = [f for f in futures if f.done() and f.exception() is not None]
+                if failed:
+                    for f in futures:
+                        f.cancel()
+                    raise failed[0].exception()  # type: ignore[misc]
+            finally:
+                pool.shutdown(wait=True)
+        joined, notes = join_results([(c, results[c["index"]]) for c in chunks])
+        joined.warnings = cut_warnings(chunks) + notes
+        info = {"chunk_seconds": req.chunk_seconds, "parallel": req.parallel,
+                "cuts_from": "speech_regions" if regions is not None else "level",
+                "chunk_count": len(chunks), "chunks_from_cache": sum(1 for c in chunks if c["from_cache"]),
+                "chunks_recognized": len(todo), "device": engine.run_device() or "unknown",
+                "engine_seconds": round(sum(float(c.get("engine_seconds") or 0.0) for c in chunks), 3),
+                "chunks": [{"index": c["index"], "start": c["start"], "end": c["end"], "cut": c["cut"], "from_cache": c["from_cache"],
+                            "engine_seconds": c.get("engine_seconds")} for c in chunks]}
+        return joined, info
 
     # ---- engine execution with a real timeout -------------------------------------------------
     def _run_engine(self, engine: TranscriptionEngine, ereq: EngineRequest, timeout: float, run_dir: str) -> EngineResult:

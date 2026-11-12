@@ -280,6 +280,9 @@ class Qwen3AsrEngine(TranscriptionEngine):
         return ModelStatus(ALIGNER["repo"], "MISSING", MODEL_MISSING, None, None,
                            f"forced aligner ({ALIGNER['licence']}) not on this machine ({len(files)} file(s) missing); `{PULL_HINT}` fetches it")
 
+    def run_device(self) -> Optional[str]:
+        return self._device()
+
     def _device(self) -> str:
         if self.device != "auto":
             return self.device

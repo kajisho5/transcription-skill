@@ -36,6 +36,7 @@ CAPABILITIES = [
     "speaker_merge",            # speaker_id filled from diarization-skill turns (`transcription/speakers`, transcribe `speaker_turns`); ADR-037
     "word_index",               # every word carries `index`, 0-based and contiguous over the whole transcript; ADR-039
     "dictionary_word_segmentation",   # request `word_segmentation: "dictionary"` (ja, optional [ja] extra): dictionary words with `timing`, `pos`; ADR-039
+    "chunked_long_recordings",  # request `chunk_seconds`: cut at pauses, `parallel` chunks at a time, cached per chunk, resumable; ADR-042
 ]
 
 TOOLS: List[Dict[str, Any]] = [
@@ -46,9 +47,12 @@ TOOLS: List[Dict[str, Any]] = [
                "allowed_input_roots": "list[dir] | null", "dry_run": "bool", "vad_filter": "bool",
                "vocabulary": "{written form: list[reading]} | null",
                "word_segmentation": "engine | dictionary (dictionary: language ja and word_timestamps true; needs the optional [ja] extra)",
-               "speaker_turns": "diarization-skill/turns@1 document | path | null (merged after recognition, never cached)"},
+               "speaker_turns": "diarization-skill/turns@1 document | path | null (merged after recognition, never cached)",
+               "chunk_seconds": "30..3600 | null (chunked long recording, cut at pauses; needs language)",
+               "parallel": "1..8 (chunks recognized at a time; chunk_seconds only)",
+               "speech_regions": "media-analysis-skill speech_regions response | result | observation | path | null (chunk_seconds only)"},
      "output": {"transcript": "Transcript", "cache_hit": "bool", "cache_key": "sha256 hex", "warnings": "list[str]"}, "deterministic": True,
-     "side_effects": ["writes cache under workspace"]},
+     "side_effects": ["writes cache under workspace", "writes per-chunk cache under workspace (chunk_seconds)"]},
     {"name": "transcription/segments", "description": "Derive SpeechEvent-compatible candidates from a Transcript (one per segment, optional gap merge).",
      "input": {"transcript": "Transcript | path", "merge_gap": "seconds >= 0"}, "output": {"events": "list[SpeechEvent]"}, "deterministic": True, "side_effects": []},
     {"name": "transcription/export", "description": "Render a Transcript as json, srt, vtt, tsv or txt (plain timed text, no styling).",

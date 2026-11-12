@@ -336,6 +336,38 @@
             "null"
           ]
         },
+        "chunking": {
+          "description": "Present only on a chunked transcription (request chunk_seconds, ADR-042): how the recording was cut, which chunks came from the per-chunk cache, the device and the realtime factor (wall seconds of this run / media seconds).",
+          "type": "object",
+          "required": ["chunk_seconds", "parallel", "cuts_from", "chunk_count", "chunks_from_cache", "chunks_recognized", "device", "engine_seconds", "wall_seconds", "realtime_factor", "chunks"],
+          "properties": {
+            "chunk_seconds": {"type": "number"},
+            "parallel": {"type": "integer", "minimum": 1},
+            "cuts_from": {"enum": ["speech_regions", "level"]},
+            "chunk_count": {"type": "integer", "minimum": 1},
+            "chunks_from_cache": {"type": "integer", "minimum": 0},
+            "chunks_recognized": {"type": "integer", "minimum": 0},
+            "device": {"type": "string"},
+            "engine_seconds": {"type": "number"},
+            "wall_seconds": {"type": "number"},
+            "realtime_factor": {"type": ["number", "null"]},
+            "chunks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["index", "start", "end", "cut", "from_cache"],
+                "properties": {
+                  "index": {"type": "integer", "minimum": 0},
+                  "start": {"type": "number"},
+                  "end": {"type": "number"},
+                  "cut": {"type": "object", "required": ["source"], "properties": {"source": {"enum": ["speech_regions", "level", "end"]}}},
+                  "from_cache": {"type": "boolean"},
+                  "engine_seconds": {"type": ["number", "null"]}
+                }
+              }
+            }
+          }
+        },
         "skill": {
           "type": "string",
           "const": "transcription-skill"
