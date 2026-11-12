@@ -1,5 +1,5 @@
 # The heavy test jobs, manual trigger only (owner decision on Actions minutes, ADR-036): `integration`
-# downloads the faster-whisper `base` model, `engines` downloads speech.cpp and pulls its models, `qwen3_asr`
+# downloads the faster-whisper `base` model (on Python 3.11 and 3.13, ADR-044), `engines` downloads speech.cpp and pulls its models, `qwen3_asr`
 # installs qwen-asr and fetches Qwen3-ASR-1.7B and Qwen3-ForcedAligner-0.6B (ADR-041). They are
 # kept out of tests.yml, which runs the unit matrix on every pull request and push to main, so a PR never
 # spends minutes (or bandwidth) on them and never shows them as checks. Run from the Actions tab or
@@ -15,17 +15,25 @@ concurrency:
 
 jobs:
   integration:
+    # Two Pythons (ADR-044): PyAV 19 has wheels for Python 3.12+ only, so a 3.11 job alone never installs the newest
+    # PyAV and missed the faster-whisper 1.2.1 / PyAV 19 break. The newest Python gets whatever pip resolves today.
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
-        with: {python-version: "3.11"}
+        with: {python-version: "${{ matrix.python }}"}
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - uses: actions/cache@v6
         with:
           path: ~/.cache/huggingface/hub
-          key: faster-whisper-base-${{ runner.os }}
+          key: faster-whisper-base-${{ runner.os }}-py${{ matrix.python }}
       - run: pip install -e ".[faster-whisper]"
+      - name: The resolved faster-whisper, PyAV and CTranslate2 (job summary)
+        run: pip show faster-whisper av ctranslate2 | grep -E "^(Name|Version):" | paste - - | tee -a "$GITHUB_STEP_SUMMARY"
       - run: transcription doctor
       - run: python -m unittest -v tests/test_integration.py
       - run: python evals/run.py

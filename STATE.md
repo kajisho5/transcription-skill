@@ -23,7 +23,7 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   message explicitly
 - CI: `.github/workflows/tests.yml` runs the unit matrix (Ubuntu/Windows/macOS × Python 3.9/3.11) on every pull request
   and push to `main` (owner decision on Actions minutes, ADR-036); `.github/workflows/heavy-tests.yml` (`integration`
-  with faster-whisper `base`, `engines` with the real speech.cpp) stays `workflow_dispatch` only
+  with faster-whisper `base` on Python 3.11 and 3.13 (ADR-044), `engines` with the real speech.cpp) stays `workflow_dispatch` only
 
 ## What exists (CURRENT)
 - Transcript / Segment / Word model, validator, JSON Schemas (`transcript/0.1`, `speech-event/0.1`, `engine-spec/0.1`)
@@ -109,6 +109,8 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   Unit-tested with the exact tone fixture (growing WAV with a too-small header, 5 s windows); faster-whisper `tiny` on a
   47 s file written in 5 s windows (`FollowTests`): WER 0.010-0.021 against one pass (bound 0.1). Not run on a real
   recorder, on compressed growing formats, or for hours
+- PyAV 19 (Python 3.12+) — CURRENT: `faster_whisper` reads the prepared WAV itself and passes samples, so faster-whisper
+  1.2.1's `av.open(metadata_errors=...)` (removed in PyAV 19) is not on the recognition path (ADR-044); no version bound
 - Output boundary: opt-in `allowed_output_roots` / `--allowed-output` (transcribe, segments, export); inputs never overwritten
 - Tests: unit / security / paths / conformance (SKILL_SPEC §8, all eight checks) / words (ADR-039) / integration (real engine) ; evals 30 cases
 
@@ -309,3 +311,6 @@ two steps run this way in video-editing-skill and color-grading-skill.
   `cache_parameters` (empty for every other engine, so their cache keys are unchanged); extra `[qwen3-asr]`; manual
   `qwen3_asr` heavy job. Defaults unchanged. Version 0.11.0 bumped in `pyproject.toml`. Contract additive
   (`contract_version` 1.0); video-production-agent needs a re-pin.
+- 2026-11-12: PyAV 19 broke `faster_whisper` on Python 3.12+ (faster-whisper 1.2.1 passes `metadata_errors` to
+  `av.open`); the engine now reads the prepared WAV and passes samples (ADR-044). heavy-tests `integration` on Python
+  3.11 and 3.13. Patch bump 0.11.4 in `pyproject.toml`. Contract unchanged

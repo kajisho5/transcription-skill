@@ -174,6 +174,8 @@ under a daemon-thread timeout instead.
 
 
 - Dependency: `faster-whisper>=1.0` (CTranslate2). Install with `pip install ".[faster-whisper]"`.
+- Audio: the engine reads the prepared mono 16 kHz 16-bit PCM WAV itself and gives faster-whisper float32 samples, so
+  PyAV is not on the recognition path (faster-whisper 1.2.1 fails with PyAV 19 when given a path; ADR-044).
 - Device/compute: CPU, `int8` by default (`FasterWhisperEngine(device=..., compute_type=...)`).
 - Model cache location comes from `HF_HUB_CACHE` / `HF_HOME` only (input paths, workspace and request
   fields never influence it); it is reported by `doctor` as a root separate from the workspace.

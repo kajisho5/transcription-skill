@@ -1313,7 +1313,7 @@ def fake_faster_whisper(known=None, version="1.2.1"):
             fw.loads.append(name)
 
         def transcribe(self, audio, **kw):
-            fw.runs.append(kw)
+            fw.runs.append(dict(kw, audio=audio))
             words = [types.SimpleNamespace(start=0.5, end=1.0, word=" Good", probability=0.9),
                      types.SimpleNamespace(start=1.0, end=1.5, word=" morning.", probability=0.8)]
             seg = types.SimpleNamespace(start=0.5, end=1.5, text=" Good morning.", avg_logprob=-0.1, words=words)
@@ -1390,6 +1390,68 @@ class FasterWhisperModelTests(unittest.TestCase):
             self.assertEqual([w.text for w in res.segments[0].words], [" Good", " morning."])
             e.transcribe(self.ereq(model="large-v3", language=None))                 # a multilingual checkpoint still detects
             self.assertIsNone(fw.runs[1]["language"])
+
+
+class FakeSamples:
+    """What the fake numpy below gives: the bytes and dtype handed to frombuffer, the astype target and the divisor."""
+
+    def __init__(self, data, dtype):
+        self.data, self.dtype, self.cast, self.divisor = data, dtype, None, None
+
+    def astype(self, t):
+        self.cast = t
+        return self
+
+    def __truediv__(self, k):
+        self.divisor = k
+        return self
+
+
+class FasterWhisperDecodeTests(unittest.TestCase):
+    """faster_whisper gets the prepared WAV as samples, so PyAV is not on the recognition path (ADR-044): faster-whisper
+    1.2.1 passes `metadata_errors` to `av.open`, which PyAV 19 removed. Runs on every CI cell with a fake numpy (the real
+    one, PyAV 19 included, runs in the heavy-tests integration job on the newest Python)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ts_unit_fwdec_")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.np = types.ModuleType("numpy")
+        self.np.float32 = "float32"
+        self.np.frombuffer = lambda data, dtype: FakeSamples(data, dtype)
+
+    def wav(self, name, channels=1, rate=16000, width=2, frames=b"\x01\x00\xff\x7f\x00\x80"):
+        path = os.path.join(self.tmp, name)
+        with wave.open(path, "wb") as w:
+            w.setnchannels(channels)
+            w.setsampwidth(width)
+            w.setframerate(rate)
+            w.writeframes(frames)
+        return path
+
+    def test_the_prepared_wav_is_read_as_little_endian_s16_over_32768(self):
+        with unittest.mock.patch.dict(sys.modules, {"numpy": self.np}):
+            got = FW.prepared_audio(self.wav("a.wav"))
+        self.assertIsInstance(got, FakeSamples)
+        self.assertEqual((got.data, got.dtype, got.cast, got.divisor), (b"\x01\x00\xff\x7f\x00\x80", "<i2", "float32", 32768.0))
+
+    def test_anything_else_is_left_to_faster_whisper_as_the_path(self):
+        others = [self.wav("stereo.wav", channels=2, frames=b"\x00" * 8), self.wav("44k.wav", rate=44100),
+                  self.wav("u8.wav", width=1, frames=b"\x80" * 4), os.path.join(self.tmp, "missing.wav")]
+        notwav = os.path.join(self.tmp, "a.mp3")
+        Path(notwav).write_bytes(b"ID3\x03\x00" + b"\x00" * 64)
+        with unittest.mock.patch.dict(sys.modules, {"numpy": self.np}):
+            for path in others + [notwav]:
+                self.assertEqual(FW.prepared_audio(path), path)
+
+    def test_transcribe_hands_the_model_samples_not_the_path(self):
+        fw, modules = fake_faster_whisper()
+        path = self.wav("audio.wav")
+        with faster_whisper_faked(fw, dict(modules, numpy=self.np)):
+            FW.FasterWhisperEngine().transcribe(EngineRequest(audio_path=path, language="en", model="base", word_timestamps=True,
+                                                              temperature=0.0, initial_prompt=None, beam_size=5))
+        audio = fw.runs[0]["audio"]
+        self.assertIsInstance(audio, FakeSamples)
+        self.assertEqual((audio.dtype, audio.divisor), ("<i2", 32768.0))
 
 
 @unittest.skipUnless(HAVE_FFMPEG, "needs ffmpeg/ffprobe for probing and extraction")

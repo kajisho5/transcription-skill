@@ -11,6 +11,7 @@ import glob
 import math
 import os
 import shutil
+import wave
 from typing import Any, Dict, List, Optional
 
 from ..errors import TranscriptionError
@@ -32,12 +33,29 @@ MODEL_FACTS: Dict[str, Dict[str, Any]] = {
                           "repo": "distil-whisper/distil-large-v3.5-ct2", "since": (1, 2, 0)},
 }
 LANGUAGE_DETECTION_MIN_PROBABILITY = 0.5   # below this the transcript says "unknown" instead of guessing
+SAMPLE_RATE = 16000                         # the prepared audio (media.AUDIO_RECIPE) and what Whisper takes
 
 
 def checkpoint_languages(model: str) -> Optional[List[str]]:
     """The languages a Whisper checkpoint is limited to (MODEL_FACTS), or None; also read by the whisperx engine."""
     facts = MODEL_FACTS.get(model)
     return list(facts["languages"]) if facts else None
+
+
+def prepared_audio(path: str) -> Any:
+    """The prepared mono 16 kHz 16-bit PCM WAV as the float32 samples faster-whisper takes, read here so that PyAV is
+    not on the recognition path (ADR-044): faster-whisper 1.2.1 opens a path with `av.open(..., metadata_errors=...)`,
+    an argument PyAV 19 removed. The samples equal what its own decoder gives for that WAV (s16 / 32768). Anything
+    else (not a WAV, another layout, unreadable) is returned as the path, for faster-whisper to decode as before."""
+    try:
+        with wave.open(path, "rb") as w:
+            if (w.getnchannels(), w.getframerate(), w.getsampwidth(), w.getcomptype()) != (1, SAMPLE_RATE, 2, "NONE"):
+                return path
+            frames = w.readframes(w.getnframes())
+    except (OSError, EOFError, wave.Error):
+        return path
+    import numpy as np  # type: ignore  # a faster-whisper dependency
+    return np.frombuffer(frames, dtype="<i2").astype(np.float32) / 32768.0
 
 
 def _import():
@@ -190,7 +208,7 @@ class FasterWhisperEngine(TranscriptionEngine):
                                      {"availability": ms.availability, "model": request.model, "offline": request.offline})
         try:
             segments, info = model.transcribe(
-                request.audio_path, language=request.language, task="transcribe", beam_size=request.beam_size,
+                prepared_audio(request.audio_path), language=request.language, task="transcribe", beam_size=request.beam_size,
                 temperature=request.temperature, initial_prompt=request.initial_prompt, word_timestamps=request.word_timestamps,
                 condition_on_previous_text=True, vad_filter=request.vad_filter)
             out: List[EngineSegment] = []
