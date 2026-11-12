@@ -102,6 +102,13 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   188 s concatenated fixture (`LongRecordingTests`) gives the one-pass words at every join and resumes after a CLI kill.
   Not run on a real multi-hour recording, on a GPU, with another engine, or with real media-analysis speech regions
   (that kind is not shipped yet)
+- Recordings in progress (ADR-043, roadmap step 9) — EXPERIMENTAL: CLI `transcribe --follow` (`--window-seconds`,
+  `--idle-seconds`, `--poll-seconds`; `--language` required) re-reads the tail of a file being written every 5 s of new
+  audio, emits `partial` / `final` JSON lines (`follow-event/0.1`, finals never change, ids `seg_NNNN`), and writes the
+  validated transcript of the finals when the file stops growing or on Ctrl-C; not cached; CLI only (no `run -` tool).
+  Unit-tested with the exact tone fixture (growing WAV with a too-small header, 5 s windows); faster-whisper `tiny` on a
+  47 s file written in 5 s windows (`FollowTests`): WER 0.010-0.021 against one pass (bound 0.1). Not run on a real
+  recorder, on compressed growing formats, or for hours
 - Output boundary: opt-in `allowed_output_roots` / `--allowed-output` (transcribe, segments, export); inputs never overwritten
 - Tests: unit / security / paths / conformance (SKILL_SPEC §8, all eight checks) / words (ADR-039) / integration (real engine) ; evals 30 cases
 

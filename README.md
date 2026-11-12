@@ -443,6 +443,30 @@ Measured with faster-whisper `tiny` on CPU (4 cores), on `en_short.wav` 24 times
 pass 13.1 s; chunked 20.1 s (`parallel` 1), 13.4 s (2), 14.7 s (4); every run gave all 384 words. Each chunk loads the
 model again in its own worker, so short chunks cost more; use minutes, not seconds, on real recordings.
 
+## Recordings in progress: `transcribe --follow` (ADR-043)
+
+`transcription transcribe rec.wav --follow --language en` follows a file that is still being written. Each time it has
+grown by `--window-seconds` (default 5), the audio after the last final point is decoded (one bounded ffmpeg run over
+that tail) and recognized. stdout carries JSON lines (`transcription-skill/follow-event/0.1`):
+
+```json
+{"schema": "transcription-skill/follow-event/0.1", "type": "final", "segment": {"id": "seg_0001", "start": 1.0, "end": 3.1, "text": "Good morning everyone."}}
+{"schema": "transcription-skill/follow-event/0.1", "type": "partial", "committed_until": 3.4, "audio_seconds": 10.0, "segments": [{"id": "seg_0002", ...}]}
+{"schema": "transcription-skill/follow-event/0.1", "type": "end", "finals": 12, "audio_seconds": 47.1, "output": "/abs/rec.transcript.json", "warnings": []}
+```
+
+- A segment is final once it ends at least 1.5 s before the end of the audio read so far. It is emitted once and never
+  changes; the next tail starts at the quietest point after it. A `partial` event lists the current hypothesis for the
+  rest, with the ids those segments would get, and replaces the previous one. A tail longer than 25 s with no final
+  makes all segments but its last final.
+- The recording is over when the file has not changed for `--idle-seconds` (default 30), or on Ctrl-C / SIGTERM: the
+  rest becomes final and the validated transcript of the finals is written (`-o`, default `<input>.transcript.json`,
+  `provenance.follow`). It is not cached. `--language` is required.
+- Formats: whatever ffmpeg reads while it is written (WAV, with its header's sizes ignored until it is closed; FLAC, MP3,
+  Matroska, MPEG-TS). Not an MP4 / MOV whose index is written at the end.
+- Measured (faster-whisper `tiny`, CPU): `en_short.wav` 6 times (47 s) written in 5 s windows, every 2 s or every 0.5 s:
+  WER of the finals against one pass over the finished file 0.010 and 0.021.
+
 ## Input boundary (allowed roots)
 
 An input path is untrusted. By default any readable regular file is accepted (unchanged behaviour).

@@ -3,7 +3,7 @@
 ```bash
 pip install -e ".[faster-whisper]"          # engine needed for integration tests and evals
 pip install -e ".[ja]"                      # optional: SudachiPy + SudachiDict core, for the real-tokenizer cases of tests/test_words.py
-python -m unittest -v tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py tests/test_version_source.py tests/test_speechcpp.py tests/test_whisperx.py tests/test_words.py tests/test_qwen3_asr.py tests/test_chunking.py
+python -m unittest -v tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py tests/test_version_source.py tests/test_speechcpp.py tests/test_whisperx.py tests/test_words.py tests/test_qwen3_asr.py tests/test_chunking.py tests/test_follow.py
 python -m unittest -v tests/test_integration.py
 python evals/run.py
 ```
