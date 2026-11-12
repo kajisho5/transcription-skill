@@ -5,7 +5,7 @@ Written from a read-only audit of this repository on 2026-10-30. Each step below
 
 ## Where it stands
 
-0.10.0, version single-sourced from `pyproject.toml` (step 1). faster-whisper engine (plus optional haas_ja, speechcpp and whisperx), offline mode, cache, export json/srt/vtt/tsv/txt, batch, word index over the whole transcript and optional Japanese dictionary words (step 13), English and European model options with per-model language limits (step 14). Unit CI runs on every pull request (#41); heavy jobs are manual.
+0.11.0, version single-sourced from `pyproject.toml` (step 1). faster-whisper engine (plus optional haas_ja, speechcpp, whisperx and qwen3_asr), offline mode, cache, export json/srt/vtt/tsv/txt, batch, word index over the whole transcript and optional Japanese dictionary words (step 13), English and European model options with per-model language limits (step 14), Qwen3-ASR with forced-aligned word timestamps (step 15). Unit CI runs on every pull request (#41); heavy jobs are manual.
 
 ## What this repository owns
 
@@ -53,6 +53,8 @@ Agent wires transcribe (ADR-024), with diarization-skill's turns as `speaker_tur
   - Done when: mapping, POS, fallback, refusal and cache-key unit tests, the real tokenizer in the unit matrix; a run on real Japanese recognition output still to do
 - [x] **14. English and European model options** — `parakeet-tdt-0.6b-v3` on `speechcpp` (25 European languages, word timestamps, CC-BY-4.0 with its attribution recorded) and `distil-large-v3.5` on `faster_whisper` (English only, MIT); a model limited to some languages refuses another language, or none, before audio work; defaults unchanged, ADR-040 — [#52](https://github.com/kajisho5/transcription-skill/pull/52)
   - Done when: fake-binary and fake-module unit tests in the unit matrix; the European model on the English fixture in the manual `engines` job still to run
+- [x] **15. Word timings for Qwen3-ASR** — `qwen3_asr`: Qwen3-ASR-1.7B recognition plus Qwen3-ForcedAligner-0.6B word timestamps (both Apache-2.0, pinned revisions) through qwen-asr (optional `[qwen3-asr]` extra, Python 3.10+, CUDA GPU or CPU); 11 languages; every word time an aligner prediction, repaired values never used; never downloads while transcribing; defaults unchanged, ADR-041 — [#53](https://github.com/kajisho5/transcription-skill/pull/53)
+  - Done when: fake-module unit tests in the unit matrix; the real models on the Japanese and English fixtures in the manual `qwen3_asr` job still to run
 
 ## Boundaries
 

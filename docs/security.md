@@ -17,6 +17,11 @@
   model from the Hugging Face Hub on first use; that is the engine library's behaviour, reported ahead
   of time as `MODEL_DOWNLOAD_REQUIRED`, and disabled by `--offline` (or `download=False`), after which a
   missing model is `MODEL_UNAVAILABLE` / `MODEL_MISSING`.
+- The optional `qwen3_asr` engine (ADR-041) never downloads while transcribing: it loads Qwen3-ASR-1.7B and
+  Qwen3-ForcedAligner-0.6B from their snapshot folders at pinned revisions, by path and with `local_files_only`, never
+  by repository name, and hands qwen-asr the audio as samples, never as a path or URL (qwen-asr would fetch a URL). Its
+  models are fetched only by `transcription models pull Qwen3-ASR-1.7B --engine qwen3_asr`. qwen-asr's vLLM backend,
+  its `qwen-asr-serve` server and its demos are never used (static test).
 - The engine abstraction does not widen the execution boundary: engine modules may not import
   `subprocess` or call `os.exec*/spawn*/popen/system` (static test). The only process launch for an
   engine library is the service's fixed worker argv; an engine that wraps a program (`speechcpp`) builds a fixed

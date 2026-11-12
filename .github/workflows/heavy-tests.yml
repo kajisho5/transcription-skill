@@ -1,5 +1,6 @@
 # The heavy test jobs, manual trigger only (owner decision on Actions minutes, ADR-036): `integration`
-# downloads the faster-whisper `base` model, `engines` downloads speech.cpp and pulls its models. They are
+# downloads the faster-whisper `base` model, `engines` downloads speech.cpp and pulls its models, `qwen3_asr`
+# installs qwen-asr and fetches Qwen3-ASR-1.7B and Qwen3-ForcedAligner-0.6B (ADR-041). They are
 # kept out of tests.yml, which runs the unit matrix on every pull request and push to main, so a PR never
 # spends minutes (or bandwidth) on them and never shows them as checks. Run from the Actions tab or
 # `gh workflow run heavy-tests.yml --ref <branch>`.
@@ -91,4 +92,54 @@ jobs:
             transcription transcribe "tests/fixtures/$1" --engine speechcpp --model "$3" --language "$2" --word-timestamps --no-cache -o out.json
             transcription check out.json
             python -c "import json,sys; d=json.load(open('out.json')); print('|', sys.argv[1], '|', ' '.join(s['text'] for s in d['segments']), '|', [(s['start'], s['end'], len(s['words'] or [])) for s in d['segments']], '|')" "$3" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+  qwen3_asr:
+    # The optional qwen3_asr engine for real (ADR-041): qwen-asr 0.0.6 from PyPI on the CPU build of PyTorch, both models
+    # fetched once with `transcription models pull` at the revisions the engine pins (CI only; transcription itself never
+    # downloads), then the Japanese and English fixtures offline on the runner's CPU in bfloat16 (about 6.5 GB of weights
+    # in memory). The real-model tests that skip in every other job must run and pass here.
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      TRANSCRIPTION_TEST_QWEN3_ASR: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: {python-version: "3.11"}
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg time
+      - name: Make room for PyTorch and the models
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - name: Install qwen-asr with the CPU build of PyTorch
+        run: |
+          pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+          pip install --no-cache-dir -e ".[qwen3-asr]"
+          pip show qwen-asr torch transformers | grep -E "^(Name|Version):"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/huggingface/hub
+          key: qwen3-asr-1.7b-7278e1e7-forcedaligner-0.6b-c7cbfc20
+      - name: Fetch both models at the pinned revisions (CI only)
+        run: transcription models pull Qwen3-ASR-1.7B --engine qwen3_asr
+      - name: doctor reports the engine, the model, the aligner and the device
+        run: |
+          transcription doctor --offline --json | tee doctor.json
+          python -c "import json; r={c['check']: c for c in json.load(open('doctor.json'))['checks']}; assert r['engine:qwen3_asr']['status']=='AVAILABLE', r['engine:qwen3_asr']; assert r['model:qwen3_asr:Qwen3-ASR-1.7B']['availability']=='MODEL_AVAILABLE', r['model:qwen3_asr:Qwen3-ASR-1.7B']; assert r['model:qwen3_asr:aligner']['status']=='AVAILABLE'; print(r['qwen3_asr:device']['detail'])"
+      - name: qwen3_asr tests, the real-model ones included
+        run: |
+          set -o pipefail
+          python -m unittest -v tests/test_qwen3_asr.py 2>&1 | tee test.log
+          ! grep -E "\.\.\. skipped" test.log
+          for t in test_real_japanese_with_word_timestamps test_real_english_with_word_timestamps; do
+            grep -E "^$t .*\.\.\. ok$" test.log || { echo "::error::$t did not run and pass"; exit 1; }
+          done
+      - name: The Japanese and English fixtures through the CLI (job summary)
+        run: |
+          for run in "ja_short.wav ja" "en_short.wav en"; do
+            set -- $run
+            /usr/bin/time -v transcription transcribe "tests/fixtures/$1" --engine qwen3_asr --language "$2" --word-timestamps --offline --no-cache -o out.json 2> time.log
+            grep -E "Elapsed|Maximum resident" time.log
+            transcription check out.json
+            python -c "import json,sys; d=json.load(open('out.json')); print('|', sys.argv[1], '|', ' '.join(s['text'] for s in d['segments']), '|', [(w['text'], w['start'], w['end']) for s in d['segments'] for w in (s['words'] or [])], '|', d['warnings'], '|')" "$1" | tee -a "$GITHUB_STEP_SUMMARY"
           done

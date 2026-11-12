@@ -211,6 +211,13 @@ class TranscriptionEngine:
         before anything runs, and the selector rejects the engine for such a named model (ADR-040). Default: None."""
         return None
 
+    def cache_parameters(self, model: str) -> Dict[str, Any]:
+        """What else identifies a run of `model`, known before it runs and not in the request: the pinned revisions of
+        the models the engine loads, a second model it always loads (qwen3_asr's forced aligner, ADR-041). The service
+        merges it into the request parameters, so it is in `provenance.parameters` and the cache key, only when it is
+        not empty: an engine that returns nothing keeps every cache key it had. Default: {}."""
+        return {}
+
     def doctor_rows(self) -> List[Dict[str, Any]]:
         """Extra `doctor` rows ({check, status, detail, ...}) about what the engine runs on: for an engine that
         wraps a program, its path, version and backend. Must not run recognition or download anything.

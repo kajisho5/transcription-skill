@@ -270,7 +270,7 @@ class MediaTests(unittest.TestCase):
 
 class EngineContractTests(unittest.TestCase):
     def test_registry_lists_only_real_engines(self):
-        self.assertEqual(engine_ids(), ["faster_whisper", "haas_ja", "speechcpp", "whisperx"])   # all implemented; haas_ja, speechcpp and whisperx are optional (ADR-033, ADR-035, ADR-038)
+        self.assertEqual(engine_ids(), ["faster_whisper", "haas_ja", "qwen3_asr", "speechcpp", "whisperx"])   # all implemented; haas_ja, qwen3_asr, speechcpp and whisperx are optional (ADR-033, ADR-041, ADR-035, ADR-038)
         with self.assertRaises(TranscriptionError) as cm:
             get_engine("fake")
         self.assertEqual(cm.exception.code, "ENGINE_UNAVAILABLE")
@@ -988,7 +988,7 @@ class EngineEcosystemTests(unittest.TestCase):
 
     def test_default_registry_has_only_local_engines(self):
         reg = default_registry()
-        self.assertEqual(reg.ids(), ["faster_whisper", "haas_ja", "speechcpp", "whisperx"])
+        self.assertEqual(reg.ids(), ["faster_whisper", "haas_ja", "qwen3_asr", "speechcpp", "whisperx"])
         for eid in reg.ids():
             sp = reg.get(eid).spec()
             self.assertEqual((sp.execution_mode, sp.requires_network), ("local", False), eid)
@@ -1006,7 +1006,9 @@ class EngineEcosystemTests(unittest.TestCase):
         if insp.available:
             self.assertTrue(insp.models)
             self.assertEqual({m["model"] for m in insp.models}, set(insp.supported_models))
-            self.assertEqual([s.id for s in reg.find_by_language("ja")], ["faster_whisper"])
+            # the optional engines list Japanese only where they are installed (an unavailable spec lists no languages)
+            optional = [eid for eid in ("haas_ja", "qwen3_asr", "speechcpp", "whisperx") if "ja" in reg.get(eid).spec().supported_languages]
+            self.assertEqual([s.id for s in reg.find_by_language("ja")], sorted(["faster_whisper"] + optional))
         with self.assertRaises(TranscriptionError):
             reg.get("fake")                       # test engine is never in the production registry
         with self.assertRaises(TranscriptionError):
@@ -1092,7 +1094,7 @@ class EngineEcosystemTests(unittest.TestCase):
         c = skill_contract()
         self.assertEqual(c["engine_contract"]["execution_modes"], ["local", "remote"])
         self.assertEqual(c["schemas"]["engine_spec"], "transcription-skill/engine-spec/0.1")
-        self.assertEqual([e["id"] for e in c["engines"]], ["faster_whisper", "haas_ja", "speechcpp", "whisperx"])
+        self.assertEqual([e["id"] for e in c["engines"]], ["faster_whisper", "haas_ja", "qwen3_asr", "speechcpp", "whisperx"])
         schema = json.loads((ROOT / "schemas" / "engine_spec.schema.json").read_text(encoding="utf-8"))
         for e in c["engines"]:
             self.assertEqual(set(e), set(schema["required"]))

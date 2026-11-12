@@ -1,11 +1,13 @@
 # Engines
 
 transcription-skill is a transcription **capability**; engines are interchangeable implementations of
-one contract. Four engines are implemented and registered: `faster_whisper`, the Reference Local Engine;
+one contract. Five engines are implemented and registered: `faster_whisper`, the Reference Local Engine;
 `haas_ja` (Haas-ja-v1.0), an optional Japanese engine that is only usable on Linux with an NVIDIA GPU
 and Python 3.11+ (ADR-033); and `speechcpp`, an optional engine that runs speech.cpp's `speech` command
 (Metal, Vulkan or the CPU; no Python ML stack, no CUDA; ADR-035); and `whisperx`, an optional engine that adds wav2vec2
-forced alignment of words to faster-whisper output (Python 3.10+, English and Japanese, no diarization; ADR-038). Cloud ASR (any vendor) and whisper.cpp are *future possible engines*: the
+forced alignment of words to faster-whisper output (Python 3.10+, English and Japanese, no diarization; ADR-038); and `qwen3_asr`,
+an optional engine that runs Qwen3-ASR-1.7B with Qwen3-ForcedAligner-0.6B word timestamps through qwen-asr (Python 3.10+,
+11 languages, CUDA GPU or CPU; ADR-041). Cloud ASR (any vendor) and whisper.cpp are *future possible engines*: the
 contract can describe them, nothing in this repository implements them.
 
 ## Contract (`engines/base.py`)
@@ -28,6 +30,7 @@ class TranscriptionEngine:
     supports_vocabulary() -> bool         # takes a request `vocabulary` (default False)
     unsupported_parameters(params) -> list[str]   # set request parameters it cannot honour (default [])
     model_languages(model) -> list[str] | None    # the languages one model is limited to (ADR-040; default None)
+    cache_parameters(model) -> dict       # run identity beyond the request (pinned revisions, a second model; ADR-041; default {})
     model_capabilities() -> list[str]     # local_model / model_download (remote engines: none)
     model_status(model, offline=False) -> ModelStatus     # never downloads
     doctor_rows() -> list[dict]           # extra doctor rows (speechcpp: binary, backend); default []
@@ -78,6 +81,11 @@ with `details.model` and `details.supported`, before audio extraction (ADR-040).
 `model`, the engine's own `default_model` is used (`faster_whisper`: `base`, as before; `haas_ja`:
 `Haas-ja-v1.0`), read from the registered class without instantiating it.
 
+`cache_parameters(model)` names what identifies a run beyond the request and is known before it runs (ADR-041): the
+service merges a non-empty answer into the request parameters, so it is in `provenance.parameters` and the cache key.
+Only `qwen3_asr` returns one (`engine_identity`: both models as `repo@revision`, and the dtype); every other engine
+returns `{}` and keeps every cache key it had.
+
 Word segmentation is not an engine parameter. `word_segmentation: "dictionary"` (ADR-039) runs after recognition,
 in the service, on the engine's words, for every engine that gives word timestamps; it is never sent to the engine
 and no engine lists it in `unsupported_parameters`. The request is refused before anything runs when the language
@@ -119,6 +127,7 @@ contract tests and is never in the default registry (`tests/test_security.py` as
 | `haas_ja` | local | `engines/haas.py` | optional (Linux + NVIDIA GPU + Python 3.11+); unit-tested with a fake `haas_asr`, not yet run on a GPU |
 | `speechcpp` | local | `engines/speechcpp.py` | optional (speech.cpp's `speech` 0.10.0+ on PATH); unit-tested with a fake `speech`, real binary in the `engines` CI job |
 | `whisperx` | local | `engines/whisperx.py` | optional (Python 3.10+, `pip install whisperx`); en/ja with wav2vec2 alignment; unit-tested with a fake `whisperx`, not yet run for real |
+| `qwen3_asr` | local | `engines/qwen3_asr.py` | optional (Python 3.10+, the `[qwen3-asr]` extra); Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B word timestamps, 11 languages; unit-tested with a fake `qwen_asr`, real models in the manual `qwen3_asr` job (not yet run) |
 | cloud ASR | remote | none | future possible engine (contract only) |
 | whisper.cpp | local | none | future possible engine (contract only) |
 
@@ -287,8 +296,8 @@ fillers dropped by Haas, the `warnings` of each transcript (fallbacks to NeMo se
   offset by their region's start and `words` are built from the tokens as speech.cpp's `words_of` does (each kana or
   kanji token is a word; tokens of a spaced script join up to the next space; a word without duration joins the word
   before it). Qwen3-ASR gives no times in
-  speech.cpp, so each region is one segment and `words` is null, with a warning; a timed model that answers
-  `untimed` is treated the same. No time is interpolated.
+  speech.cpp, so each region is one segment and `words` is null, with a warning (Qwen3-ASR with word timestamps is the
+  `qwen3_asr` engine, ADR-041); a timed model that answers `untimed` is treated the same. No time is interpolated.
 - Languages: `ja` for ReazonSpeech, parakeet-tdt_ctc-0.6b-ja and Haas; parakeet-tdt-0.6b-v3's 25 European languages
   (`bg cs da de el en es et fi fr hr hu it lt lv mt nl pl pt ro ru sk sl sv uk`, its model card's and speech.cpp's
   catalog's); Qwen3-ASR's 30 (`ar cs da de el en es fa fi fil fr hi hu id it ja ko mk ms nl pl pt ro ru sv th tr vi yue
@@ -375,6 +384,66 @@ transcription transcribe talk.mp4 --engine speechcpp --model parakeet-tdt-0.6b-v
   from diarization-skill's turns (ADR-037).
 - `vad_filter`: whisperX always decodes voice-activity regions, so `false` is reported as a warning. `deterministic:
   false` until two real runs are shown identical.
+
+## qwen3_asr (optional Qwen3-ASR engine with forced-aligned words, ADR-041)
+
+- Models, both Apache-2.0 and pinned (verified 2026-11-12 on the cards; licences and every fact below are in ADR-041):
+
+  | role | model | revision | licence | files (bytes) |
+  |---|---|---|---|---|
+  | recognition | [Qwen/Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) | `7278e1e70fe206f11671096ffdd38061171dd6e5` | Apache-2.0 | 4,703,055,333 (bfloat16) |
+  | word timestamps | [Qwen/Qwen3-ForcedAligner-0.6B](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B) | `c7cbfc2048c462b0d63a45797104fc9db3ad62b7` | Apache-2.0 | 1,840,013,484 (bfloat16) |
+
+  Model name `Qwen3-ASR-1.7B` (the only one, the default); the aligner always comes with it.
+- Runtime: [qwen-asr](https://pypi.org/project/qwen-asr/0.0.6/) 0.0.6 (Apache-2.0), transformers backend
+  (`Qwen3ASRModel`, `Qwen3ForcedAligner`); the `[qwen3-asr]` extra (install line below; Python 3.10+; pulls PyTorch,
+  transformers 4.57.6, nagisa, soynlp, gradio and more). Never the vLLM backend, never a server. `qwen_asr` is imported
+  only after the Python check, and the engine checks that the entry points it uses are there.
+- Device: `cuda:0` when PyTorch sees a CUDA GPU, otherwise the CPU; bfloat16. No vendor memory figure exists; the weights
+  alone are about 6.5 GB. CPU speed is not known. `doctor` shows `model:qwen3_asr:Qwen3-ASR-1.7B`,
+  `model:qwen3_asr:aligner` and `qwen3_asr:device`.
+- Never downloads while transcribing: both models must be complete in the Hugging Face cache at the pinned revisions
+  (`$HF_HUB_CACHE` / `$HF_HOME/hub` / `~/.cache/huggingface/hub`) and are loaded by folder path, never by name. A missing
+  one is `MODEL_MISSING`, online or offline, with the command to run once: `transcription models pull Qwen3-ASR-1.7B
+  --engine qwen3_asr` (both repositories at the pinned revisions, about 6.5 GB). Without the skill:
+  `hf download Qwen/Qwen3-ASR-1.7B --revision 7278e1e70fe206f11671096ffdd38061171dd6e5` and the same for
+  `Qwen/Qwen3-ForcedAligner-0.6B --revision c7cbfc2048c462b0d63a45797104fc9db3ad62b7` (into the cache, not `--local-dir`).
+- Languages: the aligner's 11, `de en es fr it ja ko pt ru yue zh`. Qwen3-ASR's other 19 are refused here
+  (`speechcpp`'s `qwen3-asr-*` models recognize them without times). Language detection: without `--language`, Qwen3-ASR
+  identifies the language of each chunk; it reports no probability, so the transcript records `unknown` with the
+  candidate in `provenance.language_detection`. A chunk recognized in a language the aligner lacks is one segment
+  without words (warning).
+- Long recordings: cut at quiet points (`engines/longform.py`, the rule of haas-asr's `split_at_quiet_points`: ~30 s,
+  each cut at the quietest 0.1 s within 2 s, at most 32.05 s), far inside qwen-asr's limits of 1200 s per recognition
+  call and 180 s per alignment call. Each chunk is recognized, then aligned in its language; times are offset by the
+  chunk start.
+- Timing: every word time is a timestamp the aligner predicted (80 ms steps). qwen-asr repairs predictions that break the
+  time order (a neighbour's value, or linear interpolation for longer runs); the engine records which values the repair
+  changed and never uses them: a unit whose start or end was repaired, or that has no duration, is joined with its
+  neighbour. Segments are cut after `。？！.?!` and at pauses of 1 s or more. A chunk whose aligner units do not
+  reproduce its text is one segment spanning the chunk, without words (warning). Confidence: null.
+- Words: English and the other spaced languages give one word per spaced word, with its punctuation; Japanese gives
+  nagisa's words (the aligner's own units), in the recognized forms, so `--word-segmentation dictionary` re-splits them
+  into SudachiPy words as for any engine (ADR-039); Chinese and Cantonese give one word per character, each with its
+  own measured time (no Chinese segmenter is added).
+- Parameters: `initial_prompt`, `vad_filter` and `temperature > 0` are refused (`parameter_unsupported`); `beam_size`
+  is ignored with a warning; no `vocabulary`.
+- Cache and provenance: `provenance.parameters.engine_identity` names both models at their revisions and the dtype, so
+  the cache key changes when a pinned revision does; `model_version` is `<asr revision>+aligner:<aligner revision>`;
+  `engine_version` is the qwen-asr version. `deterministic: false` until two real runs are shown identical.
+- Vendor-measured alignment accuracy (the model card's accumulated average shift, lower is better): 42.9 ms on average
+  over its MFA-labelled sets (English 37.5, Japanese 42.2), 52.9 ms on their 300 s concatenations, 32.4 ms on its
+  human-labelled sets. Not measured here.
+
+### Trying qwen3_asr
+
+```bash
+pip install "transcription-skill[qwen3-asr] @ git+https://github.com/kajisho5/transcription-skill"   # Python 3.10+
+transcription models pull Qwen3-ASR-1.7B --engine qwen3_asr      # about 6.5 GB, once, online
+transcription doctor --offline                                    # engine:qwen3_asr, model rows, qwen3_asr:device
+transcription transcribe talk.mp4 --engine qwen3_asr --language ja --word-timestamps --offline -o talk.json
+transcription transcribe talk.mp4 --engine qwen3_asr --language en --word-timestamps --offline -o talk_en.json
+```
 
 ## Determinism
 

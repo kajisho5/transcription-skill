@@ -91,6 +91,8 @@ transcription transcribe talk.mp4 --engine speechcpp --model parakeet-tdt-0.6b-v
                                                            # English and 24 other European languages on speech.cpp, with word times
 transcription transcribe talk_en.mp4 --model distil-large-v3.5 --language en
                                                            # English-only distilled Whisper (faster-whisper 1.2.0+); other languages refused
+transcription transcribe talk.mp4 --engine qwen3_asr --language ja --word-timestamps
+                                                           # optional: Qwen3-ASR-1.7B + forced-aligned word times (11 languages)
 
 # hand off
 transcription export lecture.transcript.json --format srt -o lecture.srt
@@ -167,6 +169,7 @@ is chosen by constraints, never by the skill's own judgement.
 | `haas_ja` | `local` | **implemented, optional**: [Haas-ja-v1.0](https://huggingface.co/third-intelligence/Haas-ja-v1.0) via `haas-asr`; Japanese only; Linux + NVIDIA GPU + Python 3.11+; custom vocabulary; unit-tested against a fake `haas_asr`, **not yet run on a GPU** ([ADR-033](docs/decisions.md#adr-033-haas-ja-v10-is-an-optional-second-local-engine-haas_ja-with-token-timed-segments-and-a-custom-vocabulary)) |
 | `speechcpp` | `local` | **implemented, optional**: [speech.cpp](https://github.com/nyosegawa/speech.cpp)'s `speech` command (0.10.0+ on PATH) on Metal, Vulkan or the CPU; ReazonSpeech v2 / parakeet-tdt_ctc-0.6b-ja / Haas-ja-v1.0 (Japanese, word timestamps), parakeet-tdt-0.6b-v3 (25 European languages, word timestamps; [ADR-040](docs/decisions.md#adr-040-parakeet-tdt-06b-v3-on-speechcpp-distil-large-v35-on-faster_whisper-and-per-model-language-limits)) and Qwen3-ASR (30 languages, words null); models fetched with `speech pull`, never by the skill; unit-tested against a fake `speech`, the real binary runs in the `engines` CI job ([ADR-035](docs/decisions.md#adr-035-speechcpp-is-an-optional-local-engine-speechcpp-run-as-its-speech-command-through-mediarun_program)) |
 | `whisperx` | `local` | **implemented, optional**: [whisperX](https://github.com/m-bain/whisperX) (Python 3.10+, `pip install whisperx`): faster-whisper batched over voice-activity regions plus wav2vec2 forced alignment for word timestamps; English and Japanese (alignment models Apache-2.0); no diarization (speakers come from diarization-skill, ADR-037); unit-tested against a fake `whisperx`, **not yet run for real** ([ADR-038](docs/decisions.md#adr-038-whisperx-is-an-optional-local-engine-whisperx-for-wav2vec2-aligned-word-timestamps-it-does-not-diarize)) |
+| `qwen3_asr` | `local` | **implemented, optional**: [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) with [Qwen3-ForcedAligner-0.6B](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B) word timestamps (both Apache-2.0, pinned revisions) via qwen-asr (Python 3.10+, the `[qwen3-asr]` extra), on a CUDA GPU or the CPU; 11 languages; never downloads while transcribing (`models pull` once); unit-tested against a fake `qwen_asr`, the real models in the manual `qwen3_asr` job, **not yet run** ([ADR-041](docs/decisions.md#adr-041-qwen3-asr-17b-with-qwen3-forcedaligner-06b-is-an-optional-local-engine-qwen3_asr-for-word-timestamps)) |
 | cloud ASR (any vendor) | `remote` | future possible engine: expressible by the contract, **not implemented** |
 | whisper.cpp | `local` | future possible engine: expressible by the contract, **not implemented** |
 
@@ -266,6 +269,27 @@ transcription transcribe talk.mp4 --engine whisperx --language en --word-timesta
   `--speaker-turns` (ADR-037) to fill `speaker_id`.
 - Words the aligner cannot time (e.g. digits) join the neighbouring word, with a warning; segment `confidence` is null.
   `vad_filter` cannot be turned off (whisperX always decodes voice-activity regions).
+
+### Optional engine: `qwen3_asr` (Qwen3-ASR with aligned words)
+
+[Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) recognizes the speech and
+[Qwen3-ForcedAligner-0.6B](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B) times every word (both Apache-2.0), through
+Qwen's `qwen-asr` package on a CUDA GPU or the CPU. Python 3.10+ and PyTorch; the weights are about 6.5 GB.
+
+```bash
+pip install "transcription-skill[qwen3-asr] @ git+https://github.com/kajisho5/transcription-skill"   # Python 3.10+
+transcription models pull Qwen3-ASR-1.7B --engine qwen3_asr   # both models at their pinned revisions, once, online
+transcription doctor --offline                                # engine:qwen3_asr, model:qwen3_asr:aligner, qwen3_asr:device
+transcription transcribe talk.mp4 --engine qwen3_asr --language ja --word-timestamps --offline
+```
+
+- Languages: the aligner's 11 (`de en es fr it ja ko pt ru yue zh`). Without `--language` the model detects it, but it
+  gives no probability, so the transcript records `unknown`.
+- Every word time is one the aligner predicted (80 ms steps). A word whose time qwen-asr had to repair is joined with its
+  neighbour, with a warning. Japanese words are the aligner's words (`--word-segmentation dictionary` gives dictionary
+  words); Chinese words are characters.
+- It never downloads while transcribing; a missing model is `MODEL_MISSING` with the `models pull` command.
+  `--initial-prompt`, `--vad-filter` and a non-zero `--temperature` are refused.
 
 ## CLI
 

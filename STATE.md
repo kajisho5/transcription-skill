@@ -52,6 +52,15 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   forced alignment for word timestamps; `en` / `ja` only (alignment models Apache-2.0, licences read from the model
   cards); Python 3.10+; no diarization (speakers stay with diarization-skill, ADR-037). Unit-tested against a fake
   `whisperx` (`tests/test_whisperx.py`); **never run for real yet**
+- Optional engine `qwen3_asr` (ADR-041) — EXPERIMENTAL: Qwen3-ASR-1.7B for recognition plus Qwen3-ForcedAligner-0.6B
+  for word timestamps (both Apache-2.0, pinned revisions), through qwen-asr 0.0.6 (`pip install
+  "transcription-skill[qwen3-asr]"`, Python 3.10+), on a CUDA GPU or the CPU in bfloat16; the aligner's 11 languages;
+  language detection without a probability (recorded `unknown`); every word time is an aligner prediction (the values
+  qwen-asr's monotonic repair replaced are never used); long audio cut at quiet points (`engines/longform.py`, the
+  haas-asr rule); never downloads while transcribing (`models pull Qwen3-ASR-1.7B --engine qwen3_asr` fetches both);
+  `engine_identity` (both revisions, dtype) in `provenance.parameters` and the cache key through the new
+  `cache_parameters` engine hook. Unit-tested against a fake `qwen_asr` (`tests/test_qwen3_asr.py`); the manual
+  `qwen3_asr` job runs the real models on the fixtures; **never run for real yet** (that job has not run)
 - Deterministic cache keyed by content fingerprint + engine id/version/execution_mode + model/model_version + parameters
 - Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt/tsv/txt), `speakers` (ADR-037), `check`, `batch` (many transcribe
   requests, one process; one item's failure never aborts the rest); CLI: doctor, transcribe, segments, export, check,
@@ -157,7 +166,12 @@ v1 (batch mode, language force-selection, long-recording timeout fix, tsv/txt ex
 8. **Run `whisperx` for real** (ADR-038): `pip install whisperx` on Python 3.10+, `models pull large-v3 --engine whisperx`,
    transcribe the same English (and Japanese) talk with `faster_whisper --word-timestamps` and `whisperx`, compare the
    word times against the audio in the SRTs, speed and memory; check two runs for identity (then flip `deterministic`).
-9. **PyPI distribution** (lower priority, needs a human decision, not just code): currently git-only
+9. **Run `qwen3_asr` for real** (ADR-041): trigger the manual `qwen3_asr` job (heavy-tests.yml) and record whether it
+   passes, its wall-clock time and peak memory on the CPU; then on a CUDA GPU transcribe a real talk with `qwen3_asr` and
+   `whisperx` / `faster_whisper --word-timestamps`, compare word times against the audio (SRT), count the warnings about
+   repaired timestamps and chunks without words, and check two runs for identity (then flip `deterministic`). Decide
+   on `initial_prompt` → qwen-asr's `context` once its effect is documented or measured.
+10. **PyPI distribution** (lower priority, needs a human decision, not just code): currently git-only
    because `PYPI_API_TOKEN` isn't configured (`.github/workflows/release.yml`'s publish step is skipped
    by design). Adding it is an operational/account decision (a PyPI project + token), not something a
    session should do unprompted — listed here so it isn't forgotten, not as work to start on its own.
@@ -273,3 +287,9 @@ two steps run this way in video-editing-skill and color-grading-skill.
   `distil-large-v3.5` (MIT, English only, faster-whisper 1.2.0+); per-model language limits refused before audio work.
   Defaults unchanged. Version 0.10.0 bumped in `pyproject.toml`. Contract additive (`contract_version` 1.0);
   video-production-agent needs a re-pin.
+- 2026-11-12: optional engine `qwen3_asr` (ADR-041): Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B (Apache-2.0, pinned
+  revisions) through qwen-asr 0.0.6, word timestamps from the aligner's own predictions only, 11 languages, never
+  downloads while transcribing; `engines/longform.py` (haas-asr's quiet-point cut rule in plain Python); engine hook
+  `cache_parameters` (empty for every other engine, so their cache keys are unchanged); extra `[qwen3-asr]`; manual
+  `qwen3_asr` heavy job. Defaults unchanged. Version 0.11.0 bumped in `pyproject.toml`. Contract additive
+  (`contract_version` 1.0); video-production-agent needs a re-pin.
