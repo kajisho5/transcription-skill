@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.1 - 2026-11-12
+
+- fix(qwen3_asr): split space-separated words out of an untimed group (#54) (adb71b7)
+
 ## 0.11.0 - 2026-11-12
 
 - Optional qwen3_asr engine: Qwen3-ASR-1.7B with forced-aligned word timestamps (ADR-041) (#53) (3580085)
