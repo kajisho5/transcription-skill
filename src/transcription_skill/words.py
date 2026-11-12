@@ -20,6 +20,7 @@ the segment keeps its engine words and the transcript carries a warning. Nothing
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -160,11 +161,20 @@ def map_dictionary_words(segment_text: str, engine_words: List[Dict[str, Any]],
 
 
 # ---- the SudachiPy segmenter -------------------------------------------------------------------
+def _normalise_dist(name: str) -> str:
+    return re.sub(r"[-_.]+", "_", name).lower()
+
+
 def _dist_version(module: Any, dist: str) -> str:
     """Version of an installed distribution from the dist-info next to its module (no metadata API import)."""
     try:
         base = Path(module.__file__).resolve().parents[1]
-        for meta in sorted(base.glob(f"{dist}-*.dist-info/METADATA")):
+        # dist-info names are not case- or separator-stable across wheel builds
+        # (``SudachiDict_core-...``, ``sudachidict-core-...``): compare normalised names.
+        wanted = _normalise_dist(dist)
+        metas = sorted(m for m in base.glob("*.dist-info/METADATA")
+                       if _normalise_dist(m.parent.name[: -len(".dist-info")].rsplit("-", 1)[0]) == wanted)
+        for meta in metas:
             for line in meta.read_text(encoding="utf-8", errors="replace").splitlines():
                 if line.startswith("Version:"):
                     return line.split(":", 1)[1].strip()
