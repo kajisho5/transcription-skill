@@ -106,6 +106,9 @@ class EngineWord:
     end: float
     text: str
     confidence: Optional[float] = None
+    # None: the engine's own word time. "interpolated": at least one boundary is an estimate the engine
+    # had to make (e.g. qwen3_asr splitting a group the aligner gave no inner boundary for; ADR-041)
+    timing: Optional[str] = None
 
 
 @dataclass

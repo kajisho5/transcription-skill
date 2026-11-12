@@ -110,12 +110,14 @@ def map_dictionary_words(segment_text: str, engine_words: List[Dict[str, Any]],
     Returns (dictionary words, None) or (None, reason) when the mapping cannot be made faithfully."""
     target = _strip_ws(segment_text)
     units: List[Tuple[int, int, float, float, Optional[float]]] = []   # (char offset, length, start, end, confidence)
+    estimated: List[bool] = []      # the engine marked this word's times as its own estimate (timing "interpolated")
     offset = 0
     for w in engine_words:
         t = _strip_ws(str(w["text"]))
         if not t:
             return None, "an engine word has no text"
         units.append((offset, len(t), float(w["start"]), float(w["end"]), w.get("confidence")))
+        estimated.append(w.get("timing") == TIMING_INTERPOLATED)
         offset += len(t)
     if "".join(_strip_ws(str(w["text"])) for w in engine_words) != target:
         return None, "engine words do not reproduce the segment text"
@@ -138,9 +140,9 @@ def map_dictionary_words(segment_text: str, engine_words: List[Dict[str, Any]],
         char == unit offset + length); measured when it is the unit's own edge."""
         o, n, s, e, _c = units[unit]
         if char == o:
-            return s, True
+            return s, not estimated[unit]
         if char == o + n:
-            return e, True
+            return e, not estimated[unit]
         return round(s + (e - s) * (char - o) / n, TIME_DECIMALS), False
 
     out: List[Dict[str, Any]] = []

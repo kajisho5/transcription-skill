@@ -41,7 +41,7 @@ The validator in `validate.py` is the executable form of this document; `transcr
 | `start`, `end` | seconds | `start < end`, contained in the segment (±0.01 s), ordered |
 | `text` | string | whitespace-trimmed token text |
 | `confidence` | number in [0,1] \| null | engine word probability when available; for a dictionary word, the lowest confidence of the engine words it overlaps (`null` if any of them has none) |
-| `timing` | `measured` \| `interpolated`, optional | dictionary words only (below). Absent on engine words, whose times are what the engine reported |
+| `timing` | `measured` \| `interpolated`, optional | dictionary words (below), and an engine word whose times are partly the engine's own estimate (`interpolated`, ADR-041 addendum). Absent on an engine word whose times are what the engine reported |
 | `pos` | enum, optional | dictionary words only: coarse part of speech, one of the fixed set below |
 | `speaker_id` | string \| null, optional | present only after a speaker merge (ADR-037): the word's own speaker or `null` |
 

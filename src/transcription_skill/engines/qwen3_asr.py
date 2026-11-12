@@ -24,7 +24,8 @@ monotonic order with `fix_timestamp`: a run of up to two is given a neighbour's 
 interpolated between its neighbours. Those repaired values are not measurements, so the engine records which values
 the repair changed and never uses them: a word whose start or end was repaired is joined with its neighbour, so every
 word starts and ends on a timestamp the aligner predicted itself. A word without duration (two equal 80 ms
-timestamps) is joined with the next word in the same way. A chunk whose words cannot be timed this way keeps its text
+timestamps) is joined with the next word in the same way; when that leaves several space-separated words in one
+group, they are split at the spaces and the group's time shared out by characters, marked ``timing: "interpolated"``. A chunk whose words cannot be timed this way keeps its text
 as one segment spanning the chunk, without words, with a warning.
 """
 from __future__ import annotations
@@ -251,7 +252,7 @@ class Qwen3AsrEngine(TranscriptionEngine):
         if entry is None:
             return {}
         return {"engine_identity": {"asr": f"{entry['repo']}@{entry['revision']}", "aligner": f"{ALIGNER['repo']}@{ALIGNER['revision']}",
-                                    "dtype": self.dtype}}
+                                    "dtype": self.dtype, "words": WORD_RULES}}
 
     # ---- model resolution (never downloads)
     def model_status(self, model: str, offline: bool = False) -> ModelStatus:
@@ -444,6 +445,11 @@ class TimestampRecorder:
         return out
 
 
+# The version of how aligner items become words. It is part of the cache identity, so a transcript cached under an
+# earlier rule is computed again instead of being served with words grouped the old way. 2: a group of several
+# space-separated words is split, with timing "interpolated" (ADR-041 addendum); 1 (unmarked): kept as one word.
+WORD_RULES = 2
+
 AlignedItem = Tuple[str, float, float, bool, bool]   # text, start s, end s, start is the aligner's own, end is the aligner's own
 
 
@@ -571,6 +577,32 @@ def timed_groups(items: Sequence[AlignedItem], duration: float) -> Tuple[Optiona
     return groups, unused
 
 
+def split_group(group_parts: Sequence[str], start: float, end: float) -> List[Tuple[str, float, float, Optional[str]]]:
+    """One timed group -> its words. A group of several items exists only because the aligner gave no own boundary
+    between them (an item without duration, or a repaired timestamp). In space-delimited text such a group can hold
+    several words ("to the"); it is split at the spaces between its items, the group's time shared out by the words'
+    character counts, and every word of it is marked ``timing: "interpolated"`` (its outer edges stay the aligner's own;
+    the inner ones are estimates). A group with no space between its items (CJK) stays one word with measured times."""
+    words: List[List[str]] = [[]]
+    for k, part in enumerate(group_parts):
+        if k and (group_parts[k - 1][-1:].isspace() or part[:1].isspace()) and "".join(words[-1]).strip():
+            words.append([])
+        words[-1].append(part)
+    texts = ["".join(w) for w in words]
+    if len(texts) == 1:
+        return [(texts[0], start, end, None)]
+    sizes = [max(1, len(t.strip())) for t in texts]
+    total = float(sum(sizes))
+    out: List[Tuple[str, float, float, Optional[str]]] = []
+    t0, acc = start, 0
+    for i, (t, n) in enumerate(zip(texts, sizes)):
+        acc += n
+        t1 = end if i == len(texts) - 1 else round(start + (end - start) * acc / total, 6)
+        out.append((t, t0, t1, "interpolated"))
+        t0 = t1
+    return out
+
+
 def _ends_sentence(text: str) -> bool:
     t = text.rstrip()
     while t and (unicodedata.category(t[-1]) in ("Pe", "Pf") or t[-1] in "\"'"):
@@ -599,15 +631,18 @@ def chunk_segments(text: str, items: Optional[Sequence[AlignedItem]], offset: fl
         return [chunk_segment(text, offset, duration)]
     if unused:
         warnings.append(f"{where}: {unused} aligner timestamp(s) that qwen-asr's monotonic repair replaced (or that fell outside the "
-                        "chunk) were not used; the affected words were joined with a neighbour")
+                        "chunk) were not used; the affected words were joined with a neighbour (no space between them) or share their "
+                        "neighbour's time by characters, marked timing \"interpolated\"")
     parts = pieces(text, spans)
-    words = [("".join(parts[a:b + 1]), offset + st, offset + en) for a, b, st, en in groups]
+    words: List[Tuple[str, float, float, Optional[str]]] = []
+    for a, b, st, en in groups:
+        words.extend(split_group(parts[a:b + 1], offset + st, offset + en))
     out: List[EngineSegment] = []
-    cur: List[Tuple[str, float, float]] = []
+    cur: List[Tuple[str, float, float, Optional[str]]] = []
 
     def close() -> None:
         seg_text = "".join(w[0] for w in cur).strip()
-        ws = [EngineWord(start=round(s, 6), end=round(e, 6), text=t.strip()) for t, s, e in cur if t.strip()]
+        ws = [EngineWord(start=round(s, 6), end=round(e, 6), text=t.strip(), timing=tm) for t, s, e, tm in cur if t.strip()]
         out.append(EngineSegment(start=round(cur[0][1], 6), end=round(cur[-1][2], 6), text=seg_text, confidence=None,
                                  words=(ws or None) if word_timestamps else None))
 

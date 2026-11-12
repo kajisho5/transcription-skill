@@ -363,7 +363,8 @@ class ModelTests(unittest.TestCase):
             e = Q.Qwen3AsrEngine()
             self.assertEqual(e.cache_parameters(Q.ASR_MODEL), {"engine_identity": {
                 "asr": f"Qwen/Qwen3-ASR-1.7B@{ASR['revision']}", "aligner": f"Qwen/Qwen3-ForcedAligner-0.6B@{Q.ALIGNER['revision']}",
-                "dtype": "bfloat16"}})
+                "dtype": "bfloat16", "words": Q.WORD_RULES}})
+            self.assertEqual(Q.WORD_RULES, 2)   # word-splitting rule of the ADR-041 addendum: older cache entries are not reused
             self.assertEqual(e.cache_parameters("other"), {})
 
 
@@ -414,17 +415,35 @@ class TranscribeTests(unittest.TestCase):
         stamps[4] = 900
         res = self.run_engine(fake_qwen_asr([("English", EN_TEXT)], [stamps]))
         s0 = res.segments[0]
-        self.assertEqual([(w.text, w.start, w.end) for w in s0.words], [("Good", 1.0, 1.32), ("morning, everyone.", 1.32, 2.4)])
+        # the repaired boundary is not used: "morning," and "everyone." share [1.32, 2.4] by characters, marked as estimates
+        self.assertEqual([(w.text, w.start, w.end, w.timing) for w in s0.words],
+                         [("Good", 1.0, 1.32, None), ("morning,", 1.32, 1.828235, "interpolated"), ("everyone.", 1.828235, 2.4, "interpolated")])
         self.assertTrue(all(w.start != 1.8 for s in res.segments for w in s.words))
         self.assertTrue(any("1 aligner timestamp(s)" in w and "repair" in w for w in res.warnings), res.warnings)
 
-    def test_a_word_without_duration_joins_the_next(self):
+    def test_a_word_without_duration_is_split_out_of_its_group_with_interpolated_times(self):
         stamps = list(EN_STAMPS)
         stamps[8:10] = [4000, 4000]                         # "to" at one 80 ms step, no duration
         res = self.run_engine(fake_qwen_asr([("English", EN_TEXT)], [stamps]))
-        self.assertEqual([(w.text, w.start, w.end) for w in res.segments[1].words],
-                         [("Welcome", 3.6, 4.0), ("to the", 4.0, 4.24), ("conference.", 4.24, 4.96)])
+        # the aligner gave no boundary between "to" and "the": the group [4.0, 4.24] is shared out by characters
+        # (2 : 3), each word marked as an estimate; the group's outer edges stay the aligner's own
+        self.assertEqual([(w.text, w.start, w.end, w.timing) for w in res.segments[1].words],
+                         [("Welcome", 3.6, 4.0, None), ("to", 4.0, 4.096, "interpolated"), ("the", 4.096, 4.24, "interpolated"),
+                          ("conference.", 4.24, 4.96, None)])
+        self.assertTrue(all(" " not in w.text for s in res.segments for w in s.words))
         self.assertEqual(res.warnings, [])
+
+    def test_a_group_without_spaces_stays_one_measured_word(self):
+        # CJK: an item without duration joins the next and the group is one word with the aligner's own edges
+        res = self.run_engine(fake_qwen_asr([("Chinese", "你好，世界。")], [[0, 0, 0, 400, 480, 720, 720, 960]]), language="zh")
+        self.assertEqual([(w.text, w.start, w.end, w.timing) for w in res.segments[0].words],
+                         [("你好，", 0.0, 0.4, None), ("世", 0.48, 0.72, None), ("界。", 0.72, 0.96, None)])
+
+    def test_split_group_shares_time_by_characters(self):
+        from transcription_skill.engines.qwen3_asr import split_group
+        self.assertEqual(split_group(["first ", "session "], 4.56, 5.36),
+                         [("first ", 4.56, 4.893333, "interpolated"), ("session ", 4.893333, 5.36, "interpolated")])
+        self.assertEqual(split_group(["你", "好"], 0.0, 0.4), [("你好", 0.0, 0.4, None)])
 
     def test_japanese_words_are_the_tokenizer_words_and_keep_the_recognized_forms(self):
         text = "ＧＰＵで１２３件、処理しました。次です。"
@@ -693,6 +712,18 @@ class ServiceTests(unittest.TestCase):
         self.assertTrue(again["cache_hit"])
         self.assertEqual(key, res["cache_key"])
         self.assertNotEqual(other, key)                              # another pinned aligner revision is another computation
+
+    def test_split_words_carry_their_estimate_into_the_transcript(self):
+        stamps = list(EN_STAMPS)
+        stamps[8:10] = [4000, 4000]                         # "to" without duration: "to" and "the" share one group
+        mod = fake_qwen_asr([("English", EN_TEXT)], [stamps])
+        with Env(mod) as env:
+            env.put_both()
+            t = self.svc().transcribe(self.req())["transcript"]
+        self.assertTrue(validate_transcript(t).ok, validate_transcript(t).errors)
+        words = [w for s in t["segments"] for w in s["words"]]
+        self.assertEqual([w["text"] for w in words], ["Good", "morning,", "everyone.", "Welcome", "to", "the", "conference."])
+        self.assertEqual([w.get("timing") for w in words], [None, None, None, None, "interpolated", "interpolated", None])
 
     def test_detected_language_without_probability_is_recorded_unknown(self):
         mod = fake_qwen_asr([("English", EN_TEXT)], [EN_STAMPS])
