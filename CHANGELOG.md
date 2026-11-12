@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.4 - 2026-11-12
+
+- faster_whisper: read the prepared WAV itself so PyAV 19 does not break recognition (ADR-044) (#57) (2113f2c)
+
 ## 0.11.3 - 2026-11-12
 
 - Recordings in progress: transcribe --follow with finals that never change (ADR-043) (#56) (c781d2c)
