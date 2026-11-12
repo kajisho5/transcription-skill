@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0 - 2026-11-12
+
+- feat(words): word index over the whole transcript; optional Japanese dictionary words (ADR-039) (#50) (6e1fb77)
+- fix(release): Dependabot labels cannot raise the release level (#49) (836a147)
+- Build(deps): Bump release-drafter/release-drafter from 6.4.0 to 7.10.0 (#48) (809a093)
+- docs(roadmap): no live-streaming context (out of scope) (#47) (e4e6813)
+- docs(roadmap): field review steps 9-12 (2026-11-05) (#46) (dc9e283)
+- docs(roadmap): step 8 (script alignment with stable-ts) and review (#45) (4a3d0d0)
+
 ## 0.8.0 - 2026-10-31
 
 - feat(engines): optional whisperX engine with wav2vec2 word alignment (ADR-038) (#44) (220a3f4)
