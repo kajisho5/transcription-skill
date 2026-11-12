@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.0 - 2026-11-12
+
+- Optional qwen3_asr engine: Qwen3-ASR-1.7B with forced-aligned word timestamps (ADR-041) (#53) (3580085)
+
 ## 0.10.0 - 2026-11-12
 
 - parakeet-tdt-0.6b-v3 on speechcpp, distil-large-v3.5 on faster_whisper, per-model language limits (ADR-040) (#52) (079c8f9)
