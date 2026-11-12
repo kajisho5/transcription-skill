@@ -877,6 +877,14 @@
   emitted ids), are validated and written to `-o`; `provenance.follow` records the window, idle and holdback seconds,
   rounds, finals and audio length. Not cached: the finals depend on when the audio arrived, so they are not the batch
   result under the same parameters. `language` required, `chunk_seconds` refused with it.
+- Bounds: the file is decoded again only after it changed; a tail over 25 s with no speech moves the final point to
+  1.5 s before its end, and one long segment over 25 s is split after its last word ending 1.5 s before the end (without
+  words it is made final whole, with a warning), so the work per round never grows with the recording. `budget.timeout`
+  bounds every ffprobe / ffmpeg run of the session, and `budget.max_audio_seconds` is checked on the decoded length before
+  anything past it is recognized or emitted. Stopped before the recorder corrected its WAV header (ffprobe sees no
+  duration), the transcript takes its duration from the decoded samples. `word_segmentation: "dictionary"` is refused
+  (`follow_with_dictionary_segmentation`): finals carry engine words and could not change afterwards. Every failure in the
+  CLI, before, during or after following (writing the transcript included), is an `error` event.
 - Each round runs the engine in a fresh worker (the timeout boundary), so the model is loaded each round; with 5 s windows
   and small models that is a second or two. Keeping one worker alive across rounds is left open.
 - Contract: additive. Capability `follow_growing_files`, the optional `provenance.follow` object in the transcript schema,

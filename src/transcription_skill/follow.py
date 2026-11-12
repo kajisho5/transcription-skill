@@ -94,8 +94,14 @@ class Follower:
             n_final = 0
             while n_final < len(segs) and segs[n_final].end <= limit:
                 n_final += 1
-            if n_final == 0 and tail_len > MAX_TAIL_SECONDS and len(segs) > 1:
-                n_final = len(segs) - 1
+            if n_final == 0 and tail_len > MAX_TAIL_SECONDS:
+                # the tail must stay bounded: continuous speech, one long segment, or no speech at all
+                if len(segs) > 1:
+                    n_final = len(segs) - 1
+                elif len(segs) == 1:
+                    segs, n_final = _force_split(segs[0], limit, self.warnings)
+                else:
+                    self.committed = max(self.committed, end - int(HOLDBACK_SECONDS * SAMPLE_RATE))
         if n_final:
             if final:
                 cut = end
@@ -145,6 +151,24 @@ def _shift(res: EngineResult, off: float, length: float) -> List[EngineSegment]:
     return out
 
 
+def _force_split(s: EngineSegment, limit: float, warnings: List[str]) -> Any:
+    """One segment over a tail longer than MAX_TAIL_SECONDS: make its words that end by `limit` a final segment of their
+    own and keep the rest open; without words, the whole segment becomes final (a warning says a word may be split)."""
+    words = s.words or []
+    k = 0
+    while k < len(words) and words[k].end <= limit:
+        k += 1
+    if words and 0 < k < len(words):
+        head = EngineSegment(start=s.start, end=words[k - 1].end, text="".join(str(w.text) for w in words[:k]), confidence=s.confidence,
+                             words=list(words[:k]))
+        rest = EngineSegment(start=words[k].start, end=s.end, text="".join(str(w.text) for w in words[k:]), confidence=s.confidence,
+                             words=list(words[k:]))
+        return [head, rest], 1
+    warnings.append(f"follow: no pause in {MAX_TAIL_SECONDS:g} s of speech; the segment at {s.start:.2f} s was made final whole, "
+                    f"a word at {s.end:.2f} s may be split")
+    return [s], 1
+
+
 def _clamp(s: EngineSegment, cut: float) -> EngineSegment:
     """A final segment never reaches past the commit point, so the next tail cannot hold any of its audio twice."""
     words = None if s.words is None else [EngineWord(start=w.start, end=min(w.end, cut), text=w.text, confidence=w.confidence, timing=w.timing)
@@ -177,13 +201,17 @@ def file_state(path: str, last: Optional[Any]) -> Optional[Any]:
 def follow_file(path: str, follower: Follower, idle_seconds: float = DEFAULT_IDLE_SECONDS,
                 poll_seconds: float = DEFAULT_POLL_SECONDS, should_stop: Callable[[], bool] = lambda: False,
                 deadline: Optional[float] = None) -> None:
-    """Poll `path` until it has not changed for `idle_seconds` (or `should_stop()`), stepping `follower`; then finish."""
+    """Poll `path` until it has not changed for `idle_seconds` (or `should_stop()`), stepping `follower` each time the
+    file has changed since the last step (an unchanged file is not decoded again); then finish."""
     sig = file_state(path, None)
+    stepped: Optional[Any] = object()          # never equal to a file state: the first poll steps
     quiet_since = time.time()
     while not should_stop():
         if deadline is not None and time.time() > deadline:
             raise TranscriptionError("TRANSCRIPTION_TIMEOUT", "budget.timeout reached while following the recording")
-        follower.step()
+        if sig != stepped:
+            stepped = sig
+            follower.step()
         now = file_state(path, sig)
         if now != sig:
             sig, quiet_since = now, time.time()

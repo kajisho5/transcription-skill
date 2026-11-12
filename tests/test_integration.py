@@ -387,6 +387,7 @@ class FollowTests(unittest.TestCase):
 
     def test_finals_of_a_growing_file_match_one_pass(self):
         tmp = tempfile.mkdtemp(prefix="ts_follow_")
+        proc = None
         try:
             src = repeated(str(FX / "en_short.wav"), 6, tmp)
             with wave.open(src, "rb") as wf:
@@ -419,7 +420,7 @@ class FollowTests(unittest.TestCase):
             finals = [e["segment"] for e in events if e["type"] == "final"]
             self.assertEqual([s["id"] for s in finals], [f"seg_{i:04d}" for i in range(1, len(finals) + 1)])
             doc = json.loads(Path(out).read_text(encoding="utf-8"))
-            self.assertGreaterEqual(doc["provenance"]["follow"]["rounds"], 5)      # recognized while the file grew
+            self.assertGreaterEqual(doc["provenance"]["follow"]["rounds"], 2)      # recognized while the file grew, not only at the end
             self.assertTrue(any(e["type"] == "partial" for e in events))
             self.assertTrue(validate_transcript(doc).ok)
             self.assertEqual([s["text"] for s in doc["segments"]], [s["text"] for s in finals])
@@ -429,6 +430,9 @@ class FollowTests(unittest.TestCase):
             hyp = " ".join(s["text"] for s in finals)
             self.assertLessEqual(wer(ref, hyp), FOLLOW_MAX_WER, (ref, hyp))
         finally:
+            if proc is not None and proc.poll() is None:    # a failed test must not leave the follower running
+                proc.kill()
+                proc.communicate()
             shutil.rmtree(tmp, ignore_errors=True)
 
 

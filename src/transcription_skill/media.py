@@ -153,13 +153,13 @@ def extract_audio(src: str, dst: str, audio_stream: int = 0, timeout: float = 60
     return {"tool": "ffmpeg", "recipe": dict(AUDIO_RECIPE), "audio_stream_index": audio_stream, "stream": f"0:a:{audio_stream}"}
 
 
-def probe_container(path: str) -> str:
+def probe_container(path: str, timeout: float = 120.0) -> str:
     """ffprobe's format name of a file that may still be being written (no duration needed). Raises UNSUPPORTED_MEDIA."""
     ffprobe = find_tool("ffprobe")
     if not ffprobe:
         raise TranscriptionError("ENGINE_UNAVAILABLE", "ffprobe not found on PATH (install FFmpeg)")
     proc = subprocess.run([ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path], stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, text=True, timeout=120, env=child_env())
+                          stderr=subprocess.PIPE, text=True, timeout=max(1.0, timeout), env=child_env())
     try:
         raw = json.loads(proc.stdout or "{}") if proc.returncode == 0 else {}
     except ValueError:
@@ -188,9 +188,9 @@ def extract_tail(src: str, dst: str, start_seconds: float, audio_stream: int = 0
         raise TranscriptionError("ENGINE_UNAVAILABLE", "ffmpeg not found on PATH (install FFmpeg)")
     try:
         proc = subprocess.run(tail_argv(ffmpeg, src, dst, start_seconds, audio_stream, wav), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              text=True, timeout=timeout, env=child_env())
+                              text=True, timeout=max(1.0, timeout), env=child_env())
     except subprocess.TimeoutExpired:
-        raise TranscriptionError("TRANSCRIPTION_FAILED", f"reading the recording exceeded {timeout:g}s")
+        raise TranscriptionError("TRANSCRIPTION_TIMEOUT", f"reading the recording exceeded {timeout:g}s")
     data = b""
     if os.path.exists(dst):
         with open(dst, "rb") as fh:

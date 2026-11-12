@@ -144,7 +144,44 @@ class FollowerTests(FollowFixture):
             state["written"] = min(len(samples), state["written"] + 5 * RATE)
             f.step()
         f.step(final=True)
-        self.assertEqual(" ".join(s["text"] for s in events.finals()).split(), [f"w{k}" for k, _, _ in layout])
+        self.assertEqual(" ".join(s["text"] for s in events.finals()).split(), [f"w{k % TONE_CYCLE}" for k, _, _ in layout])
+
+
+class BoundedTailTests(FollowFixture):
+    def run_follower(self, samples, engine, window=5.0):
+        events, state = Events(), {"written": 0}
+        calls = []
+
+        def recognize(s):
+            calls.append(len(s))
+            p = os.path.join(self.tmp, "bt.wav")
+            samples_to_wav(s, p)
+            return engine.transcribe(EngineRequest(audio_path=p, language="en", model="fake-model", word_timestamps=True,
+                                                   temperature=0.0, initial_prompt=None, beam_size=5))
+        f = Follower(lambda start: samples[start:state["written"]], recognize, events, window_seconds=window, word_timestamps=True)
+        while state["written"] < len(samples):
+            state["written"] = min(len(samples), state["written"] + int(window * RATE))
+            f.step()
+        f.step(final=True)
+        return events, calls
+
+    def test_silence_does_not_grow_the_tail(self):
+        layout = tone_layout([2], lead=70.0)                           # 70 s of nothing, then two words
+        wav = os.path.join(self.tmp, "silence.wav")
+        write_tones(wav, layout)
+        events, calls = self.run_follower(read_all(wav), ToneEngine())
+        self.assertLess(max(calls), 40 * RATE)                          # never the whole recording again
+        self.assertEqual(" ".join(s["text"] for s in events.finals()).split(), ["w0", "w1"])
+
+    def test_one_long_segment_is_split_at_its_words(self):
+        layout = tone_layout([130], word_seconds=(0.3,))                # 130 words (55 s) with 0.12 s gaps: one segment, no pause
+        wav = os.path.join(self.tmp, "monologue.wav")
+        write_tones(wav, layout)
+        events, calls = self.run_follower(read_all(wav), ToneEngine())
+        self.assertLess(max(calls), 40 * RATE)
+        finals = events.finals()
+        self.assertGreater(len(finals), 1)
+        self.assertEqual("".join(s["text"] for s in finals).replace("w", " w").split(), [f"w{k % TONE_CYCLE}" for k, _, _ in layout])
 
 
 class ServiceFollowTests(FollowFixture):
@@ -205,6 +242,31 @@ class ServiceFollowTests(FollowFixture):
         doc = TranscriptionService(workspace=self.tmp, engine=ToneEngine()).follow(req, events, should_stop=lambda: True)
         self.assertEqual(" ".join(s["text"] for s in doc["segments"]).split(), self.truth)
 
+    def test_stopped_before_the_header_was_finished(self):
+        dst = os.path.join(self.tmp, "unfinished.wav")
+        with wave.open(dst, "wb") as wf:                                # data size 0 in the header, never corrected
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(RATE)
+            wf.writeframes(b"")
+        with open(dst, "ab") as fh:
+            fh.write(self.samples.tobytes())
+        events = Events()
+        req = parse_request({"input": dst, "engine": "fake", "model": "fake-model", "language": "en", "workspace": self.tmp})
+        doc = TranscriptionService(workspace=self.tmp, engine=ToneEngine()).follow(req, events, should_stop=lambda: True)
+        self.assertTrue(validate_transcript(doc).ok)
+        self.assertEqual(" ".join(s["text"] for s in doc["segments"]).split(), self.truth)
+        self.assertAlmostEqual(doc["duration"], len(self.samples) / RATE, places=3)
+
+    def test_budget_is_checked_before_anything_is_emitted(self):
+        events = Events()
+        req = parse_request({"input": self.wav, "engine": "fake", "model": "fake-model", "language": "en", "workspace": self.tmp,
+                             "budget": {"max_audio_seconds": 10}})
+        with self.assertRaises(TranscriptionError) as cm:
+            TranscriptionService(workspace=self.tmp, engine=ToneEngine()).follow(req, events, should_stop=lambda: True)
+        self.assertEqual(cm.exception.code, "BUDGET_EXCEEDED")
+        self.assertEqual(events.finals(), [])
+
     def test_refusals(self):
         svc = TranscriptionService(workspace=self.tmp, engine=ToneEngine())
         with self.assertRaises(TranscriptionError) as cm:
@@ -213,6 +275,10 @@ class ServiceFollowTests(FollowFixture):
         with self.assertRaises(TranscriptionError) as cm:
             svc.follow(parse_request({"input": self.wav, "engine": "fake", "model": "fake-model", "language": "en", "chunk_seconds": 60}), Events())
         self.assertEqual(cm.exception.details["reason"], "follow_with_chunking")
+        with self.assertRaises(TranscriptionError) as cm:
+            svc.follow(parse_request({"input": self.wav, "engine": "fake", "model": "fake-model", "language": "ja", "word_timestamps": True,
+                                      "word_segmentation": "dictionary"}), Events())
+        self.assertEqual(cm.exception.details["reason"], "follow_with_dictionary_segmentation")
         self.assertIn("follow_growing_files", CAPABILITIES)
 
     def test_tail_of_a_wav_whose_header_is_too_small(self):
@@ -237,6 +303,11 @@ class ServiceFollowTests(FollowFixture):
         ev = [json.loads(line) for line in p.stdout.splitlines()]
         self.assertEqual(ev[-1]["type"], "error")
         self.assertEqual(ev[-1]["error"]["details"]["reason"], "language_required_for_follow")
+        p = subprocess.run([sys.executable, "-m", "transcription_skill.cli", "transcribe", dst, "--follow", "--language", "en",
+                            "--window-seconds", "0", "--workspace", self.tmp],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=dict(os.environ, PYTHONPATH=str(ROOT / "src")))
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertEqual(json.loads(p.stdout.splitlines()[-1])["type"], "error")     # preflight errors are events too
 
 
 if __name__ == "__main__":

@@ -339,7 +339,15 @@
         "follow": {
           "description": "Present only on a transcript of a followed recording (transcribe --follow, ADR-043): the window, idle and holdback seconds, how many recognition rounds ran, how many final segments were emitted, and the audio length read.",
           "type": "object",
-          "required": ["window_seconds", "idle_seconds", "holdback_seconds", "rounds", "finals", "audio_seconds"]
+          "required": ["window_seconds", "idle_seconds", "holdback_seconds", "rounds", "finals", "audio_seconds"],
+          "properties": {
+            "window_seconds": {"type": "number", "exclusiveMinimum": 0},
+            "idle_seconds": {"type": "number", "exclusiveMinimum": 0},
+            "holdback_seconds": {"type": "number", "minimum": 0},
+            "rounds": {"type": "integer", "minimum": 0},
+            "finals": {"type": "integer", "minimum": 0},
+            "audio_seconds": {"type": "number", "minimum": 0}
+          }
         },
         "chunking": {
           "description": "Present only on a chunked transcription (request chunk_seconds, ADR-042): how the recording was cut, which chunks came from the per-chunk cache, the device and the realtime factor (wall seconds of this run / media seconds).",

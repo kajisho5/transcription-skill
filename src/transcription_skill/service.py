@@ -114,11 +114,12 @@ class TranscriptionService:
                                      {"engine": engine.id, "model": req.model, "availability": model.availability, "offline": req.offline})
         return engine, model
 
-    def _prepare(self, req: TranscribeRequest) -> Dict[str, Any]:
+    def _prepare(self, req: TranscribeRequest, meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """`meta` replaces ffprobe's facts only for a followed recording whose header was never finished (ADR-043)."""
         policy = PathPolicy(req.allowed_input_roots)
         path = policy.resolve_input(req.input)                       # resolved path is used for every later step
         display_name = os.path.basename(os.path.abspath(req.input))  # what the caller named, for source.filename
-        meta = probe(path)
+        meta = probe(path) if meta is None else meta
         if req.audio_stream is not None and req.audio_stream >= meta["audio_stream_count"]:
             raise TranscriptionError("INVALID_INPUT",
                                      f"audio_stream {req.audio_stream} does not exist: {display_name} has {meta['audio_stream_count']} audio stream(s)",
@@ -249,6 +250,9 @@ class TranscriptionService:
                                      "a transcript has one language", {"reason": "language_required_for_follow"})
         if req.chunk_seconds is not None:
             raise TranscriptionError("INVALID_INPUT", "follow and chunk_seconds cannot be combined", {"reason": "follow_with_chunking"})
+        if req.word_segmentation == WORD_SEGMENTATION_DICTIONARY:   # finals are emitted with engine words and must not change after
+            raise TranscriptionError("INVALID_INPUT", "follow emits engine words; word_segmentation 'dictionary' cannot be combined with it",
+                                     {"reason": "follow_with_dictionary_segmentation"})
         path = PathPolicy(req.allowed_input_roots).resolve_input(req.input)
         self._check_engine(req)
         engine: TranscriptionEngine = self._engine_override or get_engine(req.engine)
@@ -260,7 +264,12 @@ class TranscriptionService:
         counter = [0]
 
         def read_tail(start_sample: int) -> "array[int]":
-            data = extract_tail(path, os.path.join(run_dir, "tail.raw"), start_sample / float(SAMPLE_RATE), stream, wav_input)
+            data = extract_tail(path, os.path.join(run_dir, "tail.raw"), start_sample / float(SAMPLE_RATE), stream, wav_input,
+                                timeout=deadline - time.time())
+            seconds = (start_sample + len(data) // 2) / float(SAMPLE_RATE)
+            if seconds > req.budget.max_audio_seconds:   # before anything past the budget is recognized or emitted
+                raise TranscriptionError("BUDGET_EXCEEDED", f"the recording passed budget.max_audio_seconds ({req.budget.max_audio_seconds:g}s)",
+                                         {"duration": seconds, "max_audio_seconds": req.budget.max_audio_seconds})
             a = array("h")
             a.frombytes(data)
             if sys.byteorder == "big":
@@ -290,7 +299,14 @@ class TranscriptionService:
             follow_file(path, follower, idle_seconds=idle_seconds, poll_seconds=poll_seconds, should_stop=should_stop, deadline=deadline)
         finally:
             shutil.rmtree(run_dir, ignore_errors=True)
-        prep = self._prepare(req)                       # the file is complete now: probe, fingerprint, parameters
+        try:
+            prep = self._prepare(req)                   # the file is complete now: probe, fingerprint, parameters
+        except TranscriptionError as exc:               # stopped before the recorder finished its header: use what was decoded
+            if exc.code != "UNSUPPORTED_MEDIA":
+                raise
+            meta = {"duration": follower.audio_seconds, "container": None, "size_bytes": os.path.getsize(path),
+                    "audio": {"codec": None, "channels": 1, "sample_rate": SAMPLE_RATE}, "audio_stream_count": stream + 1, "has_video": False}
+            prep = self._prepare(req, meta=meta)
         extraction = {"tool": "ffmpeg", "recipe": dict(AUDIO_RECIPE), "audio_stream_index": stream, "stream": f"0:a:{stream}"}
         processing = time.time() - t0
         doc = build_transcript(req, prep, follower.result(), extraction, processing_seconds=processing, engine_seconds=processing, warnings=[])
@@ -308,7 +324,7 @@ class TranscriptionService:
         sig, quiet_since = file_state(path, None), time.time()
         while True:
             try:
-                return probe_container(path)
+                return probe_container(path, timeout=deadline - time.time())
             except TranscriptionError as exc:
                 if exc.code != "UNSUPPORTED_MEDIA" or should_stop() or time.time() > deadline:
                     raise

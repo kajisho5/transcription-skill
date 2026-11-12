@@ -93,36 +93,39 @@ def cmd_follow(args: argparse.Namespace, params: Dict[str, Any]) -> int:
     from .follow import FOLLOW_EVENT_SCHEMA
     from .request import parse_request
     from .service import TranscriptionService
-    if params.pop("dry_run", False) or params.pop("speaker_turns", None) is not None:
-        raise TranscriptionError("INVALID_INPUT", "--follow cannot be combined with --dry-run or --speaker-turns", {"reason": "follow_options"})
-    for name, value in (("--window-seconds", args.window_seconds), ("--idle-seconds", args.idle_seconds), ("--poll-seconds", args.poll_seconds)):
-        if value is not None and not (0 < value <= 3600):
-            raise TranscriptionError("INVALID_INPUT", f"{name} must be in (0, 3600]")
-    req = parse_request(params)
-    out = OutputPolicy(args.allowed_output).resolve_output(args.output or _default_output(args.input), forbid=[args.input])
+
+    def emit(event: Dict[str, Any]) -> None:
+        sys.stdout.write(json.dumps(event, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
+
     stop = {"now": False}
 
     def on_signal(signum: int, frame: Any) -> None:
         stop["now"] = True
 
     old = {sig: signal.signal(sig, on_signal) for sig in (signal.SIGINT, signal.SIGTERM)}
-
-    def emit(event: Dict[str, Any]) -> None:
-        sys.stdout.write(json.dumps(event, ensure_ascii=False) + "\n")
-        sys.stdout.flush()
-
-    try:
+    try:                                                # every failure, before or after following, is an `error` event
+        if params.pop("dry_run", False) or params.pop("speaker_turns", None) is not None:
+            raise TranscriptionError("INVALID_INPUT", "--follow cannot be combined with --dry-run or --speaker-turns", {"reason": "follow_options"})
+        for name, value in (("--window-seconds", args.window_seconds), ("--idle-seconds", args.idle_seconds), ("--poll-seconds", args.poll_seconds)):
+            if value is not None and not (0 < value <= 3600):
+                raise TranscriptionError("INVALID_INPUT", f"{name} must be in (0, 3600]")
+        req = parse_request(params)
+        out = OutputPolicy(args.allowed_output).resolve_output(args.output or _default_output(args.input), forbid=[args.input])
         kw = {k: v for k, v in (("window_seconds", args.window_seconds), ("idle_seconds", args.idle_seconds),
                                 ("poll_seconds", args.poll_seconds)) if v is not None}
         doc = TranscriptionService(workspace=req.workspace).follow(req, emit, should_stop=lambda: stop["now"], **kw)
+        try:
+            with open(out, "w", encoding="utf-8") as fh:
+                json.dump(doc, fh, ensure_ascii=False, indent=2)
+        except OSError as exc:
+            raise TranscriptionError("TRANSCRIPTION_FAILED", f"the transcript could not be written: {exc}", {"reason": "output_write_failed"})
     except TranscriptionError as exc:
         emit({"schema": FOLLOW_EVENT_SCHEMA, "type": "error", "error": exc.to_dict()["error"]})
         return exc.exit_code
     finally:
         for sig, handler in old.items():
             signal.signal(sig, handler)
-    with open(out, "w", encoding="utf-8") as fh:
-        json.dump(doc, fh, ensure_ascii=False, indent=2)
     emit({"schema": FOLLOW_EVENT_SCHEMA, "type": "end", "finals": len(doc["segments"]), "audio_seconds": doc["provenance"]["follow"]["audio_seconds"],
           "output": os.path.abspath(out), "warnings": doc["warnings"]})
     return 0
