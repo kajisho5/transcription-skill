@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 from typing import Any, Dict, List, Optional
 
 from .errors import TranscriptionError
@@ -68,10 +69,19 @@ class TranscriptCache:
     def put(self, key: str, doc: Dict[str, Any]) -> str:
         os.makedirs(self.root, exist_ok=True)
         p = self.path(key)
-        tmp = p + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(doc, fh, ensure_ascii=False, indent=2)
-        os.replace(tmp, p)
+        # a unique temporary file per writer: two processes writing the same key
+        # (e.g. both adding word indexes to one pre-0.9 entry) must not share one
+        fd, tmp = tempfile.mkstemp(prefix=os.path.basename(p) + ".", suffix=".tmp", dir=self.root)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(doc, fh, ensure_ascii=False, indent=2)
+            os.replace(tmp, p)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
         return p
 
     def count(self) -> int:

@@ -239,6 +239,64 @@ class RequestOptionTests(unittest.TestCase):
         self.assertIn("dictionary_word_segmentation", CAPABILITIES)
 
 
+class DistVersionTests(unittest.TestCase):
+    """The segmenter identity reads versions from dist-info whatever its case or separators."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="ts_dist_")
+        pkg = os.path.join(self.root, "sudachidict_core")
+        os.makedirs(pkg)
+        self.init = os.path.join(pkg, "__init__.py")
+        Path(self.init).write_text("", encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _dist(self, dirname, version):
+        d = os.path.join(self.root, dirname)
+        os.makedirs(d)
+        Path(d, "METADATA").write_text(f"Metadata-Version: 2.1\nName: x\nVersion: {version}\n", encoding="utf-8")
+
+    def test_mixed_case_dist_info_is_found(self):
+        self._dist("SudachiDict_core-20230927.dist-info", "20230927")
+        module = unittest.mock.Mock(__file__=self.init)
+        self.assertEqual(W._dist_version(module, "sudachidict_core"), "20230927")
+
+    def test_hyphenated_dist_info_is_found(self):
+        self._dist("sudachidict-core-20240109.dist-info", "20240109")
+        module = unittest.mock.Mock(__file__=self.init)
+        self.assertEqual(W._dist_version(module, "sudachidict_core"), "20240109")
+
+    def test_other_distribution_is_not_taken(self):
+        self._dist("sudachidict_core_extra-1.0.dist-info", "1.0")
+        module = unittest.mock.Mock(__file__=self.init)
+        self.assertEqual(W._dist_version(module, "sudachidict_core"), "unknown")
+
+
+class CacheWriteTests(unittest.TestCase):
+    def test_writers_use_their_own_temporary_files(self):
+        ws = tempfile.mkdtemp(prefix="ts_cache_")
+        try:
+            cache = TranscriptCache(ws)
+            key = "a" * 64
+            seen = []
+            real_replace = os.replace
+
+            def spy(src, dst):
+                seen.append(src)
+                return real_replace(src, dst)
+
+            with unittest.mock.patch("transcription_skill.cache.os.replace", side_effect=spy):
+                cache.put(key, {"n": 1})
+                cache.put(key, {"n": 2})
+            self.assertEqual(len(set(seen)), 2)          # never the same temporary path twice
+            with open(cache.path(key), encoding="utf-8") as fh:
+                self.assertEqual(json.load(fh), {"n": 2})
+            self.assertEqual([n for n in os.listdir(cache.root) if n.endswith(".tmp")], [])
+        finally:
+            shutil.rmtree(ws, ignore_errors=True)
+
+
 class MissingDependencyTests(unittest.TestCase):
     def setUp(self):
         W._SEGMENTER = None
