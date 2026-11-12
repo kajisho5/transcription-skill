@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.3 - 2026-11-12
+
+- Recordings in progress: transcribe --follow with finals that never change (ADR-043) (#56) (c781d2c)
+
 ## 0.11.2 - 2026-11-12
 
 - Long recordings: chunked at pauses, parallel, cached per chunk, resumable (ADR-042) (#55) (8646c14)
