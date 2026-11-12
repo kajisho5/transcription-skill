@@ -29,8 +29,10 @@ class FakeEngine(TranscriptionEngine):
     def __init__(self, segments: Optional[List[Dict[str, Any]]] = None, delay: float = 0.0, language: Optional[str] = "ja",
                  language_probability: Optional[float] = 0.99, version: str = "1.0", available: bool = True, words: bool = True,
                  fail: Optional[Exception] = None, local_models: Optional[List[str]] = None, downloadable: bool = False,
-                 execution_mode: Optional[str] = None, requires_network: Optional[bool] = None, engine_id: Optional[str] = None):
+                 execution_mode: Optional[str] = None, requires_network: Optional[bool] = None, engine_id: Optional[str] = None,
+                 model_langs: Optional[Dict[str, List[str]]] = None):
         self.segments = FAKE_SEGMENTS if segments is None else segments
+        self.model_langs = model_langs or {}       # model -> the languages it is limited to (ADR-040)
         self.delay = delay
         self.language = language
         self.language_probability = language_probability
@@ -71,6 +73,9 @@ class FakeEngine(TranscriptionEngine):
 
     def supports_language_detection(self) -> bool:
         return True
+
+    def model_languages(self, model: str) -> Optional[List[str]]:
+        return self.model_langs.get(model)
 
     def model_capabilities(self) -> List[str]:
         if self.execution_mode != EXECUTION_LOCAL:

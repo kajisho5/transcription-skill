@@ -86,11 +86,14 @@ def reject_reasons(engine: TranscriptionEngine, spec: EngineSpec, req: EngineReq
     if not spec.available:
         reasons.append(R_NOT_INSTALLED)
         return reasons
-    if req.language is not None and req.language not in spec.supported_languages:
+    # a model the caller names may recognize fewer languages than its engine and detect none (ADR-040); the engine's
+    # default model is not checked here, so a requirement that names no model selects as before
+    model_langs = engine.model_languages(req.model) if req.model is not None else None
+    if req.language is not None and (req.language not in spec.supported_languages or (model_langs is not None and req.language not in model_langs)):
         reasons.append(R_LANGUAGE)
     if req.word_timestamps and not spec.has(CAP_WORD_TIMESTAMPS):
         reasons.append(R_WORD_TIMESTAMPS)
-    if req.language_detection and not spec.has(CAP_LANGUAGE_DETECTION):
+    if req.language_detection and (not spec.has(CAP_LANGUAGE_DETECTION) or model_langs is not None):
         reasons.append(R_LANGUAGE_DETECTION)
     if req.vocabulary and not spec.has(CAP_CUSTOM_VOCABULARY):
         reasons.append(R_VOCABULARY)

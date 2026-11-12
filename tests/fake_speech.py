@@ -32,6 +32,11 @@ CATALOG = [
       ("q4_k", "reazonspeech-nemo-619M-v2-Q4_K.gguf", 357216832)]),
     ("parakeet-tdt_ctc-0.6b-ja", "sakasegawa/parakeet-tdt_ctc-0.6b-ja-GGUF", ["ja"], "recognition", "q8_0",
      [("q8_0", "parakeet-tdt_ctc-0.6B-ja-Q8_0.gguf", 661012416), ("q4_k", "parakeet-tdt_ctc-0.6B-ja-Q4_K.gguf", 357318592)]),
+    ("parakeet-tdt-0.6b-v3", "sakasegawa/parakeet-tdt-0.6b-v3-GGUF",
+     ["bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hr", "hu", "it", "lt", "lv", "mt", "nl", "pl", "pt", "ro", "ru", "sk", "sl",
+      "sv", "uk"], "recognition", "f16",
+     [("f16", "parakeet-tdt-0.6B-v3-F16.gguf", 1255370688), ("q8_0", "parakeet-tdt-0.6B-v3-Q8_0.gguf", 668107680),
+      ("q4_k", "parakeet-tdt-0.6B-v3-Q4_K.gguf", 363627424)]),
     ("haas-ja-v1.0", "sakasegawa/Haas-ja-v1.0-GGUF", ["ja"], "recognition", "q8_0",
      [("q8_0", "Haas-616M-ja-v1.0-Q8_0.gguf", 656381472)]),
     ("qwen3-asr-0.6b", "sakasegawa/Qwen3-ASR-0.6B-GGUF", ["en", "ja", "zh"], "recognition", "q8_0",
@@ -208,7 +213,8 @@ def main(argv) -> None:
 
 
 def timing(text: str, d: float, zero: bool):
-    """Tokens of one character each, spread evenly over [0.1, d - 0.1]; segments cut after 。？！, as FastConformer's are."""
+    """Tokens of one character each, spread evenly over [0.1, d - 0.1]; segments cut after 。？！.?!, as speech.cpp cuts a
+    FastConformer model's (a full stop, a question mark or an exclamation mark)."""
     chars = list(text)
     if not chars:
         return [], []
@@ -222,7 +228,7 @@ def timing(text: str, d: float, zero: bool):
     segments, cur = [], []
     for t in tokens:
         cur.append(t)
-        if t["text"] in "。？！?!":
+        if t["text"] in "。？！.?!":
             segments.append({"start": cur[0]["start"], "end": cur[-1]["end"], "text": "".join(x["text"] for x in cur)})
             cur = []
     if cur:

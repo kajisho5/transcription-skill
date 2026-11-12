@@ -32,8 +32,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..errors import TranscriptionError
 from .base import (CAP_LOCAL_MODEL, CAP_MODEL_DOWNLOAD, EXECUTION_LOCAL, MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED, MODEL_MISSING,
-                   MODEL_UNKNOWN, EngineRequest, EngineResult, EngineSegment, EngineWord, ModelStatus, TranscriptionEngine)
+                   MODEL_UNKNOWN, EngineRequest, EngineResult, EngineSegment, EngineWord, ModelStatus, TranscriptionEngine,
+                   refuse_model_language)
 from .faster_whisper import MODEL_NAMES as WHISPER_MODEL_NAMES
+from .faster_whisper import checkpoint_languages
 
 ENGINE_ID = "whisperx"
 INSTALL_HINT = "pip install whisperx  (Python 3.10-3.13; pulls PyTorch)"
@@ -168,6 +170,9 @@ class WhisperXEngine(TranscriptionEngine):
     def supports_language_detection(self) -> bool:
         return False    # the alignment model is chosen per language, so the language must be given
 
+    def model_languages(self, model: str) -> Optional[List[str]]:
+        return checkpoint_languages(model)      # the same Whisper checkpoints as faster_whisper, the same limits (ADR-040)
+
     def model_capabilities(self) -> List[str]:
         return [CAP_LOCAL_MODEL] + ([CAP_MODEL_DOWNLOAD] if self.download else [])
 
@@ -236,6 +241,7 @@ class WhisperXEngine(TranscriptionEngine):
         if lang not in ALIGN_MODELS:
             raise TranscriptionError("INVALID_INPUT", f"engine {self.id} supports {sorted(ALIGN_MODELS)} (a commercially licensed alignment "
                                      f"model per language); got {lang!r}", {"engine": self.id, "reason": "language_unsupported"})
+        refuse_model_language(self.id, request.model, lang, self.model_languages(request.model))
         no_fetch = request.offline or not self.download
         ms = self.model_status(request.model, offline=request.offline)
         if ms.availability == MODEL_UNKNOWN:

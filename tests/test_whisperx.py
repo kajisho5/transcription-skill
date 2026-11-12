@@ -283,6 +283,25 @@ class TranscribeTests(unittest.TestCase):
                 self.assertEqual((cm.exception.code, cm.exception.details["reason"]), ("INVALID_INPUT", "language_unsupported"))
         self.assertEqual(mod.calls, [])
 
+    def test_an_english_only_checkpoint_is_refused_for_japanese(self):
+        # the same Whisper checkpoint names and limits as faster_whisper (ADR-040): distil-large-v3.5 is English only
+        mod = fake_whisperx()
+        with Env(mod) as env:
+            env.put_whisper("distil-large-v3.5")
+            env.put_align("en")
+            env.put_align("ja")
+            e = X.WhisperXEngine()
+            self.assertIn("distil-large-v3.5", e.supported_models)
+            self.assertEqual(e.model_languages("distil-large-v3.5"), ["en"])
+            self.assertIsNone(e.model_languages("large-v3"))
+            with self.assertRaises(TranscriptionError) as cm:
+                e.transcribe(ereq(model="distil-large-v3.5", language="ja"))
+            self.assertEqual((cm.exception.code, cm.exception.details["reason"], cm.exception.details["supported"]),
+                             ("INVALID_INPUT", "language_unsupported", ["en"]))
+            self.assertEqual(mod.calls, [])
+            e.transcribe(ereq(model="distil-large-v3.5", language="en"))
+        self.assertEqual((calls(mod, "load_model")[0]["arch"], calls(mod, "load_model")[0]["language"]), ("distil-large-v3.5", "en"))
+
     def test_japanese_words_join_without_spaces(self):
         aligned = [{"start": 0.0, "end": 1.0, "text": "二十五円です", "words": [{"word": "二"}, {"word": "十", "start": 0.1, "end": 0.2},
                                                                              {"word": "五"}, {"word": "円", "start": 0.4, "end": 0.6, "score": 0.5}]}]

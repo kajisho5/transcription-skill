@@ -87,6 +87,10 @@ transcription transcribe talk.mp4 --engine haas_ja --language ja --vocabulary te
                                                            # optional Japanese engine (Linux + NVIDIA GPU), jargon/names list
 transcription transcribe talk.mp4 --engine speechcpp --language ja --word-timestamps
                                                            # optional engine: speech.cpp's `speech` (Metal/Vulkan/CPU, no Python ML, no CUDA)
+transcription transcribe talk.mp4 --engine speechcpp --model parakeet-tdt-0.6b-v3 --language de --word-timestamps
+                                                           # English and 24 other European languages on speech.cpp, with word times
+transcription transcribe talk_en.mp4 --model distil-large-v3.5 --language en
+                                                           # English-only distilled Whisper (faster-whisper 1.2.0+); other languages refused
 
 # hand off
 transcription export lecture.transcript.json --format srt -o lecture.srt
@@ -161,7 +165,7 @@ is chosen by constraints, never by the skill's own judgement.
 |--------|----------------|--------|
 | `faster_whisper` | `local` | **implemented**, verified on the fixtures (Reference Local Engine) |
 | `haas_ja` | `local` | **implemented, optional**: [Haas-ja-v1.0](https://huggingface.co/third-intelligence/Haas-ja-v1.0) via `haas-asr`; Japanese only; Linux + NVIDIA GPU + Python 3.11+; custom vocabulary; unit-tested against a fake `haas_asr`, **not yet run on a GPU** ([ADR-033](docs/decisions.md#adr-033-haas-ja-v10-is-an-optional-second-local-engine-haas_ja-with-token-timed-segments-and-a-custom-vocabulary)) |
-| `speechcpp` | `local` | **implemented, optional**: [speech.cpp](https://github.com/nyosegawa/speech.cpp)'s `speech` command (0.10.0+ on PATH) on Metal, Vulkan or the CPU; ReazonSpeech v2 / parakeet-tdt_ctc-0.6b-ja / Haas-ja-v1.0 (Japanese, word timestamps) and Qwen3-ASR (30 languages, words null); models fetched with `speech pull`, never by the skill; unit-tested against a fake `speech`, the real binary runs in the `engines` CI job ([ADR-035](docs/decisions.md#adr-035-speechcpp-is-an-optional-local-engine-speechcpp-run-as-its-speech-command-through-mediarun_program)) |
+| `speechcpp` | `local` | **implemented, optional**: [speech.cpp](https://github.com/nyosegawa/speech.cpp)'s `speech` command (0.10.0+ on PATH) on Metal, Vulkan or the CPU; ReazonSpeech v2 / parakeet-tdt_ctc-0.6b-ja / Haas-ja-v1.0 (Japanese, word timestamps), parakeet-tdt-0.6b-v3 (25 European languages, word timestamps; [ADR-040](docs/decisions.md#adr-040-parakeet-tdt-06b-v3-on-speechcpp-distil-large-v35-on-faster_whisper-and-per-model-language-limits)) and Qwen3-ASR (30 languages, words null); models fetched with `speech pull`, never by the skill; unit-tested against a fake `speech`, the real binary runs in the `engines` CI job ([ADR-035](docs/decisions.md#adr-035-speechcpp-is-an-optional-local-engine-speechcpp-run-as-its-speech-command-through-mediarun_program)) |
 | `whisperx` | `local` | **implemented, optional**: [whisperX](https://github.com/m-bain/whisperX) (Python 3.10+, `pip install whisperx`): faster-whisper batched over voice-activity regions plus wav2vec2 forced alignment for word timestamps; English and Japanese (alignment models Apache-2.0); no diarization (speakers come from diarization-skill, ADR-037); unit-tested against a fake `whisperx`, **not yet run for real** ([ADR-038](docs/decisions.md#adr-038-whisperx-is-an-optional-local-engine-whisperx-for-wav2vec2-aligned-word-timestamps-it-does-not-diarize)) |
 | cloud ASR (any vendor) | `remote` | future possible engine: expressible by the contract, **not implemented** |
 | whisper.cpp | `local` | future possible engine: expressible by the contract, **not implemented** |
@@ -232,12 +236,15 @@ transcription transcribe talk.mp4 --engine speechcpp --language ja --word-timest
 ```
 
 - Models: `reazonspeech-v2` (default), `parakeet-tdt_ctc-0.6b-ja`, `haas-ja-v1.0` (Japanese, segments and word
-  timestamps from speech.cpp's token times), `qwen3-asr-0.6b`, `qwen3-asr-1.7b` (30 languages; speech.cpp gives no
-  times for them, so each detected speech region is a segment and `words` is null). `NAME:q4_k` and the other weight
-  types of speech.cpp's catalog work too. All have licences that allow commercial use (table in
-  [docs/engines.md](docs/engines.md#model-licences-verified-2026-10-31); parakeet is CC-BY-4.0: attribute NVIDIA).
+  timestamps from speech.cpp's token times), `parakeet-tdt-0.6b-v3` (English and 24 other European languages, segments
+  and word timestamps; `speech pull parakeet-tdt-0.6b-v3:q8_0` is 0.67 GB), `qwen3-asr-0.6b`, `qwen3-asr-1.7b` (30
+  languages; speech.cpp gives no times for them, so each detected speech region is a segment and `words` is null).
+  `NAME:q4_k` and the other weight types of speech.cpp's catalog work too. All have licences that allow commercial use
+  (table in [docs/engines.md](docs/engines.md#model-licences-verified-2026-10-31); both parakeet models are CC-BY-4.0:
+  attribute NVIDIA).
 - Recognition runs by the regions silero-vad finds, as `speech asr --vad` does, because these models drop sentences
-  from long stretches. `--language` is required; `initial_prompt` and a non-zero `temperature` are refused.
+  from long stretches. `--language` is required and must be one of the model's (`reazonspeech-v2` with `--language en`
+  is refused before any audio work); `initial_prompt` and a non-zero `temperature` are refused.
 
 ### Optional engine: `whisperx` (word alignment)
 

@@ -13,10 +13,11 @@ import shutil
 import struct
 import sys
 import tempfile
+import types
 import unittest
 import unittest.mock
 import wave
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,7 +33,8 @@ from transcription_skill.cache import TranscriptCache, cache_key  # noqa: E402
 from transcription_skill.engines import (CAP_LANGUAGE_DETECTION, CAP_LOCAL_EXECUTION, CAP_NETWORK_REQUIRED, CAP_REMOTE_EXECUTION, CAP_WORD_TIMESTAMPS,  # noqa: E402
                                          EngineRegistry, EngineRequirements, default_registry, engine_ids, get_engine, require_engine,
                                          select_engines)
-from transcription_skill.engines.base import EngineRequest, EngineResult, EngineSpec  # noqa: E402
+from transcription_skill.engines import faster_whisper as FW  # noqa: E402
+from transcription_skill.engines.base import EngineRequest, EngineResult, EngineSpec, refuse_model_language  # noqa: E402
 from transcription_skill.errors import ERROR_CODES, TranscriptionError  # noqa: E402
 from transcription_skill.export import render, to_srt, to_tsv, to_txt, write  # noqa: E402
 from transcription_skill.media import child_env, extraction_argv, probe  # noqa: E402
@@ -1271,6 +1273,158 @@ class SelectionMatrixTests(unittest.TestCase):
         self.assertEqual(self.ids(sel), ["alpha", "zeta"])          # sorted ids, nothing else
         self.assertFalse(any(k in sel.to_dict() for k in ("best", "score", "rank", "preferred")))
         self.assertFalse(hasattr(sel, "best"))
+
+    def test_a_named_model_limited_to_some_languages(self):
+        r = self.reg(FakeEngine(model_langs={"base": ["en"]}))                 # ADR-040
+        for req, reasons in ((EngineRequirements(language="ja", model="base"), ["language_unsupported"]),
+                             (EngineRequirements(language_detection=True, model="base"), ["language_detection_unsupported"]),
+                             (EngineRequirements(language="ja", language_detection=True, model="base"),
+                              ["language_unsupported", "language_detection_unsupported"])):
+            sel = select_engines(req, r)
+            self.assertEqual((self.ids(sel), self.reasons(sel, "fake")), ([], reasons), req)
+        for req in (EngineRequirements(language="en", model="base"), EngineRequirements(model="base"), EngineRequirements(language="ja"),
+                    EngineRequirements(language="ja", language_detection=True), EngineRequirements(language="ja", model="fake-model")):
+            self.assertEqual(self.ids(select_engines(req, r)), ["fake"], req)   # unconstrained models, and the default model, as before
+
+    def test_model_language_refusal(self):
+        for language in ("en", "ja", None):
+            self.assertIsNone(refuse_model_language("e", "m", language, None))     # no limit: nothing to refuse
+        self.assertIsNone(refuse_model_language("e", "m", "en", ["en"]))
+        for language, reason in (("ja", "language_unsupported"), (None, "language_detection_unsupported")):
+            with self.assertRaises(TranscriptionError) as cm:
+                refuse_model_language("e", "m", language, ("en", "de"))
+            self.assertEqual((cm.exception.code, cm.exception.details),
+                             ("INVALID_INPUT", {"engine": "e", "model": "m", "reason": reason, "supported": ["en", "de"]}))
+
+
+def fake_faster_whisper(known=None, version="1.2.1"):
+    """A stand-in for the faster_whisper package: `_MODELS` (`known` names, every MODEL_NAMES entry by default), the
+    language codes, and a WhisperModel that records what it is given. No CTranslate2, no model, no network."""
+    fw, utils, tok = types.ModuleType("faster_whisper"), types.ModuleType("faster_whisper.utils"), types.ModuleType("faster_whisper.tokenizer")
+    fw.__version__ = version
+    utils._MODELS = {m: f"Systran/faster-whisper-{m}" for m in (FW.MODEL_NAMES if known is None else known)}
+    tok._LANGUAGE_CODES = ("de", "en", "ja")
+    fw.utils, fw.tokenizer, fw.loads, fw.runs = utils, tok, [], []
+
+    class WhisperModel:
+        def __init__(self, name, **kw):
+            fw.loads.append(name)
+
+        def transcribe(self, audio, **kw):
+            fw.runs.append(kw)
+            words = [types.SimpleNamespace(start=0.5, end=1.0, word=" Good", probability=0.9),
+                     types.SimpleNamespace(start=1.0, end=1.5, word=" morning.", probability=0.8)]
+            seg = types.SimpleNamespace(start=0.5, end=1.5, text=" Good morning.", avg_logprob=-0.1, words=words)
+            return iter([seg]), types.SimpleNamespace(language=kw.get("language") or "en", language_probability=0.98)
+
+    fw.WhisperModel = WhisperModel
+    return fw, {"faster_whisper": fw, "faster_whisper.utils": utils, "faster_whisper.tokenizer": tok}
+
+
+@contextmanager
+def faster_whisper_faked(fw, modules):
+    """FW._import gives the fake package, and the Hugging Face cache is an empty folder of this test's own."""
+    hub = tempfile.mkdtemp(prefix="ts_fw_hub_")
+    try:
+        with unittest.mock.patch.object(FW, "_import", return_value=fw), unittest.mock.patch.dict(sys.modules, modules), \
+                unittest.mock.patch.dict(os.environ, {"HF_HUB_CACHE": hub}):
+            yield
+    finally:
+        shutil.rmtree(hub, ignore_errors=True)
+
+
+class FasterWhisperModelTests(unittest.TestCase):
+    """faster_whisper's model list against a fake faster_whisper package (ADR-040): runs on every CI cell."""
+
+    def ereq(self, **kw):
+        d = dict(audio_path="/nonexistent/audio.wav", language="en", model="distil-large-v3.5", word_timestamps=True, temperature=0.0,
+                 initial_prompt=None, beam_size=5)
+        d.update(kw)
+        return EngineRequest(**d)
+
+    def test_distil_large_v3_5_is_listed_english_only_with_its_licence(self):
+        self.assertIn("distil-large-v3.5", FW.MODEL_NAMES)
+        self.assertEqual(FW.MODEL_NAMES[:18], ("tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "medium.en", "large-v1",
+                                               "large-v2", "large-v3", "large", "distil-large-v2", "distil-medium.en", "distil-small.en",
+                                               "distil-large-v3", "large-v3-turbo", "turbo"))   # the earlier names, unchanged and in order
+        facts = FW.MODEL_FACTS["distil-large-v3.5"]
+        self.assertEqual((facts["languages"], facts["licence"], facts["repo"], facts["since"]),
+                         (("en",), "MIT", "distil-whisper/distil-large-v3.5-ct2", (1, 2, 0)))
+        self.assertEqual(facts["card"], "https://huggingface.co/distil-whisper/distil-large-v3.5")
+        self.assertEqual(set(FW.MODEL_FACTS), {"distil-large-v3.5"})        # no earlier model gained a limit
+        self.assertEqual(FW.checkpoint_languages("distil-large-v3.5"), ["en"])
+        self.assertEqual([m for m in FW.MODEL_NAMES if FW.checkpoint_languages(m) is not None], ["distil-large-v3.5"])
+        self.assertEqual(default_registry().default_model("faster_whisper"), "base")
+
+    def test_model_status_needs_a_faster_whisper_that_knows_the_name(self):
+        fw, modules = fake_faster_whisper()
+        with faster_whisper_faked(fw, modules):
+            e = FW.FasterWhisperEngine()
+            self.assertIn("distil-large-v3.5", e.supported_models)
+            self.assertEqual(e.model_languages("distil-large-v3.5"), ["en"])
+            self.assertEqual(e.model_status("distil-large-v3.5").availability, "MODEL_DOWNLOAD_REQUIRED")
+            self.assertEqual(e.model_status("distil-large-v3.5", offline=True).availability, "MODEL_MISSING")
+        older, modules = fake_faster_whisper(known=[m for m in FW.MODEL_NAMES if m != "distil-large-v3.5"], version="1.1.1")
+        with faster_whisper_faked(older, modules):
+            e = FW.FasterWhisperEngine()
+            ms = e.model_status("distil-large-v3.5")
+            self.assertEqual((ms.status, ms.availability, ms.download_required), ("MISSING", "MODEL_MISSING", False))
+            self.assertIn("faster-whisper 1.1.1 does not know distil-large-v3.5", ms.detail)
+            self.assertIn("1.2.0 or later", ms.detail)
+            self.assertEqual(e.model_status("base").availability, "MODEL_DOWNLOAD_REQUIRED")     # every other name as before
+
+    def test_transcribe_refuses_another_language_before_loading_the_model(self):
+        fw, modules = fake_faster_whisper()
+        with faster_whisper_faked(fw, modules):
+            e = FW.FasterWhisperEngine()
+            for language, reason in (("ja", "language_unsupported"), (None, "language_detection_unsupported")):
+                with self.assertRaises(TranscriptionError) as cm:
+                    e.transcribe(self.ereq(language=language))
+                self.assertEqual((cm.exception.code, cm.exception.details["reason"], cm.exception.details["supported"]),
+                                 ("INVALID_INPUT", reason, ["en"]))
+            self.assertEqual(fw.loads, [])
+            res = e.transcribe(self.ereq())
+            self.assertEqual((fw.loads, fw.runs[0]["language"]), (["distil-large-v3.5"], "en"))
+            self.assertEqual([w.text for w in res.segments[0].words], [" Good", " morning."])
+            e.transcribe(self.ereq(model="large-v3", language=None))                 # a multilingual checkpoint still detects
+            self.assertIsNone(fw.runs[1]["language"])
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "needs ffmpeg/ffprobe for probing and extraction")
+class ModelLanguageServiceTests(unittest.TestCase):
+    """The service refuses a request outside a model's languages before any audio work (ADR-040)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ts_unit_ml_")
+        self.wav = os.path.join(self.tmp, "talk.wav")
+        make_wav(self.wav, 6.0)
+        self.ws = os.path.join(self.tmp, "ws")
+        self.engine = FakeEngine(model_langs={"base": ["en"]})
+        self.svc = TranscriptionService(workspace=self.ws, engine=self.engine)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def req(self, **kw):
+        return parse_request(dict({"input": self.wav, "engine": "fake", "model": "base"}, **kw))
+
+    def test_refused_before_anything_runs(self):
+        for language, reason in (("ja", "language_unsupported"), (None, "language_detection_unsupported")):
+            for run in (self.svc.dry_run, self.svc.transcribe):
+                with self.assertRaises(TranscriptionError, msg=(language, run)) as cm:
+                    run(self.req(language=language))
+                self.assertEqual(cm.exception.code, "INVALID_INPUT")
+                self.assertEqual(cm.exception.details, {"engine": "fake", "model": "base", "reason": reason, "supported": ["en"]})
+        self.assertEqual(self.engine.calls, [])
+        self.assertFalse(os.path.isdir(os.path.join(self.ws, "tmp")) and os.listdir(os.path.join(self.ws, "tmp")))
+
+    def test_the_models_language_and_unconstrained_models_run_as_before(self):
+        doc = self.svc.transcribe(self.req(language="en"))["transcript"]
+        self.assertEqual((doc["language"], doc["language_source"]), ("en", "requested"))
+        doc = self.svc.transcribe(self.req(model="fake-model"))["transcript"]      # no language: detection, as before
+        self.assertEqual((doc["language"], doc["language_source"]), ("ja", "detected"))
+        doc = self.svc.transcribe(self.req(model="fake-model", language="ja"))["transcript"]
+        self.assertEqual(doc["language"], "ja")
 
 
 class JsonProtocolTests(unittest.TestCase):

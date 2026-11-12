@@ -27,6 +27,7 @@ class TranscriptionEngine:
     supports_language_detection() -> bool
     supports_vocabulary() -> bool         # takes a request `vocabulary` (default False)
     unsupported_parameters(params) -> list[str]   # set request parameters it cannot honour (default [])
+    model_languages(model) -> list[str] | None    # the languages one model is limited to (ADR-040; default None)
     model_capabilities() -> list[str]     # local_model / model_download (remote engines: none)
     model_status(model, offline=False) -> ModelStatus     # never downloads
     doctor_rows() -> list[dict]           # extra doctor rows (speechcpp: binary, backend); default []
@@ -70,7 +71,10 @@ the same conditions as `language_detection_unsupported` / `word_timestamps_unsup
 `vocabulary` needs `custom_vocabulary` (else `INVALID_INPUT`, `reason: custom_vocabulary_unsupported`;
 selector: `custom_vocabulary_unsupported` with `EngineRequirements(vocabulary=True)`), and a parameter an
 engine lists in `unsupported_parameters` is `INVALID_INPUT`, `reason: parameter_unsupported`, with the names
-in `details.parameters` — refused before anything runs, never silently ignored. When a request names no
+in `details.parameters` — refused before anything runs, never silently ignored. A model limited to some languages
+(`model_languages`: an English-only checkpoint, one model of `speechcpp`) refuses another language with `INVALID_INPUT`,
+`reason: language_unsupported`, and a request without a language with `reason: language_detection_unsupported`, both
+with `details.model` and `details.supported`, before audio extraction (ADR-040). When a request names no
 `model`, the engine's own `default_model` is used (`faster_whisper`: `base`, as before; `haas_ja`:
 `Haas-ja-v1.0`), read from the registered class without instantiating it.
 
@@ -126,7 +130,9 @@ rejected[reason codes], requirements)`. `require_engine` raises `ENGINE_UNAVAILA
 rejection when no candidate remains. Reason codes: `engine_not_installed`, `execution_mode_mismatch`,
 `network_required`, `language_unsupported`, `word_timestamps_unsupported`,
 `language_detection_unsupported`, `custom_vocabulary_unsupported`, `model_unknown`,
-`model_not_available_offline`, `engine_id_mismatch`.
+`model_not_available_offline`, `engine_id_mismatch`. When the requirement names a `model`, that model's own
+languages count too (`model_languages`, ADR-040): a language outside them is `language_unsupported`, and
+`language_detection` is `language_detection_unsupported`. A requirement without a model is filtered as before.
 
 This is filtering, not decision-making. Candidates come back in registry order; nothing here says
 which one is better, and the selector's source contains no sort, score or rank (eval 19). Which
@@ -162,9 +168,12 @@ under a daemon-thread timeout instead.
 - Device/compute: CPU, `int8` by default (`FasterWhisperEngine(device=..., compute_type=...)`).
 - Model cache location comes from `HF_HUB_CACHE` / `HF_HOME` only (input paths, workspace and request
   fields never influence it); it is reported by `doctor` as a root separate from the workspace.
-- Models: Whisper checkpoints by name (`tiny`, `base`, `small`, `medium`, `large-v3`, `large-v3-turbo`,
-  `distil-*`, `.en` variants). `model_status` looks in the Hugging Face cache
-  (`$HF_HUB_CACHE` / `$HF_HOME/hub` / `~/.cache/huggingface/hub`) and reports the snapshot id as
+- Models: Whisper checkpoints by name, an allowlist (`tiny`, `base`, `small`, `medium`, `large-v3`, `large-v3-turbo`,
+  `distil-*`, `.en` variants). `distil-large-v3.5` (ADR-040; [card](https://huggingface.co/distil-whisper/distil-large-v3.5),
+  MIT, files `distil-whisper/distil-large-v3.5-ct2`) is English only: a request with another language or without one is
+  refused (`language_unsupported` / `language_detection_unsupported`), and it needs faster-whisper 1.2.0 or later
+  (older releases do not know the name; `model_status` says so as `MODEL_MISSING`). `model_status` looks in the
+  Hugging Face cache (`$HF_HUB_CACHE` / `$HF_HOME/hub` / `~/.cache/huggingface/hub`) and reports the snapshot id as
   `model_version`; it never downloads. `transcribe` downloads on first use unless the engine is
   constructed with `download=False` (then `MODEL_UNAVAILABLE`). Model names that are not Whisper names
   are `UNKNOWN` and refused; paths are refused by the request parser.
@@ -260,7 +269,8 @@ fillers dropped by Haas, the `warnings` of each transcript (fallbacks to NeMo se
   server without authentication), and not `speech worker` (its point, a model kept loaded, does not apply to a
   per-request worker process).
 - Models (see the licence table below), named as speech.cpp names them: `reazonspeech-v2` (default),
-  `parakeet-tdt_ctc-0.6b-ja`, `haas-ja-v1.0`, `qwen3-asr-0.6b`, `qwen3-asr-1.7b`, each optionally `:TYPE`
+  `parakeet-tdt_ctc-0.6b-ja`, `haas-ja-v1.0`, `parakeet-tdt-0.6b-v3` (ADR-040; its default file is the 1.26 GB `f16`,
+  `:q8_0` is 0.67 GB and `:q4_k` 0.36 GB), `qwen3-asr-0.6b`, `qwen3-asr-1.7b`, each optionally `:TYPE`
   (`f16`, `q8_0`, `q6_k`, `q5_k`, `q4_k`, where speech.cpp's catalog has that file). The region detector
   `silero-vad` is required too.
 - Never downloads: `model_status` asks `speech models --json` which files are fetched, and recognition passes those
@@ -273,15 +283,22 @@ fillers dropped by Haas, the `warnings` of each transcript (fallbacks to NeMo se
   (threshold 0.5, 300 ms pad, 500 ms silence, 10 s longest region), each region cut from the WAV, then `speech asr
   <model.gguf> --format json --language <lang> [--timestamps] r00001.wav ...` (up to 200 regions per run). By regions
   because a FastConformer model loses whole sentences of a long stretch; `vad_filter` has no effect here.
-- Timing: ReazonSpeech, parakeet and Haas give segments (cut after `。？！.?!`) and tokens with times; segments are
+- Timing: ReazonSpeech, both parakeet models and Haas give segments (cut after `。？！.?!`) and tokens with times; segments are
   offset by their region's start and `words` are built from the tokens as speech.cpp's `words_of` does (each kana or
   kanji token is a word; tokens of a spaced script join up to the next space; a word without duration joins the word
   before it). Qwen3-ASR gives no times in
   speech.cpp, so each region is one segment and `words` is null, with a warning; a timed model that answers
   `untimed` is treated the same. No time is interpolated.
-- Languages: `ja` for ReazonSpeech, parakeet and Haas; Qwen3-ASR's 30 (`ar cs da de el en es fa fi fil fr hi hu id it
-  ja ko mk ms nl pl pt ro ru sv th tr vi yue zh`). The language is required (no detection); a language the model does
-  not have is `INVALID_INPUT` (`reason: language_unsupported`) before anything runs.
+- Languages: `ja` for ReazonSpeech, parakeet-tdt_ctc-0.6b-ja and Haas; parakeet-tdt-0.6b-v3's 25 European languages
+  (`bg cs da de el en es et fi fr hr hu it lt lv mt nl pl pt ro ru sk sl sv uk`, its model card's and speech.cpp's
+  catalog's); Qwen3-ASR's 30 (`ar cs da de el en es fa fi fil fr hi hu id it ja ko mk ms nl pl pt ro ru sv th tr vi yue
+  zh`). The language is required (no detection); a language the model does not have is `INVALID_INPUT` (`reason:
+  language_unsupported`) before audio extraction. Only Qwen3-ASR is steered by it: the FastConformer models only check
+  it, and parakeet-tdt-0.6b-v3 finds the language of the audio itself, so the transcript's `language` is the requested
+  one (`language_source: requested`).
+- Long recordings: the parakeet models attend over the whole input, so memory grows with its square; the engine only
+  ever sends one region of speech (at most 10 s plus padding). parakeet-tdt-0.6b-v3's card gives 24 minutes for one pass
+  (full attention, A100 80 GB); that is recorded as `single_pass_s` and tested against the region length.
 - Parameters: `initial_prompt` and `temperature > 0` are refused (`parameter_unsupported`); `beam_size` is ignored with
   a warning; no `vocabulary` (Haas's `--keywords` in speech.cpp gives text without times). Confidence: null.
 - Timeout: `speech` runs in its own process group and is stopped a little before `budget.timeout`
@@ -297,19 +314,26 @@ fillers dropped by Haas, the `warnings` of each transcript (fallbacks to NeMo se
 
 Read from the Hugging Face model cards (front matter `license:` and the licence section) of the upstream weights and of
 the converted GGUF repositories at the revisions speech.cpp 0.10.0's catalog pins. Only models whose licence allows
-commercial use are registered. Nothing in this table is unverified.
+commercial use are registered. Nothing in this table is unverified; the parakeet-tdt-0.6b-v3 row was read on 2026-11-12
+(ADR-040).
 
 | model | upstream weights | licence | commercial use | converted files (catalog revision) |
 |---|---|---|---|---|
 | `reazonspeech-v2` | [reazon-research/reazonspeech-nemo-v2](https://huggingface.co/reazon-research/reazonspeech-nemo-v2) | Apache-2.0 | yes | [sakasegawa/reazonspeech-nemo-v2-GGUF](https://huggingface.co/sakasegawa/reazonspeech-nemo-v2-GGUF) `ed04d9e`, Apache-2.0 |
 | `parakeet-tdt_ctc-0.6b-ja` | [nvidia/parakeet-tdt_ctc-0.6b-ja](https://huggingface.co/nvidia/parakeet-tdt_ctc-0.6b-ja) | CC-BY-4.0 | yes, with attribution | [sakasegawa/parakeet-tdt_ctc-0.6b-ja-GGUF](https://huggingface.co/sakasegawa/parakeet-tdt_ctc-0.6b-ja-GGUF) `f7cb538`, CC-BY-4.0 |
+| `parakeet-tdt-0.6b-v3` | [nvidia/parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) `541d1f9` | CC-BY-4.0 | yes, with attribution | [sakasegawa/parakeet-tdt-0.6b-v3-GGUF](https://huggingface.co/sakasegawa/parakeet-tdt-0.6b-v3-GGUF) `b7ed82d`, CC-BY-4.0 |
 | `haas-ja-v1.0` | [third-intelligence/Haas-ja-v1.0](https://huggingface.co/third-intelligence/Haas-ja-v1.0) | Apache-2.0 | yes | [sakasegawa/Haas-ja-v1.0-GGUF](https://huggingface.co/sakasegawa/Haas-ja-v1.0-GGUF) `6b965d5`, Apache-2.0 |
 | `qwen3-asr-0.6b` | [Qwen/Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B) | Apache-2.0 (front matter; no licence section) | yes | [sakasegawa/Qwen3-ASR-0.6B-GGUF](https://huggingface.co/sakasegawa/Qwen3-ASR-0.6B-GGUF) `ee78f87`, Apache-2.0 |
 | `qwen3-asr-1.7b` | [Qwen/Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) | Apache-2.0 (the same) | yes | [sakasegawa/Qwen3-ASR-1.7B-GGUF](https://huggingface.co/sakasegawa/Qwen3-ASR-1.7B-GGUF) `81e2423`, Apache-2.0 |
 | `silero-vad` (region detector) | [snakers4/silero-vad](https://github.com/snakers4/silero-vad) | MIT | yes | [sakasegawa/silero-vad-GGUF](https://huggingface.co/sakasegawa/silero-vad-GGUF) `7fcb7aa`, MIT |
 
 The licences of the training data were not assessed; they are not the model licences. speech.cpp's other models
-(parakeet-tdt-0.6b-v3, Nemotron 3.5 Transcribe, the synthesis models) are not registered.
+(Nemotron 3.5 Transcribe, the synthesis models) are not registered.
+
+Attribution for the two CC-BY-4.0 models (both NVIDIA's) is recorded in `engines/speechcpp.py` `MODELS[...]["attribution"]`:
+the model and its card, the licence (<https://creativecommons.org/licenses/by/4.0/>), and that speech.cpp's GGUF files
+change the weights' format and quantize them without retraining. Whoever shares those weights, or material adapted from
+them, gives that credit; the skill itself never redistributes them (`speech pull` fetches them).
 
 ### Trying speechcpp
 
@@ -319,6 +343,8 @@ speech pull reazonspeech-v2 silero-vad        # 0.66 GB + 1.2 MB, once, outside 
 transcription doctor                          # engine:speechcpp, speechcpp:binary, speechcpp:backend, model rows
 transcription transcribe talk.mp4 --engine speechcpp --language ja --word-timestamps -o talk.json
 transcription transcribe talk.mp4 --engine speechcpp --model qwen3-asr-0.6b --language en -o talk_en.json   # words null
+speech pull parakeet-tdt-0.6b-v3:q8_0        # 0.67 GB; English and 24 other European languages, with word times
+transcription transcribe talk.mp4 --engine speechcpp --model parakeet-tdt-0.6b-v3:q8_0 --language en --word-timestamps -o talk_en_words.json
 ```
 
 ## whisperx (optional word-alignment engine, ADR-038)
@@ -330,8 +356,8 @@ transcription transcribe talk.mp4 --engine speechcpp --model qwen3-asr-0.6b --la
   language=)`, then `load_align_model(language_code=, model_name=<explicit repo>, model_cache_only=)` and
   `align(..., return_char_alignments=False)`. The audio is the prepared WAV read with `wave` (never `whisperx.load_audio`,
   which starts ffmpeg).
-- Models: the Whisper names and Hugging Face cache of `faster_whisper` (default `large-v3`), plus one alignment model per
-  language and NLTK `punkt_tab`; `transcription models pull MODEL --engine whisperx` fetches all of them. Offline, or with
+- Models: the Whisper names and Hugging Face cache of `faster_whisper` (default `large-v3`), with the same per-model
+  limits (`distil-large-v3.5` is English only, ADR-040), plus one alignment model per language and NLTK `punkt_tab`; `transcription models pull MODEL --engine whisperx` fetches all of them. Offline, or with
   downloads off, each missing piece is `MODEL_UNAVAILABLE` (`MODEL_MISSING`, `details.component`).
 - Languages and licences (read 2026-10-31; only commercially usable alignment weights are used):
 

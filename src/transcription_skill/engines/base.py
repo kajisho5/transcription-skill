@@ -13,7 +13,9 @@ capability; it is not a hint about quality and the skill never picks an engine b
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
+
+from ..errors import TranscriptionError
 
 EXECUTION_LOCAL = "local"      # recognition runs on this machine
 EXECUTION_REMOTE = "remote"    # recognition runs on another host (a cloud ASR service); none implemented
@@ -141,6 +143,21 @@ class EngineResult:
                    warnings=list(d.get("warnings") or []))
 
 
+def refuse_model_language(engine_id: str, model: str, language: Optional[str], languages: Optional[Sequence[str]]) -> None:
+    """INVALID_INPUT when `model` recognizes only `languages` (TranscriptionEngine.model_languages) and the request
+    asks for another language (`language_unsupported`) or for none (`language_detection_unsupported`: the skill
+    never supplies a language, ADR-023). Shared by the service's check and the engines' own (ADR-040)."""
+    if languages is None:
+        return
+    if language is None:
+        raise TranscriptionError("INVALID_INPUT", f"model {model} of engine {engine_id} recognizes only {', '.join(languages)} and does not "
+                                 "detect the language; pass 'language' explicitly",
+                                 {"engine": engine_id, "model": model, "reason": "language_detection_unsupported", "supported": list(languages)})
+    if language not in languages:
+        raise TranscriptionError("INVALID_INPUT", f"model {model} of engine {engine_id} does not recognize language {language!r}",
+                                 {"engine": engine_id, "model": model, "reason": "language_unsupported", "supported": list(languages)})
+
+
 class TranscriptionEngine:
     """Contract every engine implements. Class attributes are static facts so registry/doctor/dry-run
     can describe an engine without loading a model."""
@@ -186,6 +203,13 @@ class TranscriptionEngine:
         """Names of request parameters (TranscribeRequest.parameters()) set to a value this engine cannot
         honour; the service refuses such a request instead of silently ignoring them. Default: none."""
         return []
+
+    def model_languages(self, model: str) -> Optional[List[str]]:
+        """The languages one model recognizes when that is fewer than the engine's `supported_languages` (an
+        English-only checkpoint, one model of a multi-model engine); None when the model takes every one of them
+        or the name is unknown. The service refuses a request in another language, or one without a language,
+        before anything runs, and the selector rejects the engine for such a named model (ADR-040). Default: None."""
+        return None
 
     def doctor_rows(self) -> List[Dict[str, Any]]:
         """Extra `doctor` rows ({check, status, detail, ...}) about what the engine runs on: for an engine that

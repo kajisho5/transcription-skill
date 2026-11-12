@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from . import __version__
 from .cache import TranscriptCache, cache_key
 from .engines import TranscriptionEngine, get_engine
-from .engines.base import MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED, EngineRequest, EngineResult
+from .engines.base import MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED, EngineRequest, EngineResult, refuse_model_language
 from .engines.faster_whisper import LANGUAGE_DETECTION_MIN_PROBABILITY
 from .errors import TranscriptionError
 from .media import child_env, extract_audio, fingerprint_file, probe
@@ -102,6 +102,8 @@ class TranscriptionService:
         if req.language is None and not engine.supports_language_detection():
             raise TranscriptionError("INVALID_INPUT", f"engine {engine.id} cannot detect the language; pass 'language' explicitly",
                                      {"engine": engine.id, "reason": "language_detection_unsupported"})
+        # a model limited to some languages (an English-only checkpoint, one model of speechcpp), before any audio work (ADR-040)
+        refuse_model_language(engine.id, req.model, req.language, engine.model_languages(req.model))
         if req.vocabulary is not None and not engine.supports_vocabulary():
             raise TranscriptionError("INVALID_INPUT", f"engine {engine.id} does not take a custom vocabulary; use an engine with the "
                                      f"custom_vocabulary capability, or initial_prompt for a faster_whisper vocabulary hint",

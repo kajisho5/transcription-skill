@@ -11,16 +11,33 @@ import glob
 import math
 import os
 import shutil
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..errors import TranscriptionError
 from .base import (CAP_LOCAL_MODEL, CAP_MODEL_DOWNLOAD, EXECUTION_LOCAL, MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED, MODEL_MISSING,
-                   MODEL_UNKNOWN, EngineRequest, EngineResult, EngineSegment, EngineWord, ModelStatus, TranscriptionEngine)
+                   MODEL_UNKNOWN, EngineRequest, EngineResult, EngineSegment, EngineWord, ModelStatus, TranscriptionEngine,
+                   refuse_model_language)
 
 ENGINE_ID = "faster_whisper"
 MODEL_NAMES = ("tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "medium.en", "large-v1", "large-v2",
-               "large-v3", "large", "distil-large-v2", "distil-medium.en", "distil-small.en", "distil-large-v3", "large-v3-turbo", "turbo")
+               "large-v3", "large", "distil-large-v2", "distil-medium.en", "distil-small.en", "distil-large-v3", "large-v3-turbo", "turbo",
+               "distil-large-v3.5")
+# Checkpoints limited to some languages, as their model cards say, read on 2026-11-12 (ADR-040): a request in another
+# language, or one without a language, is refused before anything runs. `since` is the first faster-whisper release
+# whose `faster_whisper.utils._MODELS` resolves the name (to `repo`); an older one reports the model MODEL_MISSING.
+# The other English-only names (`*.en`, distil-large-v2, distil-large-v3, distil-medium.en, distil-small.en) are not
+# listed here and keep their behaviour.
+MODEL_FACTS: Dict[str, Dict[str, Any]] = {
+    "distil-large-v3.5": {"languages": ("en",), "licence": "MIT", "card": "https://huggingface.co/distil-whisper/distil-large-v3.5",
+                          "repo": "distil-whisper/distil-large-v3.5-ct2", "since": (1, 2, 0)},
+}
 LANGUAGE_DETECTION_MIN_PROBABILITY = 0.5   # below this the transcript says "unknown" instead of guessing
+
+
+def checkpoint_languages(model: str) -> Optional[List[str]]:
+    """The languages a Whisper checkpoint is limited to (MODEL_FACTS), or None; also read by the whisperx engine."""
+    facts = MODEL_FACTS.get(model)
+    return list(facts["languages"]) if facts else None
 
 
 def _import():
@@ -77,6 +94,9 @@ class FasterWhisperEngine(TranscriptionEngine):
     def supports_language_detection(self) -> bool:
         return True
 
+    def model_languages(self, model: str) -> Optional[List[str]]:
+        return checkpoint_languages(model)
+
     def model_capabilities(self) -> List[str]:
         return [CAP_LOCAL_MODEL] + ([CAP_MODEL_DOWNLOAD] if self.download else [])
 
@@ -106,6 +126,11 @@ class FasterWhisperEngine(TranscriptionEngine):
             return ModelStatus(model, "UNKNOWN", MODEL_UNKNOWN, None, None, f"not a known Whisper model name; known: {', '.join(MODEL_NAMES)}")
         if not self._mod:
             return ModelStatus(model, "MISSING", MODEL_MISSING, None, None, self.unavailable_reason() or "engine unavailable")
+        if model in MODEL_FACTS and not self._repo_id(model):
+            need = ".".join(str(n) for n in MODEL_FACTS[model]["since"])
+            return ModelStatus(model, "MISSING", MODEL_MISSING, None, None,
+                               f"faster-whisper {self.version or '(unknown version)'} does not know {model}; it needs faster-whisper {need} "
+                               "or later (pip install -U faster-whisper)")
         snap = self._cached_snapshot(model)
         if snap:
             return ModelStatus(model, "AVAILABLE", MODEL_AVAILABLE, "local", snap, "in the local Hugging Face cache")
@@ -156,6 +181,7 @@ class FasterWhisperEngine(TranscriptionEngine):
             raise TranscriptionError("MODEL_UNAVAILABLE", f"model {request.model!r}: {ms.detail}", {"availability": ms.availability, "model": request.model, "offline": request.offline})
         if request.language is not None and request.language not in self.supported_languages:
             raise TranscriptionError("INVALID_INPUT", f"language {request.language!r} is not supported by {self.id}")
+        refuse_model_language(self.id, request.model, request.language, self.model_languages(request.model))
         try:
             model = self._mod.WhisperModel(request.model, device=self.device, compute_type=self.compute_type,
                                            local_files_only=(not self.download) or request.offline)
