@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.2 - 2026-11-12
+
+- Long recordings: chunked at pauses, parallel, cached per chunk, resumable (ADR-042) (#55) (8646c14)
+
 ## 0.11.1 - 2026-11-12
 
 - fix(qwen3_asr): split space-separated words out of an untimed group (#54) (adb71b7)
