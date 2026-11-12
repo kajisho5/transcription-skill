@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.0 - 2026-11-12
+
+- parakeet-tdt-0.6b-v3 on speechcpp, distil-large-v3.5 on faster_whisper, per-model language limits (ADR-040) (#52) (079c8f9)
+
 ## 0.9.1 - 2026-11-12
 
 - fix(words): robust dictionary version lookup and per-writer cache temp files (#51) (a5c452e)
