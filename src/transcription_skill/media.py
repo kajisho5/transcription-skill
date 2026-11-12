@@ -153,6 +153,57 @@ def extract_audio(src: str, dst: str, audio_stream: int = 0, timeout: float = 60
     return {"tool": "ffmpeg", "recipe": dict(AUDIO_RECIPE), "audio_stream_index": audio_stream, "stream": f"0:a:{audio_stream}"}
 
 
+def probe_container(path: str, timeout: float = 120.0) -> str:
+    """ffprobe's format name of a file that may still be being written (no duration needed). Raises UNSUPPORTED_MEDIA."""
+    ffprobe = find_tool("ffprobe")
+    if not ffprobe:
+        raise TranscriptionError("ENGINE_UNAVAILABLE", "ffprobe not found on PATH (install FFmpeg)")
+    proc = subprocess.run([ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path], stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, text=True, timeout=max(1.0, timeout), env=child_env())
+    try:
+        raw = json.loads(proc.stdout or "{}") if proc.returncode == 0 else {}
+    except ValueError:
+        raw = {}
+    fmt = (raw.get("format") or {}).get("format_name")
+    if not fmt or not any(s.get("codec_type") == "audio" for s in raw.get("streams") or []):
+        raise TranscriptionError("UNSUPPORTED_MEDIA", f"ffprobe cannot read an audio stream from {os.path.basename(path)} (yet)")
+    return str(fmt)
+
+
+def tail_argv(ffmpeg: str, src: str, dst: str, start_seconds: float, audio_stream: int = 0, wav: bool = False) -> List[str]:
+    """Decode `src` from `start_seconds` to its current end as raw mono 16 kHz s16le samples (a file still being written,
+    ADR-043). A WAV header written before the recording ended states a data size that is too small, so for WAV input the
+    demuxer is told to ignore it and read to the end of the file."""
+    r = AUDIO_RECIPE
+    return ([ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y"] + (["-ignore_length", "1"] if wav else [])
+            + ["-ss", f"{start_seconds:.6f}", "-i", src, "-map", f"0:a:{audio_stream}", "-vn", "-sn", "-dn",
+               "-ac", str(r["channels"]), "-ar", str(r["sample_rate"]), "-c:a", r["codec"], "-f", "s16le", dst])
+
+
+def extract_tail(src: str, dst: str, start_seconds: float, audio_stream: int = 0, wav: bool = False, timeout: float = 600.0) -> bytes:
+    """The raw samples of `src` from `start_seconds` on, as ffmpeg can decode them now. The last packet of a file that is
+    being written may be incomplete; what decodes is returned and the rest comes with the next read."""
+    ffmpeg = find_tool("ffmpeg")
+    if not ffmpeg:
+        raise TranscriptionError("ENGINE_UNAVAILABLE", "ffmpeg not found on PATH (install FFmpeg)")
+    try:
+        proc = subprocess.run(tail_argv(ffmpeg, src, dst, start_seconds, audio_stream, wav), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, timeout=max(1.0, timeout), env=child_env())
+    except subprocess.TimeoutExpired:
+        raise TranscriptionError("TRANSCRIPTION_TIMEOUT", f"reading the recording exceeded {timeout:g}s")
+    data = b""
+    if os.path.exists(dst):
+        with open(dst, "rb") as fh:
+            data = fh.read()
+        os.remove(dst)
+    if proc.returncode != 0 and not data:
+        tail = "\n".join(proc.stderr.strip().splitlines()[-3:])
+        if "Invalid argument" in tail or "nothing was encoded" in tail or not tail:
+            return b""                                    # nothing new past start_seconds yet
+        raise TranscriptionError("TRANSCRIPTION_FAILED", f"reading the recording failed: {tail}")
+    return data[: len(data) - len(data) % 2]
+
+
 def _f(v: Any) -> Optional[float]:
     try:
         return float(v) if v is not None else None

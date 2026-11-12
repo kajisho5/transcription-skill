@@ -12,9 +12,11 @@ import re
 import shutil
 import subprocess
 import sys
+import struct
 import tempfile
 import time
 import unittest
+import wave
 from pathlib import Path
 
 from transcription_skill.engines import get_engine
@@ -372,6 +374,66 @@ class LongRecordingTests(unittest.TestCase):
         self.assertEqual(rk["chunks_from_cache"], done)
         self.assertEqual(rk["chunks_recognized"], rk["chunk_count"] - done)
         self.assertEqual([(s["start"], s["end"], s["text"]) for s in resumed["segments"]], [(s["start"], s["end"], s["text"]) for s in full["segments"]])
+
+
+FOLLOW_MAX_WER = 0.1    # finals of a followed recording against one pass over the finished file (ADR-043)
+
+
+@unittest.skipUnless(HAVE_FFMPEG and ENGINE_OK, "needs ffmpeg and faster-whisper (pip install faster-whisper)")
+class FollowTests(unittest.TestCase):
+    """`transcribe --follow` (ADR-043) with the real engine and the smallest model: en_short.wav 6 times (47 s) is
+    written to a new WAV in 5 s windows, the way a recorder writes (header first, sizes corrected at the end), while
+    the CLI follows it. The finals must equal one pass over the finished file within FOLLOW_MAX_WER."""
+
+    def test_finals_of_a_growing_file_match_one_pass(self):
+        tmp = tempfile.mkdtemp(prefix="ts_follow_")
+        proc = None
+        try:
+            src = repeated(str(FX / "en_short.wav"), 6, tmp)
+            with wave.open(src, "rb") as wf:
+                params, data = wf.getparams(), wf.readframes(wf.getnframes())
+            dst = os.path.join(tmp, "recording.wav")
+            with wave.open(dst, "wb") as wf:                  # a 44-byte header with data size 0: the recorder has not finished
+                wf.setparams(params)
+                wf.writeframes(b"")
+            ws = os.path.join(tmp, "ws")
+            out = os.path.join(tmp, "followed.json")
+            cmd = [sys.executable, "-m", "transcription_skill.cli", "transcribe", dst, "--follow", "--language", "en", "--model", LONG_MODEL,
+                   "--idle-seconds", "8", "--poll-seconds", "0.2", "--workspace", ws, "-o", out]
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=dict(os.environ, PYTHONUTF8="1"))
+            step = 5 * 16000 * 2
+            with open(dst, "ab") as fh:
+                for i in range(0, len(data), step):
+                    fh.write(data[i:i + step])
+                    fh.flush()
+                    time.sleep(2.0)
+            size = os.path.getsize(dst)
+            with open(dst, "r+b") as fh:                      # the recorder closes the file: sizes corrected
+                fh.seek(4)
+                fh.write(struct.pack("<I", size - 8))
+                fh.seek(40)
+                fh.write(struct.pack("<I", size - 44))
+            stdout, stderr = proc.communicate(timeout=600)
+            self.assertEqual(proc.returncode, 0, stderr[-2000:] + stdout[-2000:])
+            events = [json.loads(line) for line in stdout.splitlines()]
+            self.assertEqual(events[-1]["type"], "end")
+            finals = [e["segment"] for e in events if e["type"] == "final"]
+            self.assertEqual([s["id"] for s in finals], [f"seg_{i:04d}" for i in range(1, len(finals) + 1)])
+            doc = json.loads(Path(out).read_text(encoding="utf-8"))
+            self.assertGreaterEqual(doc["provenance"]["follow"]["rounds"], 2)      # recognized while the file grew, not only at the end
+            self.assertTrue(any(e["type"] == "partial" for e in events))
+            self.assertTrue(validate_transcript(doc).ok)
+            self.assertEqual([s["text"] for s in doc["segments"]], [s["text"] for s in finals])
+            batch = TranscriptionService(workspace=ws).transcribe(parse_request({"input": dst, "model": LONG_MODEL, "language": "en",
+                                                                                 "cache": False}))["transcript"]
+            ref = " ".join(s["text"] for s in batch["segments"])
+            hyp = " ".join(s["text"] for s in finals)
+            self.assertLessEqual(wer(ref, hyp), FOLLOW_MAX_WER, (ref, hyp))
+        finally:
+            if proc is not None and proc.poll() is None:    # a failed test must not leave the follower running
+                proc.kill()
+                proc.communicate()
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 @unittest.skipUnless(ENGINE_OK, "needs faster-whisper (pip install faster-whisper)")

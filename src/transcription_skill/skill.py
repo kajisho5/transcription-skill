@@ -36,6 +36,7 @@ CAPABILITIES = [
     "speaker_merge",            # speaker_id filled from diarization-skill turns (`transcription/speakers`, transcribe `speaker_turns`); ADR-037
     "word_index",               # every word carries `index`, 0-based and contiguous over the whole transcript; ADR-039
     "dictionary_word_segmentation",   # request `word_segmentation: "dictionary"` (ja, optional [ja] extra): dictionary words with `timing`, `pos`; ADR-039
+    "follow_growing_files",     # CLI `transcribe --follow`: partial / final segments as JSON lines while the file is written; ADR-043
     "chunked_long_recordings",  # request `chunk_seconds`: cut at pauses, `parallel` chunks at a time, cached per chunk, resumable; ADR-042
 ]
 

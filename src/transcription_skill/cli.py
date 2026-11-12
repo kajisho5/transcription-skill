@@ -86,8 +86,55 @@ def _load_vocabulary_file(path: str) -> Any:
             raise TranscriptionError("INVALID_INPUT", f"vocabulary file is not valid JSON: {exc}")
 
 
+def cmd_follow(args: argparse.Namespace, params: Dict[str, Any]) -> int:
+    """`transcribe --follow`: JSON lines on stdout (follow-event/0.1), one per partial or final, then `end` (ADR-043).
+    Ctrl-C / SIGTERM stop following: what has been read so far is made final and the transcript is written."""
+    import signal
+    from .follow import FOLLOW_EVENT_SCHEMA
+    from .request import parse_request
+    from .service import TranscriptionService
+
+    def emit(event: Dict[str, Any]) -> None:
+        sys.stdout.write(json.dumps(event, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
+
+    stop = {"now": False}
+
+    def on_signal(signum: int, frame: Any) -> None:
+        stop["now"] = True
+
+    old = {sig: signal.signal(sig, on_signal) for sig in (signal.SIGINT, signal.SIGTERM)}
+    try:                                                # every failure, before or after following, is an `error` event
+        if params.pop("dry_run", False) or params.pop("speaker_turns", None) is not None:
+            raise TranscriptionError("INVALID_INPUT", "--follow cannot be combined with --dry-run or --speaker-turns", {"reason": "follow_options"})
+        for name, value in (("--window-seconds", args.window_seconds), ("--idle-seconds", args.idle_seconds), ("--poll-seconds", args.poll_seconds)):
+            if value is not None and not (0 < value <= 3600):
+                raise TranscriptionError("INVALID_INPUT", f"{name} must be in (0, 3600]")
+        req = parse_request(params)
+        out = OutputPolicy(args.allowed_output).resolve_output(args.output or _default_output(args.input), forbid=[args.input])
+        kw = {k: v for k, v in (("window_seconds", args.window_seconds), ("idle_seconds", args.idle_seconds),
+                                ("poll_seconds", args.poll_seconds)) if v is not None}
+        doc = TranscriptionService(workspace=req.workspace).follow(req, emit, should_stop=lambda: stop["now"], **kw)
+        try:
+            with open(out, "w", encoding="utf-8") as fh:
+                json.dump(doc, fh, ensure_ascii=False, indent=2)
+        except OSError as exc:
+            raise TranscriptionError("TRANSCRIPTION_FAILED", f"the transcript could not be written: {exc}", {"reason": "output_write_failed"})
+    except TranscriptionError as exc:
+        emit({"schema": FOLLOW_EVENT_SCHEMA, "type": "error", "error": exc.to_dict()["error"]})
+        return exc.exit_code
+    finally:
+        for sig, handler in old.items():
+            signal.signal(sig, handler)
+    emit({"schema": FOLLOW_EVENT_SCHEMA, "type": "end", "finals": len(doc["segments"]), "audio_seconds": doc["provenance"]["follow"]["audio_seconds"],
+          "output": os.path.abspath(out), "warnings": doc["warnings"]})
+    return 0
+
+
 def cmd_transcribe(args: argparse.Namespace) -> int:
     params = _transcribe_params(args)
+    if args.follow:
+        return cmd_follow(args, params)
     res = run_tool("transcription/transcribe", params)
     if args.dry_run:
         if args.json:
@@ -442,6 +489,13 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--parallel", type=int, metavar="N", help="with --chunk-seconds: recognize up to N chunks at a time (1-8, default 1)")
     t.add_argument("--speech-regions", metavar="FILE", help="with --chunk-seconds: media-analysis-skill speech_regions JSON of the same "
                    "file; cuts go in its pauses (default: the quietest point near each cut)")
+    t.add_argument("--follow", action="store_true", help="the file is still being written: emit partial and final segments as JSON "
+                   "lines while it grows, stop when it has not grown for --idle-seconds (or on Ctrl-C), then write the transcript "
+                   "(ADR-043); needs --language")
+    t.add_argument("--window-seconds", type=float, metavar="S", help="with --follow: recognize again each time S more seconds arrived (default 5)")
+    t.add_argument("--idle-seconds", type=float, metavar="S", help="with --follow: the recording is over when the file has not changed "
+                   "for S seconds (default 30)")
+    t.add_argument("--poll-seconds", type=float, metavar="S", help="with --follow: how often the file is checked (default 1)")
     t.add_argument("-o", "--output", help="transcript JSON path (default <input>.transcript.json)")
     t.add_argument("--dry-run", action="store_true", help="show what would run (engine, model, language, budget, cache status) without running ASR")
     t.add_argument("--json", action="store_true", help="print one JSON document on stdout")

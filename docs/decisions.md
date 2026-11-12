@@ -851,3 +851,49 @@
   13.1 s; chunked 20.1 s with `parallel` 1 (realtime factor 0.107), 13.4 s with 2 (0.071), 14.7 s with 4 (0.078); 60 s
   chunks with `parallel` 1: 16.2 s. Every run returned all 384 words of the 24 copies. Not measured: a real 2-8 h
   recording, a GPU, other engines chunked, the media-analysis-skill speech regions of a real file.
+
+## ADR-043 Recordings in progress: `transcribe --follow` with final segments that never change
+- Need: start transcribing an all-day recording while it is still being recorded. A partial result must be usable at once,
+  and what has been handed out as final must never move, so a consumer can act on it (subtitles, notes).
+- CLI only: `transcribe INPUT --follow --language L` (plus `--window-seconds` 5, `--idle-seconds` 30, `--poll-seconds` 1).
+  stdout is JSON lines of `transcription-skill/follow-event/0.1`: `final` (one segment), `partial` (the current
+  hypothesis for everything after the finals), `end` (counts and the transcript path) or `error`. It is not a
+  `transcription/*` tool: the `run -` transport returns one document, and a stream does not fit it. The service method
+  `TranscriptionService.follow(req, emit, ...)` is the library entry point.
+- Reading: the file is polled (size and mtime). Each time `window_seconds` more audio can be decoded, one bounded ffmpeg run
+  (fixed argv, `-ss <last final point>`) decodes from the last final point to the current end; the work per round is the
+  open tail, not the whole file. A WAV header written at the start states a data size of 0 or too small, so WAV input is
+  read with the demuxer's `-ignore_length 1` (only for WAV: other demuxers refuse the option). Until ffprobe can see an
+  audio stream (a recorder may have written only a header), it keeps waiting while the file changes. An MP4/MOV whose
+  index comes at the end cannot be read before it is closed; fragmented or streaming containers can.
+- Final rule (`follow.py`): the leading segments of a tail that end at least 1.5 s (HOLDBACK) before the end of the audio
+  read are final, in order; they get `seg_0001`, `seg_0002`, ... and are emitted once. The next tail starts at the
+  quietest point between the last final segment and the next one (the level rule of ADR-042), and final segments are
+  clamped to it, so no audio is recognized twice. A tail over 25 s without a final makes all but its last segment final
+  (continuous speech). When the file has not changed for `idle_seconds`, or the user stops it (Ctrl-C / SIGTERM), the rest
+  is recognized once more and all of it is final. Partial ids are the ids those segments would get as finals; a partial
+  event replaces the previous one.
+- Result: the finals go through `build_transcript` (the segment filter is the same, so the transcript ids equal the
+  emitted ids), are validated and written to `-o`; `provenance.follow` records the window, idle and holdback seconds,
+  rounds, finals and audio length. Not cached: the finals depend on when the audio arrived, so they are not the batch
+  result under the same parameters. `language` required, `chunk_seconds` refused with it.
+- Bounds: the file is decoded again only after it changed; a tail over 25 s with no speech moves the final point to
+  1.5 s before its end, and one long segment over 25 s is split after its last word ending 1.5 s before the end (without
+  words it is made final whole, with a warning), so the work per round never grows with the recording. `budget.timeout`
+  bounds every ffprobe / ffmpeg run of the session, and `budget.max_audio_seconds` is checked on the decoded length before
+  anything past it is recognized or emitted. Stopped before the recorder corrected its WAV header (ffprobe sees no
+  duration), the transcript takes its duration from the decoded samples. `word_segmentation: "dictionary"` is refused
+  (`follow_with_dictionary_segmentation`): finals carry engine words and could not change afterwards. Every failure in the
+  CLI, before, during or after following (writing the transcript included), is an `error` event.
+- Each round runs the engine in a fresh worker (the timeout boundary), so the model is loaded each round; with 5 s windows
+  and small models that is a second or two. Keeping one worker alive across rounds is left open.
+- Contract: additive. Capability `follow_growing_files`, the optional `provenance.follow` object in the transcript schema,
+  the new CLI flags. Tools, request fields and `CONTRACT_VERSION` 1.0 unchanged.
+- Tests. Unit (`tests/test_follow.py`): the tone recording of ADR-042 grown in 5, 3.3 and 7 s windows gives finals equal to
+  the known words exactly (once each, in order, word times within 10 ms), ids sequential, a partial never naming an id
+  already final; a forced final for speech with short pauses; the service on a real growing WAV with a header of data
+  size 0 written by a thread; stop; refusals; the tail reader against a too-small header; the CLI's JSON-line error.
+  Integration (`FollowTests`, faster-whisper `tiny`): `en_short.wav` 6 times (47 s) written in 5 s windows every 2 s
+  while the CLI follows it; finals equal one pass over the finished file within WER 0.1. Measured on this host: WER 0.010
+  (a window every 2 s, 10 rounds) and 0.021 (every 0.5 s, 5 rounds). Not verified: a real recorder, compressed growing
+  formats, hours of input.

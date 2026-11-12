@@ -14,8 +14,9 @@ import sys
 import threading
 import time
 import uuid
+from array import array
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import __version__
 from .cache import TranscriptCache, cache_key
@@ -25,7 +26,9 @@ from .engines import TranscriptionEngine, get_engine
 from .engines.base import MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED, EngineRequest, EngineResult, refuse_model_language
 from .engines.faster_whisper import LANGUAGE_DETECTION_MIN_PROBABILITY
 from .errors import TranscriptionError
-from .media import child_env, extract_audio, fingerprint_file, probe
+from .follow import (DEFAULT_IDLE_SECONDS, DEFAULT_POLL_SECONDS, DEFAULT_WINDOW_SECONDS, HOLDBACK_SECONDS, SAMPLE_RATE, Follower, file_state, follow_file,
+                     samples_to_wav)
+from .media import AUDIO_RECIPE, child_env, extract_audio, extract_tail, fingerprint_file, probe, probe_container
 from .models import LANGUAGE_UNKNOWN, Provenance, Segment, Source, Transcript, Word, new_id, now_iso
 from .paths import PathPolicy, make_run_dir, resolve_workspace
 from .normalize import normalize_text
@@ -77,18 +80,8 @@ class TranscriptionService:
         self._engine_override = engine
 
     # ---- shared preparation -------------------------------------------------------------------
-    def _prepare(self, req: TranscribeRequest) -> Dict[str, Any]:
-        policy = PathPolicy(req.allowed_input_roots)
-        path = policy.resolve_input(req.input)                       # resolved path is used for every later step
-        display_name = os.path.basename(os.path.abspath(req.input))  # what the caller named, for source.filename
-        meta = probe(path)
-        if req.audio_stream is not None and req.audio_stream >= meta["audio_stream_count"]:
-            raise TranscriptionError("INVALID_INPUT",
-                                     f"audio_stream {req.audio_stream} does not exist: {display_name} has {meta['audio_stream_count']} audio stream(s)",
-                                     {"audio_stream": req.audio_stream, "audio_stream_count": meta["audio_stream_count"]})
-        if meta["duration"] > req.budget.max_audio_seconds:
-            raise TranscriptionError("BUDGET_EXCEEDED", f"media is {meta['duration']:.1f}s, budget.max_audio_seconds is {req.budget.max_audio_seconds:g}s; transcription not started",
-                                     {"duration": meta["duration"], "max_audio_seconds": req.budget.max_audio_seconds})
+    def _check_engine(self, req: TranscribeRequest) -> Tuple[TranscriptionEngine, Any]:
+        """Everything about the engine and model that refuses a request before audio work: (engine, model status)."""
         engine = self._engine_override or get_engine(req.engine)
         if req.offline and engine.requires_network:
             raise TranscriptionError("ENGINE_UNAVAILABLE", f"engine {engine.id} needs the network for recognition and the request is offline",
@@ -119,6 +112,22 @@ class TranscriptionService:
         if model.availability not in (MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED):
             raise TranscriptionError("MODEL_UNAVAILABLE", f"model {req.model!r}: {model.detail}",
                                      {"engine": engine.id, "model": req.model, "availability": model.availability, "offline": req.offline})
+        return engine, model
+
+    def _prepare(self, req: TranscribeRequest, meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """`meta` replaces ffprobe's facts only for a followed recording whose header was never finished (ADR-043)."""
+        policy = PathPolicy(req.allowed_input_roots)
+        path = policy.resolve_input(req.input)                       # resolved path is used for every later step
+        display_name = os.path.basename(os.path.abspath(req.input))  # what the caller named, for source.filename
+        meta = probe(path) if meta is None else meta
+        if req.audio_stream is not None and req.audio_stream >= meta["audio_stream_count"]:
+            raise TranscriptionError("INVALID_INPUT",
+                                     f"audio_stream {req.audio_stream} does not exist: {display_name} has {meta['audio_stream_count']} audio stream(s)",
+                                     {"audio_stream": req.audio_stream, "audio_stream_count": meta["audio_stream_count"]})
+        if meta["duration"] > req.budget.max_audio_seconds:
+            raise TranscriptionError("BUDGET_EXCEEDED", f"media is {meta['duration']:.1f}s, budget.max_audio_seconds is {req.budget.max_audio_seconds:g}s; transcription not started",
+                                     {"duration": meta["duration"], "max_audio_seconds": req.budget.max_audio_seconds})
+        engine, model = self._check_engine(req)
         segmenter = get_segmenter() if req.word_segmentation == WORD_SEGMENTATION_DICTIONARY else None
         fp = fingerprint_file(path)
         if req.speech_regions_fingerprint is not None and not same_fingerprint(req.speech_regions_fingerprint, fp):
@@ -227,6 +236,104 @@ class TranscriptionService:
         if req.cache:
             cache.put(prep["cache_key"], doc)
         return {"transcript": doc, "cache_hit": False, "cache_key": prep["cache_key"], "warnings": warnings}
+
+    # ---- recordings in progress (ADR-043) ----------------------------------------------------
+    def follow(self, req: TranscribeRequest, emit: Callable[[Dict[str, Any]], None], window_seconds: float = DEFAULT_WINDOW_SECONDS,
+               idle_seconds: float = DEFAULT_IDLE_SECONDS, poll_seconds: float = DEFAULT_POLL_SECONDS,
+               should_stop: Callable[[], bool] = lambda: False) -> Dict[str, Any]:
+        """Transcribe `req.input` while it is being written: final and partial segments go to `emit` as they are known
+        (follow.py); when the file has not grown for `idle_seconds` (or `should_stop()`), the rest is made final and the
+        validated Transcript of the finals is returned. It is not cached: it is a live session, not the batch result."""
+        t0 = time.time()
+        if req.language is None:
+            raise TranscriptionError("INVALID_INPUT", "following a recording needs \"language\": each window is recognized on its own and "
+                                     "a transcript has one language", {"reason": "language_required_for_follow"})
+        if req.chunk_seconds is not None:
+            raise TranscriptionError("INVALID_INPUT", "follow and chunk_seconds cannot be combined", {"reason": "follow_with_chunking"})
+        if req.word_segmentation == WORD_SEGMENTATION_DICTIONARY:   # finals are emitted with engine words and must not change after
+            raise TranscriptionError("INVALID_INPUT", "follow emits engine words; word_segmentation 'dictionary' cannot be combined with it",
+                                     {"reason": "follow_with_dictionary_segmentation"})
+        path = PathPolicy(req.allowed_input_roots).resolve_input(req.input)
+        self._check_engine(req)
+        engine: TranscriptionEngine = self._engine_override or get_engine(req.engine)
+        wav_input = "wav" in self._wait_for_audio(path, idle_seconds, poll_seconds, should_stop, t0 + req.budget.timeout).split(",")
+        stream = req.audio_stream if req.audio_stream is not None else 0
+        ws = self._workspace_for(req)
+        run_dir = make_run_dir(ws, uuid.uuid4().hex)
+        deadline = t0 + req.budget.timeout
+        counter = [0]
+
+        def read_tail(start_sample: int) -> "array[int]":
+            data = extract_tail(path, os.path.join(run_dir, "tail.raw"), start_sample / float(SAMPLE_RATE), stream, wav_input,
+                                timeout=deadline - time.time())
+            seconds = (start_sample + len(data) // 2) / float(SAMPLE_RATE)
+            if seconds > req.budget.max_audio_seconds:   # before anything past the budget is recognized or emitted
+                raise TranscriptionError("BUDGET_EXCEEDED", f"the recording passed budget.max_audio_seconds ({req.budget.max_audio_seconds:g}s)",
+                                         {"duration": seconds, "max_audio_seconds": req.budget.max_audio_seconds})
+            a = array("h")
+            a.frombytes(data)
+            if sys.byteorder == "big":
+                a.byteswap()
+            return a
+
+        def recognize(samples: "array[int]") -> EngineResult:
+            counter[0] += 1
+            cdir = os.path.join(run_dir, f"window_{counter[0]:06d}")
+            os.mkdir(cdir)
+            try:
+                wav = os.path.join(cdir, "audio.wav")
+                samples_to_wav(samples, wav)
+                left = deadline - time.time()
+                if left <= 0:
+                    raise TranscriptionError("TRANSCRIPTION_TIMEOUT", f"budget.timeout ({req.budget.timeout:g}s) used up while following",
+                                             {"timeout": req.budget.timeout})
+                ereq = EngineRequest(audio_path=wav, language=req.language, model=req.model, word_timestamps=req.word_timestamps,
+                                     temperature=req.temperature, initial_prompt=req.initial_prompt, beam_size=req.beam_size, offline=req.offline,
+                                     vad_filter=req.vad_filter, vocabulary=req.vocabulary, timeout=left)
+                return self._run_engine(engine, ereq, left, cdir)
+            finally:
+                shutil.rmtree(cdir, ignore_errors=True)
+
+        follower = Follower(read_tail, recognize, emit, window_seconds=window_seconds, word_timestamps=req.word_timestamps)
+        try:
+            follow_file(path, follower, idle_seconds=idle_seconds, poll_seconds=poll_seconds, should_stop=should_stop, deadline=deadline)
+        finally:
+            shutil.rmtree(run_dir, ignore_errors=True)
+        try:
+            prep = self._prepare(req)                   # the file is complete now: probe, fingerprint, parameters
+        except TranscriptionError as exc:               # stopped before the recorder finished its header: use what was decoded
+            if exc.code != "UNSUPPORTED_MEDIA":
+                raise
+            meta = {"duration": follower.audio_seconds, "container": None, "size_bytes": os.path.getsize(path),
+                    "audio": {"codec": None, "channels": 1, "sample_rate": SAMPLE_RATE}, "audio_stream_count": stream + 1, "has_video": False}
+            prep = self._prepare(req, meta=meta)
+        extraction = {"tool": "ffmpeg", "recipe": dict(AUDIO_RECIPE), "audio_stream_index": stream, "stream": f"0:a:{stream}"}
+        processing = time.time() - t0
+        doc = build_transcript(req, prep, follower.result(), extraction, processing_seconds=processing, engine_seconds=processing, warnings=[])
+        doc["provenance"]["follow"] = {"window_seconds": window_seconds, "idle_seconds": idle_seconds, "holdback_seconds": HOLDBACK_SECONDS,
+                                       "rounds": follower.rounds, "finals": len(follower.finals), "audio_seconds": round(follower.audio_seconds, 6)}
+        rep = validate_transcript(doc, expected_fingerprint=prep["fingerprint"])
+        if not rep.ok:
+            raise TranscriptionError("INVALID_RESULT", "the followed transcript failed validation", {"errors": rep.errors[:10]})
+        return doc
+
+    @staticmethod
+    def _wait_for_audio(path: str, idle_seconds: float, poll_seconds: float, should_stop: Callable[[], bool], deadline: float) -> str:
+        """A recorder may have written only a header so far: probe again until an audio stream can be read, as long as the
+        file keeps changing (or idle_seconds have not passed yet). Returns ffprobe's format name."""
+        sig, quiet_since = file_state(path, None), time.time()
+        while True:
+            try:
+                return probe_container(path, timeout=deadline - time.time())
+            except TranscriptionError as exc:
+                if exc.code != "UNSUPPORTED_MEDIA" or should_stop() or time.time() > deadline:
+                    raise
+                now = file_state(path, sig)
+                if now != sig:
+                    sig, quiet_since = now, time.time()
+                elif time.time() - quiet_since >= idle_seconds:
+                    raise
+            time.sleep(poll_seconds)
 
     # ---- long recordings (ADR-042) ------------------------------------------------------------
     def _transcribe_chunked(self, req: TranscribeRequest, prep: Dict[str, Any], ereq: EngineRequest, run_dir: str, ws: str,
