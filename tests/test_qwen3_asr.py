@@ -363,7 +363,8 @@ class ModelTests(unittest.TestCase):
             e = Q.Qwen3AsrEngine()
             self.assertEqual(e.cache_parameters(Q.ASR_MODEL), {"engine_identity": {
                 "asr": f"Qwen/Qwen3-ASR-1.7B@{ASR['revision']}", "aligner": f"Qwen/Qwen3-ForcedAligner-0.6B@{Q.ALIGNER['revision']}",
-                "dtype": "bfloat16"}})
+                "dtype": "bfloat16", "words": Q.WORD_RULES}})
+            self.assertEqual(Q.WORD_RULES, 2)   # word-splitting rule of the ADR-041 addendum: older cache entries are not reused
             self.assertEqual(e.cache_parameters("other"), {})
 
 

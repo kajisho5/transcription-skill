@@ -110,9 +110,13 @@ class MappingTests(unittest.TestCase):
         # the engine marked its second word's times as its own estimate: a dictionary word whose edges fall on that
         # word's edges is still interpolated, never shown as measured
         words = [ew(1.0, 1.4, "東京"), dict(ew(1.4, 1.8, "都に"), timing="interpolated")]
-        out, why = W.map_dictionary_words("東京都に", words, [("東京", "noun"), ("都", "suffix"), ("に", "particle")])
+        # both edges of the dictionary word "都に" are the engine word's own edges: only the engine's marker decides
+        out, why = W.map_dictionary_words("東京都に", words, [("東京", "noun"), ("都に", "other")])
         self.assertIsNone(why)
-        self.assertEqual([w["timing"] for w in out], ["measured", "interpolated", "interpolated"])
+        self.assertEqual([w["timing"] for w in out], ["measured", "interpolated"])
+        unmarked = [ew(1.0, 1.4, "東京"), ew(1.4, 1.8, "都に")]
+        out, _ = W.map_dictionary_words("東京都に", unmarked, [("東京", "noun"), ("都に", "other")])
+        self.assertEqual([w["timing"] for w in out], ["measured", "measured"])
 
     def test_boundary_inside_an_engine_unit_splits_it_by_character_share_and_is_marked_interpolated(self):
         words = [ew(1.0, 1.6, "本日の", 0.95), ew(1.6, 2.4, "講演を", 0.9)]

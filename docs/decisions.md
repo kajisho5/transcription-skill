@@ -785,4 +785,6 @@
   the aligner's own; the inner ones are estimates). A group with no space between its items (CJK) stays one word with
   measured times, as before. Engine words may therefore carry `timing` too (`EngineWord.timing`, passed through by the
   service); dictionary mapping (ADR-039) treats such a word's edges as interpolated, never measured. The same split
-  applies where a repaired timestamp is dropped, so a repaired boundary is still never used.
+  applies where a repaired timestamp is dropped, so a repaired boundary is still never used. The word rule's version
+  (`words: 2`) is part of the engine identity in the cache key, so transcripts cached under the old rule are
+  computed again rather than served with words grouped the old way.

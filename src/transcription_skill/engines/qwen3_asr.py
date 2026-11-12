@@ -252,7 +252,7 @@ class Qwen3AsrEngine(TranscriptionEngine):
         if entry is None:
             return {}
         return {"engine_identity": {"asr": f"{entry['repo']}@{entry['revision']}", "aligner": f"{ALIGNER['repo']}@{ALIGNER['revision']}",
-                                    "dtype": self.dtype}}
+                                    "dtype": self.dtype, "words": WORD_RULES}}
 
     # ---- model resolution (never downloads)
     def model_status(self, model: str, offline: bool = False) -> ModelStatus:
@@ -444,6 +444,11 @@ class TimestampRecorder:
                 out.append(None if rec is None else aligned_items(res, rec))
         return out
 
+
+# The version of how aligner items become words. It is part of the cache identity, so a transcript cached under an
+# earlier rule is computed again instead of being served with words grouped the old way. 2: a group of several
+# space-separated words is split, with timing "interpolated" (ADR-041 addendum); 1 (unmarked): kept as one word.
+WORD_RULES = 2
 
 AlignedItem = Tuple[str, float, float, bool, bool]   # text, start s, end s, start is the aligner's own, end is the aligner's own
 
