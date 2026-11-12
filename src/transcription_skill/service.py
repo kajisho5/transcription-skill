@@ -26,8 +26,9 @@ from .media import child_env, extract_audio, fingerprint_file, probe
 from .models import LANGUAGE_UNKNOWN, Provenance, Segment, Source, Transcript, Word, new_id, now_iso
 from .paths import PathPolicy, make_run_dir, resolve_workspace
 from .normalize import normalize_text
-from .request import TranscribeRequest, default_workspace, summarize_for_display
+from .request import TranscribeRequest, default_workspace, parameters_hash, summarize_for_display
 from .validate import CONTAINMENT_TOLERANCE, validate_transcript
+from .words import WORD_SEGMENTATION_DICTIONARY, get_segmenter, needs_word_indices, segment_dictionary_words, with_word_indices
 
 WORKER_MODULE = "transcription_skill.engines.worker"
 # Whisper-family engines emit timestamps on a 0.02 s grid inside 30 s windows and regularly place the last
@@ -113,10 +114,14 @@ class TranscriptionService:
         if model.availability not in (MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED):
             raise TranscriptionError("MODEL_UNAVAILABLE", f"model {req.model!r}: {model.detail}",
                                      {"engine": engine.id, "model": req.model, "availability": model.availability, "offline": req.offline})
+        segmenter = get_segmenter() if req.word_segmentation == WORD_SEGMENTATION_DICTIONARY else None
         fp = fingerprint_file(path)
-        key = cache_key(fp, engine.id, engine.version or "unknown", engine.execution_mode, req.model, None, req.parameters())
+        parameters = req.parameters()
+        if segmenter is not None:   # a different SudachiPy / dictionary release can split words differently (ADR-039)
+            parameters = dict(parameters, word_segmenter=segmenter.identity)
+        key = cache_key(fp, engine.id, engine.version or "unknown", engine.execution_mode, req.model, None, parameters)
         return {"path": path, "display_name": display_name, "meta": meta, "engine": engine, "model": model, "fingerprint": fp, "cache_key": key,
-                "path_policy": policy.describe()}
+                "path_policy": policy.describe(), "segmenter": segmenter, "parameters": parameters}
 
     def _workspace_for(self, req: TranscribeRequest) -> str:
         return resolve_workspace(req.workspace) if req.workspace else self.workspace
@@ -142,6 +147,8 @@ class TranscriptionService:
             "model": prep["model"].to_dict(),
             "language": req.language or "auto",
             "word_timestamps": req.word_timestamps,
+            "word_segmentation": {"mode": req.word_segmentation,
+                                  "segmenter": prep["segmenter"].identity if prep["segmenter"] is not None else None},
             "offline": req.offline,
             "network_use": "none" if (req.offline or (not eng.requires_network and prep["model"].availability == MODEL_AVAILABLE))
                            else ("model download" if prep["model"].availability == MODEL_DOWNLOAD_REQUIRED else "recognition"),
@@ -168,6 +175,9 @@ class TranscriptionService:
                 warnings.append(f"CACHE_INVALID: {exc.message}; recomputing")
                 hit = None
             if hit is not None:
+                if needs_word_indices(hit):   # stored before word indices existed (ADR-039): number its words, store it back
+                    hit = dict(hit, segments=with_word_indices(hit["segments"]))
+                    cache.put(prep["cache_key"], hit)
                 return {"transcript": hit, "cache_hit": True, "cache_key": prep["cache_key"], "warnings": warnings}
 
         engine: TranscriptionEngine = prep["engine"]
@@ -344,14 +354,21 @@ def build_transcript(req: TranscribeRequest, prep: Dict[str, Any], result: Engin
         segments.append(Segment(id=seg_id, start=start, end=end, text=text, raw_text=raw,
                                 confidence=None if s.confidence is None else float(s.confidence), words=words, speaker_id=None).to_dict())
 
+    segmenter = prep.get("segmenter")
+    if segmenter is not None:
+        segments, notes = segment_dictionary_words(segments, segmenter)
+        warnings.extend(notes)
+    segments = with_word_indices(segments)
+
     src = Source(filename=prep["display_name"], fingerprint=prep["fingerprint"], size_bytes=int(meta["size_bytes"]), media_duration=duration,
                  audio_channels=meta["audio"].get("channels"), sample_rate=meta["audio"].get("sample_rate"), container=meta.get("container"),
                  has_video=bool(meta["has_video"]))
     created = now_iso()
     engine: TranscriptionEngine = prep["engine"]
+    parameters = prep.get("parameters") or req.parameters()
     prov = Provenance(engine=result.engine_id, engine_version=result.engine_version, execution_mode=engine.execution_mode,
                       model=result.model, model_version=result.model_version,
-                      parameters=req.parameters(), parameters_hash=req.parameters_hash(), cache_key=prep["cache_key"], created_at=created,
+                      parameters=parameters, parameters_hash=parameters_hash(parameters), cache_key=prep["cache_key"], created_at=created,
                       processing_seconds=round(processing_seconds, 3), skill_version=__version__, language_detection=detection,
                       audio_extraction=dict(extraction, engine_seconds=round(engine_seconds, 3)))
     asset_id = req.asset_id or ("asset_" + prep["fingerprint"].split(":", 1)[1][:16])

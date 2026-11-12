@@ -35,6 +35,7 @@ stdout) and `transcribe` accepts `--dry-run` (plan only, no ASR).
 | "transcribe this", "what do they say" | `transcribe input.mp4` |
 | "it's in Japanese" / "英語です" | `transcribe input.mp4 --language ja` / `--language en` |
 | "I need word-level timing" | `transcribe input.mp4 --word-timestamps` |
+| "Japanese, I need real words (for cut points / line breaks), with part of speech" | `transcribe input.mp4 --language ja --word-timestamps --word-segmentation dictionary`; needs `pip install "transcription-skill[ja]"` (SudachiPy). Refused for other languages: their engine words are already words |
 | "give me an SRT / VTT" | `transcribe` then `export t.json --format srt -o t.srt` |
 | "when does each part of speech start and end" | `segments t.json --merge-gap 0.5 --json` |
 | "is this transcript file valid" | `check t.json` |
@@ -71,6 +72,13 @@ never "fix" the transcript text yourself when the user asked for the transcript.
   at 1 s is normal. Use `--word-timestamps` when the first word's onset matters, and expect ±1 s.
 - A mixed-language recording gets one transcript-level `language` (the engine's detection over the
   first 30 s); segments in the other language are still transcribed.
+- Every word has `index`: 0-based and contiguous over the whole transcript, not per segment. Name words by it
+  ("words 12-17") in an editing plan; it is stable for the same cache key.
+- With `--word-segmentation dictionary`, a word with `timing: "interpolated"` had a boundary placed inside an engine
+  word by character share: an estimate, not a measured time. `timing: "measured"` words start and end on engine word
+  boundaries. A segment whose words could not be mapped keeps its engine words (no `timing`, no `pos`) and the
+  transcript carries a warning naming it. `pos` is one of `noun, pronoun, verb, adjective, adverb, particle,
+  auxiliary, conjunction, interjection, prefix, suffix, symbol, other`.
 - `confidence` on segments is `exp(avg_logprob)` from the engine and is shared by segments in the same
   30 s decoding window; use it to compare, not as a calibrated probability.
 - `speaker_id` is `null` unless the transcript went through a speaker merge (`transcription speakers --turns

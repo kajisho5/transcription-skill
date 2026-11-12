@@ -542,3 +542,48 @@
   faster-whisper cache; CI never installs whisperX, torch or a model. Not verified here: a real run (recognition quality,
   alignment accuracy against faster-whisper's word times, speed, memory). Next step: run both engines on the same English
   recording and compare the SRTs.
+
+## ADR-039 Word numbers over the whole transcript; optional Japanese dictionary words with honest timings
+- Need: editing plans (video-production-agent) and subtitle checks (qc-skill) want to name words ("cut words 12-17",
+  "no subtitle line may start with a particle"). Words had no identity, and Whisper-family engines return Japanese
+  "words" that are sub-word pieces (`本`, `日の`), so neither a word number nor a part of speech was available.
+- Decision 1, word index: every word of every Transcript produced from 0.9.0 on carries `index`, 0-based and contiguous
+  over the whole document, in document order (segments by start, words by start). Numbers depend only on word order,
+  so one cache key always numbers the same words alike. `words: null` segments contribute none. The validator accepts
+  `index` on every word or on none (older documents stay valid) and, when present, requires each to equal the word's
+  position. A cache entry written before this gets its numbers on read and is stored back; its cache key does not
+  change, so no recognition is re-run.
+- Decision 2, request `word_segmentation`: `"engine"` (default, unchanged output apart from `index`) or `"dictionary"`.
+  Dictionary mode is Japanese only (`language: "ja"` required; auto-detect and other languages are refused with
+  `dictionary_segmentation_language`, because English and the other supported languages already come with real words
+  and no tokenizer is invented for them) and needs `word_timestamps: true` (`word_timestamps_required`).
+- Tokenizer: SudachiPy, split mode C (longest units, so compounds stay whole), over the first installed SudachiDict
+  edition of `core`, `small`, `full`. It is an optional extra (`pip install "transcription-skill[ja]"`: `sudachipy>=0.6.8`,
+  `sudachidict_core`), never a dependency of the core package; imported only when a dictionary request arrives. When it
+  is missing the request is `INVALID_INPUT` with `reason: dictionary_segmentation_unavailable` and `details.install`,
+  checked before audio extraction, so no recognition time is spent.
+- Mapping: the segment text, with every whitespace character removed, must equal the concatenation of the engine words
+  and of the dictionary words (whitespace-only tokens dropped). A dictionary boundary on an engine word boundary takes
+  that time; a word made of whole engine words is `timing: "measured"`. A boundary inside an engine word splits that
+  word's time by character share and the affected words are `timing: "interpolated"`. Interpolated times are never
+  presented as measured. `confidence` is the lowest of the overlapped engine words (`null` if any is `null`). Any
+  mismatch, a non-positive duration or a tokenizer failure keeps that segment's engine words, with a warning naming the
+  segment. `timing` was chosen over a boolean `estimated` so a consumer reads one field with two named values.
+- Part of speech: `pos` from Sudachi's top-level category, into the fixed set `noun, pronoun, verb, adjective, adverb,
+  particle, auxiliary, conjunction, interjection, prefix, suffix, symbol, other` (名詞 noun, 代名詞 pronoun, 動詞 verb,
+  形容詞/形状詞 adjective, 副詞 adverb, 助詞 particle, 助動詞 auxiliary, 接続詞 conjunction, 感動詞 interjection, 接頭辞
+  prefix, 接尾辞 suffix, 補助記号/記号/空白 symbol, 連体詞 and anything else other). `particle` and `auxiliary` are the
+  values qc-skill uses to refuse a subtitle line that starts with one; the table is tested entry by entry.
+- Cache and provenance: `provenance.parameters` gains `word_segmentation: "dictionary"` and `word_segmenter`
+  (`segmenter`, `segmenter_version`, `dictionary`, `dictionary_version`, `split_mode`), so the cache key (computed from
+  those parameters, recomputable from the document) changes with the option and with a SudachiPy or dictionary release.
+  With the default, neither key appears and every existing cache key is unchanged.
+- Contract: additive. Tool input `word_segmentation`; capabilities `word_index` and `dictionary_word_segmentation`; JSON
+  Schema word properties `index`, `timing`, `pos`. `CONTRACT_VERSION` stays `1.0`; the transcript schema id stays
+  `transcription-skill/transcript/0.1`. video-production-agent pins the contract byte for byte and needs a re-pin.
+- Tests: `tests/test_words.py`. Mapping, index, validator, request, cache-key and missing-dependency tests use a fake
+  segmenter and run in every job; the real-tokenizer tests run in the Linux / Python 3.11 unit job, which installs the
+  `[ja]` extra and sets `TRANSCRIPTION_REQUIRE_SUDACHI=1` so they fail rather than skip there. Run once by hand on the Japanese fixture
+  (`tests/fixtures/ja_short.wav`, faster-whisper `base`, SudachiDict small 20261015): one segment, 26 dictionary words,
+  no fallback, 18 measured and 8 interpolated. Not verified: the fallback rate on long real recordings, and the timing
+  error of interpolated boundaries against forced alignment.

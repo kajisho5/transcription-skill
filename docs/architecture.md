@@ -30,6 +30,8 @@ engine worker subprocess               engines/worker.py   python -m transcripti
 EngineResult (raw)                     engines/base.py
         ↓
 build_transcript                       service.py     normalize text, drop empty/zero-length segments (warned), language policy, provenance
+        ↓  word_segmentation "dictionary" (ja): words.py re-splits each segment into dictionary words (SudachiPy), maps engine times (ADR-039)
+word index                             words.py       every word gets `index`, 0-based over the whole transcript
         ↓
 validate_transcript                    validate.py    INVALID_RESULT if it fails: nothing is returned
         ↓
@@ -64,6 +66,7 @@ Transcript + diarization-skill turns ──► speakers.py ──► Transcript 
 | `service.py` | orchestration, worker launch with timeout, Transcript construction | yes: the worker (list argv) |
 | `cache.py` | cache identity and storage | no |
 | `validate.py` | the Transcript contract as code | no |
+| `words.py` | word index over the whole transcript; optional Japanese dictionary words (SudachiPy, `[ja]` extra) with mapped `timing` and coarse `pos` (ADR-039) | no |
 | `normalize.py` | whitespace / control-character normalization only | no |
 | `models.py` | dataclasses: Transcript, Segment, Word, Source, Provenance, SpeechEvent | no |
 | `speech_events.py` | segments → SpeechEvent candidates (optional gap merge) | no |

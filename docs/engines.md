@@ -74,6 +74,13 @@ in `details.parameters` — refused before anything runs, never silently ignored
 `model`, the engine's own `default_model` is used (`faster_whisper`: `base`, as before; `haas_ja`:
 `Haas-ja-v1.0`), read from the registered class without instantiating it.
 
+Word segmentation is not an engine parameter. `word_segmentation: "dictionary"` (ADR-039) runs after recognition,
+in the service, on the engine's words, for every engine that gives word timestamps; it is never sent to the engine
+and no engine lists it in `unsupported_parameters`. The request is refused before anything runs when the language
+is not `ja` (`dictionary_segmentation_language`), when `word_timestamps` is false (`word_timestamps_required`) or
+when SudachiPy or its dictionary is missing (`dictionary_segmentation_unavailable`, with the install line in
+`details.install`). See [transcript.md](transcript.md#dictionary-words-adr-039).
+
 An engine knows nothing about Transcript ids, caches, budgets, provenance or files other than the WAV
 it is given. Errors are `TranscriptionError` with `ENGINE_UNAVAILABLE`, `MODEL_UNAVAILABLE` (details
 carry `availability`), `TRANSCRIPTION_FAILED` or `INVALID_INPUT`. No error code was added for model

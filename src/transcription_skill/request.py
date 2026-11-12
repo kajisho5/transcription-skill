@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from .errors import TranscriptionError
 from .validate import CREDENTIAL_PATTERNS
+from .words import DICTIONARY_LANGUAGES, WORD_SEGMENTATION_DICTIONARY, WORD_SEGMENTATION_ENGINE, WORD_SEGMENTATION_MODES
 
 DEFAULT_ENGINE = "faster_whisper"
 DEFAULT_MODEL = "base"
@@ -23,7 +24,8 @@ MAX_VOCABULARY_READINGS = 20
 MAX_VOCABULARY_CHARS = 100
 
 ALLOWED_KEYS = {"input", "language", "engine", "model", "word_timestamps", "temperature", "initial_prompt", "beam_size", "audio_stream",
-                "asset_id", "budget", "cache", "workspace", "offline", "allowed_input_roots", "vad_filter", "vocabulary"}
+                "asset_id", "budget", "cache", "workspace", "offline", "allowed_input_roots", "vad_filter", "vocabulary",
+                "word_segmentation"}
 FORBIDDEN_KEYS = {"command", "argv", "cmd", "shell", "exec", "args", "script", "binary", "api_key", "apikey", "token",
                   "secret", "password", "credentials", "env"}
 BUDGET_KEYS = {"timeout", "max_audio_seconds"}
@@ -65,27 +67,36 @@ class TranscribeRequest:
     allowed_input_roots: Optional[List[str]] = None   # when given, the input must resolve inside one of these directories
     vad_filter: bool = False             # skip non-speech before decoding (faster-whisper's own VAD filter; opt-in, unchanged default)
     vocabulary: Optional[Dict[str, List[str]]] = None   # custom vocabulary {written form: [readings]}; engines with custom_vocabulary only
+    word_segmentation: str = WORD_SEGMENTATION_ENGINE   # "engine" (words as the engine gives them) | "dictionary" (ja only, ADR-039)
 
     def parameters(self) -> Dict[str, Any]:
         """The parameters that shape the ASR output. Part of provenance and of the cache identity.
         `audio_stream` is normalized to its effective index (None means the same stream as 0) so a
         request that omits it and one that names index 0 explicitly share a cache entry. `vocabulary`
         appears only when given, so requests without one keep the parameters (and cache keys) they had
-        before the field existed (ADR-033)."""
+        before the field existed (ADR-033). `word_segmentation` likewise appears only when it is not the default
+        "engine" (ADR-039)."""
         p = {"language": self.language, "word_timestamps": self.word_timestamps, "temperature": self.temperature,
              "initial_prompt": self.initial_prompt, "beam_size": self.beam_size,
              "audio_stream": self.audio_stream if self.audio_stream is not None else 0, "vad_filter": self.vad_filter}
         if self.vocabulary is not None:
             p["vocabulary"] = self.vocabulary
+        if self.word_segmentation != WORD_SEGMENTATION_ENGINE:
+            p["word_segmentation"] = self.word_segmentation
         return p
 
     def parameters_hash(self) -> str:
-        return hashlib.sha256(json.dumps(self.parameters(), sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+        return parameters_hash(self.parameters())
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
         d["budget"] = self.budget.to_dict()
         return d
+
+
+def parameters_hash(parameters: Dict[str, Any]) -> str:
+    """sha256 of the canonical JSON of a parameters object (provenance.parameters_hash)."""
+    return hashlib.sha256(json.dumps(parameters, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def _bad(msg: str, **details: Any) -> TranscriptionError:
@@ -176,6 +187,20 @@ def parse_request(doc: Any) -> TranscribeRequest:
 
     vocabulary = parse_vocabulary(doc.get("vocabulary"))
 
+    segmentation = doc.get("word_segmentation", WORD_SEGMENTATION_ENGINE)
+    if segmentation is None:
+        segmentation = WORD_SEGMENTATION_ENGINE
+    if not isinstance(segmentation, str) or segmentation not in WORD_SEGMENTATION_MODES:
+        raise _bad(f"'word_segmentation' must be one of {list(WORD_SEGMENTATION_MODES)}", allowed=list(WORD_SEGMENTATION_MODES))
+    if segmentation == WORD_SEGMENTATION_DICTIONARY:
+        if lang not in DICTIONARY_LANGUAGES:
+            raise _bad(f"word_segmentation 'dictionary' is for Japanese only and needs \"language\": \"ja\" in the request (got "
+                       f"{lang or 'auto-detect'}); other languages already come with real words: use word_segmentation 'engine'",
+                       reason="dictionary_segmentation_language", language=lang, supported=list(DICTIONARY_LANGUAGES))
+        if not wt:
+            raise _bad("word_segmentation 'dictionary' maps word timings onto dictionary words and needs \"word_timestamps\": true",
+                       reason="word_timestamps_required")
+
     budget = Budget()
     b = doc.get("budget")
     if b is not None:
@@ -191,7 +216,7 @@ def parse_request(doc: Any) -> TranscribeRequest:
     return TranscribeRequest(input=inp, language=lang, engine=engine, model=model, word_timestamps=wt, temperature=float(temp),
                              initial_prompt=prompt, beam_size=beam, audio_stream=audio_stream, asset_id=asset_id, budget=budget, cache=cache,
                              workspace=ws, offline=offline, allowed_input_roots=roots, vad_filter=vad_filter,
-                             vocabulary=vocabulary)
+                             vocabulary=vocabulary, word_segmentation=segmentation)
 
 
 def _vocab_text(value: Any, what: str) -> str:

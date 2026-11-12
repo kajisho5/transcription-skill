@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/kajisho5/transcription-skill/schemas/transcript.schema.json",
   "title": "Transcript",
-  "description": "transcription-skill/transcript/0.1. Timestamps are seconds on the asset's own timeline. speaker_id is null unless filled from diarization-skill speaker turns (transcription/speakers or transcribe speaker_turns, ADR-037); recognition alone never sets it.",
+  "description": "transcription-skill/transcript/0.1. Timestamps are seconds on the asset's own timeline. speaker_id is null unless filled from diarization-skill speaker turns (transcription/speakers or transcribe speaker_turns, ADR-037); recognition alone never sets it. Every word carries index, 0-based and contiguous over the whole transcript (ADR-039); dictionary words (word_segmentation 'dictionary') add timing and pos.",
   "type": "object",
   "required": [
     "schema",
@@ -96,6 +96,11 @@
         "confidence"
       ],
       "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0-based word number, contiguous over the whole transcript in document order (segments by start, words by start); present on every word of documents written by 0.9.0 and later, absent on older ones (ADR-039)"
+        },
         "start": {
           "type": "number",
           "minimum": 0
@@ -122,6 +127,31 @@
           ],
           "minLength": 1,
           "description": "optional; present after a speaker merge (ADR-037): the word's own speaker or null"
+        },
+        "timing": {
+          "enum": [
+            "measured",
+            "interpolated"
+          ],
+          "description": "dictionary words only (word_segmentation 'dictionary', ADR-039): 'measured' when both boundaries are engine word boundaries, 'interpolated' when a boundary was placed inside an engine word by character share. Absent on engine words, whose times are engine-reported"
+        },
+        "pos": {
+          "enum": [
+            "noun",
+            "pronoun",
+            "verb",
+            "adjective",
+            "adverb",
+            "particle",
+            "auxiliary",
+            "conjunction",
+            "interjection",
+            "prefix",
+            "suffix",
+            "symbol",
+            "other"
+          ],
+          "description": "dictionary words only (ADR-039): coarse part of speech from the dictionary, a fixed set"
         }
       }
     },
