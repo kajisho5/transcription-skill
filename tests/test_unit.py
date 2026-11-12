@@ -1006,7 +1006,9 @@ class EngineEcosystemTests(unittest.TestCase):
         if insp.available:
             self.assertTrue(insp.models)
             self.assertEqual({m["model"] for m in insp.models}, set(insp.supported_models))
-            self.assertEqual([s.id for s in reg.find_by_language("ja")], ["faster_whisper"])
+            # the optional engines list Japanese only where they are installed (an unavailable spec lists no languages)
+            optional = [eid for eid in ("haas_ja", "qwen3_asr", "speechcpp", "whisperx") if "ja" in reg.get(eid).spec().supported_languages]
+            self.assertEqual([s.id for s in reg.find_by_language("ja")], sorted(["faster_whisper"] + optional))
         with self.assertRaises(TranscriptionError):
             reg.get("fake")                       # test engine is never in the production registry
         with self.assertRaises(TranscriptionError):

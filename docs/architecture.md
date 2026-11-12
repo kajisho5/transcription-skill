@@ -61,7 +61,7 @@ Transcript + diarization-skill turns ──► speakers.py ──► Transcript 
 | `engines/haas.py` | optional Haas-ja-v1.0 engine (ADR-033) | no (in-process library) |
 | `engines/speechcpp.py` | optional speech.cpp engine (ADR-035): builds the `speech` argv, maps its JSON to segments | no (calls `media.run_program`) |
 | `engines/whisperx.py` | optional whisperX engine (ADR-038): batched Whisper + wav2vec2 word alignment, no diarization | no (in-process library; reads the WAV itself) |
-| `engines/qwen3_asr.py` | optional Qwen3-ASR engine (ADR-041): Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B through qwen-asr, words from the aligner's own timestamps | no (in-process library; reads the WAV itself; never downloads) |
+| `engines/qwen3_asr.py` | optional Qwen3-ASR engine (ADR-041): Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B through qwen-asr, words from the aligner's own timestamps | no (in-process library; reads the WAV itself; transcription never downloads, `models pull` fetches both models) |
 | `engines/longform.py` | `split_at_quiet_points`: long audio cut at quiet points (haas-asr's rule, plain Python) for `qwen3_asr` | no |
 | `engines/worker.py` | subprocess entry point running one engine call | no |
 | `engines/__init__.py` | public surface of the engine package | no |

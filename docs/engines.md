@@ -127,7 +127,7 @@ contract tests and is never in the default registry (`tests/test_security.py` as
 | `haas_ja` | local | `engines/haas.py` | optional (Linux + NVIDIA GPU + Python 3.11+); unit-tested with a fake `haas_asr`, not yet run on a GPU |
 | `speechcpp` | local | `engines/speechcpp.py` | optional (speech.cpp's `speech` 0.10.0+ on PATH); unit-tested with a fake `speech`, real binary in the `engines` CI job |
 | `whisperx` | local | `engines/whisperx.py` | optional (Python 3.10+, `pip install whisperx`); en/ja with wav2vec2 alignment; unit-tested with a fake `whisperx`, not yet run for real |
-| `qwen3_asr` | local | `engines/qwen3_asr.py` | optional (Python 3.10+, `pip install "transcription-skill[qwen3-asr]"`); Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B word timestamps, 11 languages; unit-tested with a fake `qwen_asr`, real models in the manual `qwen3_asr` job (not yet run) |
+| `qwen3_asr` | local | `engines/qwen3_asr.py` | optional (Python 3.10+, the `[qwen3-asr]` extra); Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B word timestamps, 11 languages; unit-tested with a fake `qwen_asr`, real models in the manual `qwen3_asr` job (not yet run) |
 | cloud ASR | remote | none | future possible engine (contract only) |
 | whisper.cpp | local | none | future possible engine (contract only) |
 
@@ -396,7 +396,7 @@ transcription transcribe talk.mp4 --engine speechcpp --model parakeet-tdt-0.6b-v
 
   Model name `Qwen3-ASR-1.7B` (the only one, the default); the aligner always comes with it.
 - Runtime: [qwen-asr](https://pypi.org/project/qwen-asr/0.0.6/) 0.0.6 (Apache-2.0), transformers backend
-  (`Qwen3ASRModel`, `Qwen3ForcedAligner`); `pip install "transcription-skill[qwen3-asr]"` (Python 3.10+; pulls PyTorch,
+  (`Qwen3ASRModel`, `Qwen3ForcedAligner`); the `[qwen3-asr]` extra (install line below; Python 3.10+; pulls PyTorch,
   transformers 4.57.6, nagisa, soynlp, gradio and more). Never the vLLM backend, never a server. `qwen_asr` is imported
   only after the Python check, and the engine checks that the entry points it uses are there.
 - Device: `cuda:0` when PyTorch sees a CUDA GPU, otherwise the CPU; bfloat16. No vendor memory figure exists; the weights
