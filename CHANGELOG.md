@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1 - 2026-11-12
+
+- fix(words): robust dictionary version lookup and per-writer cache temp files (#51) (a5c452e)
+
 ## 0.9.0 - 2026-11-12
 
 - feat(words): word index over the whole transcript; optional Japanese dictionary words (ADR-039) (#50) (6e1fb77)
