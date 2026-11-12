@@ -47,6 +47,7 @@ stdout) and `transcribe` accepts `--dry-run` (plan only, no ASR).
 | "Japanese, better than Whisper, on a Mac / no NVIDIA GPU" | `transcribe input.mp4 --engine speechcpp --language ja [--model parakeet-tdt_ctc-0.6b-ja] --word-timestamps`; needs speech.cpp's `speech` on PATH and `speech pull <model> silero-vad` done once by the user (the skill never downloads these); `doctor` shows the binary, backend and models |
 | "English / German / French / another European language, word timings, no Python ML stack or on a Mac" | `transcribe input.mp4 --engine speechcpp --model parakeet-tdt-0.6b-v3 --language de --word-timestamps` (25 languages: `bg cs da de el en es et fi fr hr hu it lt lv mt nl pl pt ro ru sk sl sv uk`; no Japanese); the user runs `speech pull parakeet-tdt-0.6b-v3 silero-vad` once (1.26 GB; `:q8_0` 0.67 GB) |
 | "word timings must sit exactly on the speech" (English or Japanese) | `transcribe input.mp4 --engine whisperx --language en --word-timestamps`; needs `pip install whisperx` (Python 3.10+) and the models once (`models pull large-v3 --engine whisperx`); `doctor` shows whether it is usable. It does no diarization: use `--speaker-turns` |
+| "Qwen3-ASR with word timings" / Japanese, Chinese, Korean or a European language with aligned words | `transcribe input.mp4 --engine qwen3_asr --language ja --word-timestamps` (11 languages: `de en es fr it ja ko pt ru yue zh`); needs `pip install "transcription-skill[qwen3-asr]"` (Python 3.10+) and both models once: the user runs `transcription models pull Qwen3-ASR-1.7B --engine qwen3_asr` (about 6.5 GB); the skill never downloads them while transcribing. GPU if PyTorch sees one, else the CPU (slow) |
 | "don't reuse the old result" | `--no-cache` |
 | "no internet here", "air-gapped", "must not upload the audio" | `transcribe ... --offline` (refuses remote engines and any model download); `doctor --offline` first |
 | "which engines / models can I use here" | `engines` / `engines --engine faster_whisper` / `engines --offline --language ja` |
@@ -91,10 +92,16 @@ never "fix" the transcript text yourself when the user asked for the transcript.
   this machine; either run once online (`MODEL_DOWNLOAD_REQUIRED` shows a download will happen) or pick
   a model that `engines --engine faster_whisper --offline` lists as `MODEL_AVAILABLE`.
 - `execution_mode` in provenance says where recognition ran (`local` today). The engines are
-  `faster_whisper`, `haas_ja`, `speechcpp` and `whisperx` (the last three optional; `doctor` says whether they are usable here);
-  do not offer a cloud engine or whisper.cpp, they are not implemented.
+  `faster_whisper`, `haas_ja`, `qwen3_asr`, `speechcpp` and `whisperx` (all but the first optional; `doctor` says whether they
+  are usable here); do not offer a cloud engine or whisper.cpp, they are not implemented.
 - With `--engine speechcpp`, `qwen3-asr-*` models give `words: null` (each segment is one speech region);
-  `MODEL_MISSING` means the user must run `speech pull <model> silero-vad` once; never run it for them unasked.
+  `MODEL_MISSING` means the user must run `speech pull <model> silero-vad` once; never run it for them unasked. For
+  Qwen3-ASR with word timings use `--engine qwen3_asr`.
+- With `--engine qwen3_asr`, every word time is one the forced aligner predicted (80 ms steps); a word whose boundary
+  qwen-asr had to repair is joined with its neighbour (warning), never given an invented time. Chinese words are single
+  characters; Japanese words are the aligner's own words (use `--word-segmentation dictionary` for dictionary words).
+  Without `--language` it detects the language but reports no probability, so the transcript says `unknown`: pass
+  `--language` when the user knows it. `MODEL_MISSING` names the `models pull` command; the user runs it once, online.
 - A model can know fewer languages than its engine: `INVALID_INPUT` with `reason: language_unsupported` and
   `details.supported` means pick a model from that list or another model; `reason: language_detection_unsupported`
   with `details.model` means that model needs `--language`. `parakeet-tdt-0.6b-v3` only checks `--language`: it writes

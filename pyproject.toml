@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "transcription-skill"
-version = "0.10.0"
+version = "0.11.0"
 description = "Speech recognition skill: audio/video in, structured Transcript (segments, word timestamps, SpeechEvent candidates) out. Not a video editing agent."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -17,6 +17,9 @@ dependencies = []
 faster-whisper = ["faster-whisper>=1.0"]
 # Japanese dictionary word segmentation (request word_segmentation "dictionary", ADR-039); never needed otherwise
 ja = ["sudachipy>=0.6.8", "sudachidict_core>=20230927"]
+# the optional qwen3_asr engine (ADR-041): Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B through qwen-asr (pulls PyTorch and
+# transformers); the version the engine was written against. qwen-asr needs Python 3.10+, so on 3.9 this installs nothing
+qwen3-asr = ["qwen-asr==0.0.6; python_version >= '3.10'"]
 
 [project.scripts]
 transcription = "transcription_skill.cli:main"

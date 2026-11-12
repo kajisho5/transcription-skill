@@ -661,3 +661,119 @@
   `parakeet-tdt-0.6b-v3:q4_k` and requires `test_real_european_model_transcribes_english_with_word_timestamps` on the
   English fixture (WER <= 0.3, words on the speech). Not verified here: a real run of either model (no download in the
   authoring environment); the `engines` job has not been run with the new model yet.
+
+## ADR-041 Qwen3-ASR-1.7B with Qwen3-ForcedAligner-0.6B is an optional local engine (`qwen3_asr`) for word timestamps
+- Need: word timings with Qwen3-ASR. `speechcpp`'s `qwen3-asr-*` models give text without times (speech.cpp refuses
+  `--timestamps` for them because the times need a second model, Qwen3-ForcedAligner-0.6B; ADR-035). Defaults unchanged
+  (`faster_whisper` `base`).
+- Facts, read from the primary sources on 2026-11-12 (nothing was installed or downloaded, nothing was run):
+  - Licences. The Hugging Face cards of [Qwen/Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) (revision
+    `7278e1e70fe206f11671096ffdd38061171dd6e5`) and [Qwen/Qwen3-ForcedAligner-0.6B](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B)
+    (revision `c7cbfc2048c462b0d63a45797104fc9db3ad62b7`), the `main` heads on that date and the revisions the engine pins,
+    say `license: apache-2.0` (front matter; the two cards are one file, with no licence section). The technical report
+    ([arXiv:2601.21337](https://arxiv.org/abs/2601.21337)) says the models are released under Apache 2.0. The runtime,
+    [qwen-asr](https://pypi.org/project/qwen-asr/0.0.6/) 0.0.6 (PyPI, 2026-01-30; source <https://github.com/QwenLM/Qwen3-ASR>),
+    is Apache-2.0 (its METADATA and LICENSE). Commercial use is allowed for both models. Training-data licences were not
+    assessed.
+  - Languages (card table; `support_languages` in each `config.json`): Qwen3-ASR-1.7B recognizes 30 languages (`ar cs da
+    de el en es fa fi fil fr hi hu id it ja ko mk ms nl pl pt ro ru sv th tr vi yue zh`) and 22 Chinese dialects, and
+    identifies the language itself ("language identification and ASR"); the aligner supports 11: Chinese, English,
+    Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, Spanish.
+  - Runtime: `pip install qwen-asr`, a pure-Python wheel; the transformers backend is `Qwen3ASRModel.from_pretrained(...)`
+    / `.transcribe(audio, context, language, return_time_stamps)` and `Qwen3ForcedAligner.from_pretrained(...)` /
+    `.align(audio, text, language)` (card "Quick Inference" and "ForcedAligner Usage"; `qwen_asr/inference/qwen3_asr.py`,
+    `qwen3_forced_aligner.py`). No network service is needed: the vLLM backend (`qwen-asr[vllm]`, `Qwen3ASRModel.LLM`),
+    the `qwen-asr-serve` server and the gradio demos are separate and not used. Its requirements pin `transformers==4.57.6`,
+    `accelerate==1.12.0` (which needs Python 3.10+, so qwen-asr does too despite declaring `>=3.9`), `nagisa==0.2.11` and
+    `soynlp==0.0.493` (the aligner's Japanese and Korean tokenizers), plus librosa, soundfile, sox, gradio, flask,
+    qwen-omni-utils; PyTorch comes through accelerate. A metadata-only `pip install --dry-run qwen-asr==0.0.6` on Linux
+    x86_64 / Python 3.11 resolved every dependency from binary wheels (nagisa and DyNet38 publish wheels for 3.10-3.14 on
+    Linux, macOS and Windows).
+  - Memory and the CPU: neither the card, the repository README nor the report gives a VRAM or CPU figure. The weight files
+    at the pinned revisions are 4.70 GB (Qwen3-ASR-1.7B, bfloat16, two safetensors shards) and 1.84 GB (the aligner), so
+    about 6.5 GB of weights in bfloat16 before activations. The transformers backend runs wherever PyTorch does; the card's
+    examples use `device_map="cuda:0"` and recommend FlashAttention 2 for GPU memory. CPU speed: unknown.
+  - Length per call (`qwen_asr/inference/utils.py`): `MAX_ASR_INPUT_SECONDS = 1200`, `MAX_FORCE_ALIGN_INPUT_SECONDS = 180`,
+    `MIN_ASR_INPUT_SECONDS = 0.5`; qwen-asr cuts longer input at low-energy points itself. The card says the aligner
+    handles "up to 5 minutes of speech"; the package cuts at 180 s.
+  - Aligner output: "timestamp prediction for arbitrary units", "word or character level timestamps" (card). In
+    `Qwen3ForceAlignProcessor` the units are the letters, digits and `'` of the text: space-separated words, every CJK
+    ideograph on its own (Chinese, Cantonese, and CJK inside other languages), nagisa words for Japanese (nagisa
+    NFKC-normalizes them), soynlp tokens for Korean; punctuation is not timed. Each unit gets a start and an end
+    timestamp, a class times `timestamp_segment_time` = 80 ms (the aligner's `config.json`): 80 ms resolution, predicted
+    in one non-autoregressive pass. `parse_timestamp` then repairs the order with `fix_timestamp`: values off the longest
+    non-decreasing subsequence get a neighbour's value (runs of up to two) or are linearly interpolated between their
+    neighbours (longer runs).
+  - Accuracy, vendor-measured (the card's "Forced Alignment Benchmarks", accumulated average shift in ms, lower is
+    better): Qwen3-ForcedAligner-0.6B 42.9 ms on average over the MFA-labelled sets (English 37.5, Japanese 42.2, Chinese
+    33.1), 52.9 ms on their 300 s concatenations (English 58.6, Japanese 81.3), 32.4 ms on the human-labelled sets. Not
+    measured here.
+  - Offline: transformers 4.57.6 (`tokenization_utils_base.py`, `_patch_mistral_regex`) asks the Hub for `model_info` when
+    a tokenizer is loaded by repository name, even from the cache; loaded from a folder it does not. With a folder (or
+    with `HF_HUB_OFFLINE`), and the models' `config.json` saying `transformers_version` 4.57.6, transformers applies its
+    "Mistral regex" pre-tokenizer fix because qwen-asr passes `fix_mistral_regex=True`; the card's own offline route (a
+    downloaded folder) loads the same way. Whether that changes any output was not checked.
+- Decision: register `Qwen3AsrEngine` (`engines/qwen3_asr.py`), an optional local engine; `faster_whisper` stays the
+  default and Reference Local Engine. One model name, `Qwen3-ASR-1.7B` (default), always with the aligner. Languages: the
+  aligner's 11, since the point is word timestamps (the other 19 stay with `speechcpp`, without times). Capabilities
+  `local_execution`, `local_model`, `word_timestamps`, `language_detection`; no `model_download` and no
+  `custom_vocabulary`. `deterministic: false` until two real runs are shown identical. Device `cuda:0` when PyTorch sees a
+  CUDA GPU, else the CPU; dtype bfloat16 (the weights' own and the cards' examples). Python 3.10+ is checked before
+  `import qwen_asr`, then the entry points the engine uses (0.0.6's) are checked, each with its unavailable reason.
+- Never downloading at run time: both models are pinned to the revisions above, looked up as complete snapshot folders in
+  the Hugging Face cache (the files the snapshot needs to load, weights included), and loaded by folder path with
+  `local_files_only=True`, never by repository name. A missing model is `MODEL_MISSING` online or offline, with the
+  command in the detail (and `details.download` in the engine's own error): `transcription models pull Qwen3-ASR-1.7B
+  --engine qwen3_asr` fetches both at the pinned revisions (about 6.5 GB), deliberately, outside a transcription. The audio
+  is the prepared WAV read with `wave` and handed over as samples, never as a path or URL (qwen-asr fetches URLs).
+- Long form: `engines/longform.py` `split_at_quiet_points`, the rule of haas-asr's helper of that name that `haas_ja` uses
+  (ADR-033: ~30 s chunks, each cut moved to the centre of the quietest 0.1 s window within 2 s), written again in plain
+  Python because haas-asr installs only on Linux with CUDA and Python 3.11+. Chunks are at most 32.05 s, far inside
+  qwen-asr's 1200 s and 180 s, so qwen-asr never cuts again; a chunk under 0.5 s is padded with silence as qwen-asr pads
+  its own, and a time in the padding is not used. Each chunk is recognized (`return_time_stamps=False`), then aligned in
+  the language it was recognized in, batched 8 at a time, and its times are offset by its start.
+- Timing, measured and never interpolated: the engine wraps the aligner's `fix_timestamp` to record what went in and what
+  came out, and uses only the timestamps the repair left as predicted. A word is closed after unit i only when unit i's
+  end and unit i+1's start are both predicted values and the word has a positive duration; otherwise the next unit joins
+  it, so a unit whose boundary was repaired, or without duration (two equal 80 ms values), is joined with its neighbour
+  and the joined word starts and ends on predicted timestamps (a warning counts the unused ones). Segments are cut after
+  `。？！.?!` (also before closing brackets or quotes) and at pauses >= 1.0 s. A chunk whose units do not reproduce its
+  text, or have no usable timestamp, is one segment spanning the chunk (its cut points, not an estimate) without words,
+  with a warning; so is a chunk recognized in a language the aligner does not have. Confidence: null.
+- Words and text: each unit is mapped back to the recognized text (exactly, or under NFKC per character for nagisa's
+  normalized Japanese units), the punctuation between units goes to the word before it up to the first space or opening
+  bracket or quote, so word texts keep the recognized forms (`ＧＰＵ`, not nagisa's `GPU`) and join back to the segment
+  text. ADR-039 therefore applies unchanged: every word gets `index`, and `word_segmentation: "dictionary"` re-splits
+  Japanese words with SudachiPy and maps the times on. Japanese units are already nagisa words, not characters, so no
+  character grouping is needed. Chinese and Cantonese units are single characters and are kept as they are, each with
+  its own measured span: ADR-039's dictionary mode is Japanese only and adds no Chinese segmenter, and joining characters
+  without one would invent word boundaries.
+- Language detection: without a language, Qwen3-ASR identifies it per chunk. It reports no probability, so the
+  transcript says `language: "unknown"` with the candidate in `provenance.language_detection` (ADR-023's threshold);
+  chunks recognized in different languages give no candidate, with a warning.
+- Parameters: `initial_prompt` is refused (qwen-asr's `context` has no documented semantics on the card or in the
+  README; a follow-up), and so are `vad_filter` and `temperature > 0` (greedy decoding: `generation_config.json`
+  `do_sample: false`); `beam_size` is ignored with a warning.
+- Cache key and provenance: a new optional engine hook, `TranscriptionEngine.cache_parameters(model)` (default `{}`),
+  names what identifies a run beyond the request and is known before it: `qwen3_asr` returns `engine_identity` (`asr`
+  and `aligner` as `repo@revision`, and the dtype). The service merges it into the parameters only when not empty, so
+  it is in `provenance.parameters` and the cache key (recomputable from the document as before), a new pinned revision
+  is a new computation, and every other engine keeps every cache key it had. `engine_version` is qwen-asr's
+  distribution version; `model_version` is `<asr revision>+aligner:<aligner revision>`. The licences are recorded in
+  `MODELS` / `ALIGNER` and in docs/engines.md.
+- Package extra: `pip install "transcription-skill[qwen3-asr]"` = `qwen-asr==0.0.6; python_version >= '3.10'` (the
+  version written against; on 3.9 it installs nothing and the engine says why). Never a core dependency.
+- Execution boundary: an in-process library in the engine worker, like `whisperx`; no subprocess, no vLLM, no server
+  (static test).
+- Contract: additive. `contract --json` gains one entry in `engines` (fixed where qwen-asr is not installed, asserted by
+  `tests/test_qwen3_asr.py`); capability names, tools, schemas and `CONTRACT_VERSION` 1.0 are unchanged.
+  video-production-agent pins this skill's exact version and contract, so it needs a re-pin. Version 0.11.0 (minor: a new
+  engine), bumped by hand in `pyproject.toml`.
+- Tests: `tests/test_qwen3_asr.py` drives the engine against a fake `qwen_asr` shaped after 0.0.6 (its loaders,
+  `transcribe`, `align`, the processor's `parse_timestamp` calling `fix_timestamp`, qwen-asr's units including NFKC
+  Japanese words) with a fake PyTorch and a faked Hugging Face cache, through the engine and the service; plus the mapping
+  rules, the cut rule against a slow reference, and the cache key. CI never installs qwen-asr, PyTorch or a model. The
+  manual `qwen3_asr` job (heavy-tests.yml) installs the extra on the CPU build of PyTorch, fetches both models with
+  `models pull`, and requires `RealQwen3AsrTests` on the Japanese and English fixtures (CER / WER <= 0.3, words inside
+  their segments and in order, first and last word near the speech). Not verified here: any real run (recognition,
+  timing accuracy against the vendor's numbers, CPU speed and memory, repeatability); the `qwen3_asr` job has not run yet.

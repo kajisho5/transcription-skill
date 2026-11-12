@@ -121,6 +121,9 @@ class TranscriptionService:
         parameters = req.parameters()
         if segmenter is not None:   # a different SudachiPy / dictionary release can split words differently (ADR-039)
             parameters = dict(parameters, word_segmenter=segmenter.identity)
+        identity = engine.cache_parameters(req.model)
+        if identity:                # pinned model revisions, a second model (ADR-041); empty for every other engine
+            parameters = dict(parameters, **identity)
         key = cache_key(fp, engine.id, engine.version or "unknown", engine.execution_mode, req.model, None, parameters)
         return {"path": path, "display_name": display_name, "meta": meta, "engine": engine, "model": model, "fingerprint": fp, "cache_key": key,
                 "path_policy": policy.describe(), "segmenter": segmenter, "parameters": parameters}
