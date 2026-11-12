@@ -897,3 +897,35 @@
   while the CLI follows it; finals equal one pass over the finished file within WER 0.1. Measured on this host: WER 0.010
   (a window every 2 s, 10 rounds) and 0.021 (every 0.5 s, 5 rounds). Not verified: a real recorder, compressed growing
   formats, hours of input.
+
+## ADR-044 faster_whisper reads the prepared WAV itself, so PyAV 19 does not break recognition
+- Problem: on Python 3.12 or later, a fresh `pip install "transcription-skill[faster-whisper]"` resolves PyAV 19, and
+  every `faster_whisper` run failed with `TRANSCRIPTION_FAILED: TypeError: open() got an unexpected keyword argument
+  'metadata_errors'`. Reproduced on Python 3.12 with faster-whisper 1.2.1, PyAV 19.0.2 and CTranslate2 4.9.0 on
+  `en_short.wav`.
+- Cause: PyAV 19.0.0 removed the `metadata_encoding` and `metadata_errors` arguments of `av.open` (its changelog,
+  "Major"), and faster-whisper 1.2.1 (2025-10-31, the newest release on 2026-11-12) calls
+  `av.open(input_file, mode="r", metadata_errors="ignore")` in `decode_audio` whenever `transcribe` is given a path. The
+  faster-whisper main branch passes the argument only for PyAV < 19, but no release has that change yet. PyAV 19 has
+  wheels for Python 3.12+ only, so Python 3.11 still gets PyAV 18.1.0 and works. That is why the `integration` job of
+  heavy-tests.yml (Python 3.11) did not see it.
+- Options: (a) `av<19` in the extra. One line, but it caps PyAV for everything sharing the environment and has to be
+  lifted again later. (b) Wait for a faster-whisper release. None exists yet. (c) Keep PyAV off the recognition path.
+  The engine always gets the prepared mono 16 kHz 16-bit PCM WAV (`media.AUDIO_RECIPE`), and faster-whisper's
+  `transcribe` also takes a float32 sample array.
+- Decision: (c). `engines/faster_whisper.py` `prepared_audio` reads that WAV with the stdlib `wave` module and gives the
+  model `int16 / 32768.0` as float32. Anything else (another layout, not a WAV, unreadable) is still passed as the
+  path, as before. No dependency or version bound changes, so it works with every PyAV from 11 up and with the pins of
+  other skills in the same environment. Measured with PyAV 18.1.0: the samples are bit-identical to faster-whisper's
+  own `decode_audio` on `en_short.wav` (125586 samples) and `ja_short.wav` (153696), so transcripts do not change.
+- Catching it next time: the heavy-tests `integration` job runs on Python 3.11 and 3.13. The newest Python gets the
+  newest PyAV that pip resolves, and the job summary shows the faster-whisper, PyAV and CTranslate2 versions. The job is
+  still manual (ADR-036). Unit tests (`FasterWhisperDecodeTests`, every CI cell, fake numpy) check that the model is
+  given samples rather than the path, the s16 little-endian read and scale, and the fallback. `PreparedAudioTests`
+  (integration) checks the real numpy result against the WAV's values.
+- Measured on this host (Python 3.12, PyAV 19.0.2, `base` from the local cache, no onnxruntime): before, the
+  `TypeError` above. After, `en_short.wav` and `lecture_short.mp4` transcribe and validate, and 16 of the 19
+  integration tests pass. The other 3 need onnxruntime (VAD) or a download (model round trip), and neither was
+  installed here. Not verified here: the full heavy-tests job on Python 3.13; the `tiny` model (`base` was already
+  cached and disk was short).
+- Contract: unchanged.

@@ -93,6 +93,6 @@ acceptable. Raise the bar by running with `--model small` or larger.
 unit + security + paths + conformance + haas_ja/speechcpp/whisperx/qwen3_asr fakes + version on Ubuntu/Windows/macOS × Python
 3.9/3.11 with ffmpeg, plus the release-tooling tests (`python -m unittest discover -s scripts/release/tests`) on
 the Linux cells; a newer push to the same ref cancels the older run. `.github/workflows/heavy-tests.yml` is manual
-only, to save Actions minutes: `integration` (integration + evals on Ubuntu with faster-whisper and a cached `base`
-model), `engines` (the real speech.cpp) and `qwen3_asr` (qwen-asr on the CPU build of PyTorch with both models,
+only, to save Actions minutes: `integration` (integration + evals on Ubuntu, Python 3.11 and 3.13, with faster-whisper and a cached `base`
+model; the newest Python gets the newest PyAV, ADR-044), `engines` (the real speech.cpp) and `qwen3_asr` (qwen-asr on the CPU build of PyTorch with both models,
 ADR-041). No job is skipped or marked as passing without running.

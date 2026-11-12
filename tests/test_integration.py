@@ -437,6 +437,23 @@ class FollowTests(unittest.TestCase):
 
 
 @unittest.skipUnless(ENGINE_OK, "needs faster-whisper (pip install faster-whisper)")
+class PreparedAudioTests(unittest.TestCase):
+    """The engine reads the prepared WAV itself, with whatever PyAV is installed (ADR-044)."""
+
+    def test_samples_are_the_wav_s16_values_over_32768(self):
+        from transcription_skill.engines.faster_whisper import prepared_audio
+        path = str(FX / "en_short.wav")
+        with wave.open(path, "rb") as w:
+            raw = w.readframes(w.getnframes())
+        ref = struct.unpack("<%dh" % (len(raw) // 2), raw)
+        got = prepared_audio(path)
+        self.assertEqual((str(got.dtype), len(got)), ("float32", len(ref)))
+        self.assertEqual([float(x) for x in got[:2000]], [v / 32768.0 for v in ref[:2000]])
+        self.assertEqual(float(got.min()), min(ref) / 32768.0)
+        self.assertEqual(float(got.max()), max(ref) / 32768.0)
+
+
+@unittest.skipUnless(ENGINE_OK, "needs faster-whisper (pip install faster-whisper)")
 class ModelManagementTests(unittest.TestCase):
     """download_model/remove_model against the real Hugging Face cache. Removes and re-fetches MODEL,
     so it always restores it afterward -- other tests in this file depend on it being present."""
