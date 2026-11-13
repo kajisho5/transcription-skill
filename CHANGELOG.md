@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.1 - 2026-11-13
+
+- Speaker merge runs diarization-skill's speaker-id conformance fixtures (ADR-046, roadmap step 17) (#61) (fb44271)
+
 ## 0.12.0 - 2026-11-13
 
 - Phrase search: transcription find / search returns every timed hit (ADR-045, roadmap step 16) (#59) (625beab)
