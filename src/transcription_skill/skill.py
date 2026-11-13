@@ -12,6 +12,7 @@ from .batch import run_batch, transcribe_tool
 from .engines import ENGINE_CAPABILITIES, EXECUTION_MODES, default_registry
 from .errors import TranscriptionError
 from .export import FORMATS, write
+from .search import find_tool
 from .speakers import load_json_document, merge_speakers
 from .speech_events import speech_events
 from .validate import validate_transcript
@@ -38,6 +39,7 @@ CAPABILITIES = [
     "dictionary_word_segmentation",   # request `word_segmentation: "dictionary"` (ja, optional [ja] extra): dictionary words with `timing`, `pos`; ADR-039
     "follow_growing_files",     # CLI `transcribe --follow`: partial / final segments as JSON lines while the file is written; ADR-043
     "chunked_long_recordings",  # request `chunk_seconds`: cut at pauses, `parallel` chunks at a time, cached per chunk, resumable; ADR-042
+    "transcript_search",        # `transcription/find`: phrase -> every timed hit (exact, normalized, optional approximate); ADR-045
 ]
 
 TOOLS: List[Dict[str, Any]] = [
@@ -65,6 +67,19 @@ TOOLS: List[Dict[str, Any]] = [
      "input": {"transcript": "Transcript | path", "turns": "diarization-skill/turns@1 document | path", "allow_source_mismatch": "bool",
                "replace": "bool"},
      "output": {"transcript": "Transcript (speaker_id filled, speaker_assignment recorded)", "warnings": "list[str]"},
+     "deterministic": True, "side_effects": []},
+    {"name": "transcription/find", "description": "Find a phrase in one or more Transcripts: every hit with its start and end, "
+     "segment ids, word indices, speaker_id and neighbouring text. Exact, then normalized matching (NFKC width folding, casefold, "
+     "long vowel marks, whitespace and punctuation ignored, across word and segment boundaries), then optional approximate "
+     "matching labelled with its ratio. A read-only query: no margin, no cut range, no ranking.",
+     "input": {"transcript": "Transcript | path (or transcripts)", "transcripts": "list[Transcript | path] (1..100; or transcript)",
+               "phrase": "str (1..500 characters)", "fuzzy": "0.5..1.0 | null (approximate matches with ratio >= fuzzy)",
+               "context": "0..10 (neighbouring segments each side, default 1)"},
+     "output": {"phrase": "str", "normalized_phrase": "str", "normalization": "str", "fuzzy": "number | null", "context": "int",
+                "count": "int", "hits": "list[{source, transcript_id, match: exact|normalized|approximate, ratio, start, end, "
+                "timing: word|segment, segment_ids, word_indices (null when segment-timed), speaker_id, speaker_ids, text, "
+                "segment_text, context: {before, after}}] (time order; empty when the phrase is not spoken)",
+                "transcripts": "list[{source, transcript_id, language, segments, words, word_timed, hits}]"},
      "deterministic": True, "side_effects": []},
     {"name": "transcription/check", "description": "Validate a Transcript document against the contract.",
      "input": {"transcript": "Transcript | path"}, "output": {"ok": "bool", "errors": "list[str]", "warnings": "list[str]"}, "deterministic": True, "side_effects": []},
@@ -184,6 +199,8 @@ def run_tool(name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         merged = merge_speakers(doc, turns, allow_source_mismatch=params.get("allow_source_mismatch", False),
                                 replace=params.get("replace", False))
         return {"transcript": merged, "warnings": [w for w in merged["warnings"] if w.startswith("speaker_id:")]}
+    if name == "transcription/find":
+        return find_tool(params)
     if name == "transcription/check":
         extra = set(params) - {"transcript"}
         if extra:

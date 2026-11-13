@@ -929,3 +929,42 @@
   installed here. Not verified here: the full heavy-tests job on Python 3.13; the `tiny` model (`base` was already
   cached and disk was short).
 - Contract: unchanged.
+
+## ADR-045 Phrase search: `transcription/find` returns every timed hit of a phrase
+- Problem: people need to find one phrase in hours of recordings and jump there. The word-timed Transcript holds
+  everything needed, but no tool searched it, so agents searched by hand and differed in how they folded Japanese
+  text. The ownership decisions of 2026-11-12 give 文字起こしの語句検索 to this repository (roadmap step 16): it owns the
+  Transcript and its normalisation, and a search is a deterministic query over that document, not an interpretation.
+- Decision: a new tool `transcription/find` (CLI `transcription find <transcript.json>... <phrase>`, alias `search`;
+  `run -` and `contract --json` list it). Standard library only (`unicodedata`, `difflib`), offline, deterministic,
+  read-only.
+  - Units: the words of a segment that has words, else the segment itself, in document order, joined into one
+    character stream per transcript. A phrase split across words or across a segment boundary is therefore found, and
+    CJK text needs no spaces.
+  - Folding, the same for the stream and the phrase: NFKC per character cluster (base character plus its combining
+    marks, and half-width katakana with its voiced mark), so width forms compare equal; casefold; a dash-like
+    character right after kana (ｰ － ― ─ ‐ – and friends) becomes ー; whitespace, punctuation (Unicode Z*, P*) and
+    control characters are dropped. A dash that does not follow kana is punctuation (`e-mail` = `email`). Katakana and
+    hiragana are not folded into each other, and no reading is guessed.
+  - Matching: every non-overlapping occurrence of the folded phrase. A hit is `exact` when the covered text equals the
+    phrase apart from whitespace, `normalized` when it equals it only after folding. With `fuzzy` (0.5-1.0), windows
+    of the folded phrase's length ±20 % with a `difflib.SequenceMatcher` ratio of at least `fuzzy` are added as
+    `approximate`, best ratio first, never overlapping another hit. The ratio is in every hit (1.0 for exact and
+    normalized).
+  - Each hit maps back to the units it covers: `start` of the first, `end` of the last, `segment_ids`, `word_indices`
+    (numbered on the fly for documents written before ADR-039), `speaker_id` (the word's own after a speaker merge,
+    else the segment's; null when the hit spans two speakers, `speaker_ids` lists them), `timing` (`word`, or `segment`
+    when a covered segment had no words), the matched `text`, the hit's `segment_text` and `context` (`--context N`
+    segments before and after, default 1). A phrase inside a longer word reports that whole word's times.
+  - Hits are in time order; several transcripts give each hit's `source` (the file name, else
+    `source.filename`) and a summary per transcript. Zero hits is a result, not an error.
+  - Refused as `INVALID_INPUT`: no phrase, a phrase longer than 500 characters or with nothing left after folding,
+    `fuzzy` outside 0.5-1.0, `context` outside 0-10, unknown keys. An invalid transcript is `VERIFICATION_FAILED`.
+- Boundary: no margin, no cut range, no ranking by importance, no "best" hit. Choosing a hit and turning it into a cut
+  is the agent's or the person's step (`not_provided` is unchanged: it lists no search).
+- Measured: a 5000-segment synthetic Japanese transcript (60 000 characters) searches in about 0.1 s, and 0.35 s with
+  `fuzzy`. `tests/test_search.py` covers the roadmap's "Done when" (three hits with word times, a hit across a segment
+  boundary, zero hits, the tool in `contract --json`), plus English and Chinese fixtures and the folding rules.
+- Not verified: a real multi-hour transcript from recognition.
+- Contract: additive. One new tool (`transcription/find`) and one capability (`transcript_search`); nothing else
+  changes, so `contract_version` stays 1.0.

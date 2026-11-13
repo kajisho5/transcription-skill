@@ -334,7 +334,15 @@ run_tool("transcription/export", {"transcript": transcript, "format": "srt", "ou
 run_tool("transcription/check", {"transcript": "lecture.transcript.json"})
 ```
 
-Tools: `transcription/transcribe`, `transcription/segments`, `transcription/export`, `transcription/speakers`, `transcription/check`, `transcription/batch`.
+Tools: `transcription/transcribe`, `transcription/segments`, `transcription/export`, `transcription/speakers`, `transcription/find`, `transcription/check`, `transcription/batch`.
+
+Phrase search (ADR-045): `run_tool("transcription/find", {"transcript": "talk.transcript.json", "phrase": "sound design"})`
+(CLI `transcription find talk.transcript.json "sound design"`, alias `search`; `transcripts` / several files for many)
+returns every hit in time order with `start`, `end`, `segment_ids`, `word_indices`, `speaker_id`, the matched text and
+the neighbouring segments (`context`). Matching folds width (NFKC), case and long vowel marks and ignores whitespace
+and punctuation over the joined word texts, so a phrase split across words or segments, or CJK text without spaces,
+is found. `fuzzy` (0.5-1.0) adds approximate hits labelled with their similarity ratio. Standard library only,
+deterministic, read-only: no margin, cut range or ranking.
 
 Speaker merge (ADR-037): `run_tool("transcription/speakers", {"transcript": transcript, "turns": "talk.turns.json"})`
 (CLI `transcription speakers talk.transcript.json --turns talk.turns.json`), or `speaker_turns` on

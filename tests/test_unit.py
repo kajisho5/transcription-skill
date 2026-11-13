@@ -298,7 +298,7 @@ class EngineContractTests(unittest.TestCase):
         c = skill_contract()
         names = [t["name"] for t in c["tools"]]
         self.assertEqual(names, ["transcription/transcribe", "transcription/segments", "transcription/export", "transcription/speakers",
-                                 "transcription/check", "transcription/batch"])
+                                 "transcription/find", "transcription/check", "transcription/batch"])
         from transcription_skill import __version__
         self.assertEqual((c["id"], c["version"]), ("transcription-skill", __version__))
         for t in TOOLS:
