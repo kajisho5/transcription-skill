@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 from array import array
+from dataclasses import replace
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -32,8 +33,9 @@ from .media import AUDIO_RECIPE, child_env, extract_audio, extract_tail, fingerp
 from .models import LANGUAGE_UNKNOWN, Provenance, Segment, Source, Transcript, Word, new_id, now_iso
 from .paths import PathPolicy, make_run_dir, resolve_workspace
 from .normalize import normalize_text
-from .request import TranscribeRequest, default_workspace, parameters_hash, summarize_for_display
+from .request import MAX_INITIAL_PROMPT_CHARS, MAX_VOCABULARY_WORDS, TranscribeRequest, default_workspace, parameters_hash, summarize_for_display
 from .validate import CONTAINMENT_TOLERANCE, validate_transcript
+from .vocab import apply_corrections, prompt_with_terms
 from .words import WORD_SEGMENTATION_DICTIONARY, get_segmenter, needs_word_indices, segment_dictionary_words, with_word_indices
 
 WORKER_MODULE = "transcription_skill.engines.worker"
@@ -114,6 +116,32 @@ class TranscriptionService:
                                      {"engine": engine.id, "model": req.model, "availability": model.availability, "offline": req.offline})
         return engine, model
 
+    def _with_domain_vocabulary(self, req: TranscribeRequest) -> TranscribeRequest:
+        """Hand the domain vocabulary's terms to the engine through what it already takes (ADR-047): an engine with a
+        custom vocabulary gets each term not already in the request's `vocabulary` as {term: []}; an engine that takes
+        `initial_prompt` gets the terms after the caller's own prompt, as many as fit; an engine with neither gets
+        nothing (recorded, with a warning on the transcript). Engine defaults are never changed."""
+        dv = req.domain_vocabulary
+        if dv is None or "delivered_as" in dv:
+            return req
+        engine = self._engine_override or get_engine(req.engine)
+        terms = list(dv["terms"])
+        if engine.supports_vocabulary():
+            vocab = dict(req.vocabulary or {})
+            known = {k.casefold() for k in vocab}
+            used = []
+            for t in terms:
+                if t.casefold() not in known and len(vocab) < MAX_VOCABULARY_WORDS:
+                    vocab[t] = []
+                    known.add(t.casefold())
+                    used.append(t)
+            return replace(req, vocabulary={k: vocab[k] for k in sorted(vocab)},
+                           domain_vocabulary=dict(dv, delivered_as="vocabulary", terms_passed=used))
+        if not engine.unsupported_parameters({"initial_prompt": "x"}):
+            prompt, used = prompt_with_terms(terms, req.initial_prompt, MAX_INITIAL_PROMPT_CHARS, japanese=dv["japanese"])
+            return replace(req, initial_prompt=prompt, domain_vocabulary=dict(dv, delivered_as="initial_prompt", terms_passed=used))
+        return replace(req, domain_vocabulary=dict(dv, delivered_as=None, terms_passed=[]))
+
     def _prepare(self, req: TranscribeRequest, meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """`meta` replaces ffprobe's facts only for a followed recording whose header was never finished (ADR-043)."""
         policy = PathPolicy(req.allowed_input_roots)
@@ -149,6 +177,7 @@ class TranscriptionService:
     # ---- dry run ------------------------------------------------------------------------------
     def dry_run(self, req: TranscribeRequest) -> Dict[str, Any]:
         """Everything transcribe() would decide before running the engine, without running it."""
+        req = self._with_domain_vocabulary(req)
         prep = self._prepare(req)
         ws = self._workspace_for(req)
         cache = TranscriptCache(ws)
@@ -173,6 +202,10 @@ class TranscriptionService:
             "network_use": "none" if (req.offline or (not eng.requires_network and prep["model"].availability == MODEL_AVAILABLE))
                            else ("model download" if prep["model"].availability == MODEL_DOWNLOAD_REQUIRED else "recognition"),
             "budget": req.budget.to_dict(),
+            "domain_vocabulary": None if req.domain_vocabulary is None else
+                                 {"terms": req.domain_vocabulary["terms"], "delivered_as": req.domain_vocabulary["delivered_as"],
+                                  "terms_passed": len(req.domain_vocabulary["terms_passed"]), "initial_prompt": req.initial_prompt},
+            "corrections": None if req.corrections is None else len(req.corrections),
             "chunking": None if req.chunk_seconds is None else
                         {"chunk_seconds": req.chunk_seconds, "parallel": req.parallel,
                          "cuts_from": "speech_regions" if req.speech_regions is not None else "level",
@@ -187,6 +220,7 @@ class TranscriptionService:
     def transcribe(self, req: TranscribeRequest) -> Dict[str, Any]:
         """Return a validated Transcript document (dict) plus a `cache_hit` marker under result metadata."""
         t0 = time.time()
+        req = self._with_domain_vocabulary(req)
         prep = self._prepare(req)
         ws = self._workspace_for(req)
         cache = TranscriptCache(ws)
@@ -253,6 +287,10 @@ class TranscriptionService:
         if req.word_segmentation == WORD_SEGMENTATION_DICTIONARY:   # finals are emitted with engine words and must not change after
             raise TranscriptionError("INVALID_INPUT", "follow emits engine words; word_segmentation 'dictionary' cannot be combined with it",
                                      {"reason": "follow_with_dictionary_segmentation"})
+        if req.corrections is not None:   # finals are emitted as recognised and never change afterwards (ADR-047)
+            raise TranscriptionError("INVALID_INPUT", "follow emits finals as recognised; corrections cannot be combined with it: apply them "
+                                     "with a batch run of the finished file", {"reason": "follow_with_corrections"})
+        req = self._with_domain_vocabulary(req)
         path = PathPolicy(req.allowed_input_roots).resolve_input(req.input)
         self._check_engine(req)
         engine: TranscriptionEngine = self._engine_override or get_engine(req.engine)
@@ -346,8 +384,8 @@ class TranscriptionService:
         regions = None if req.speech_regions is None else [(float(a), float(b)) for a, b in req.speech_regions]
         chunks = plan_chunks(frames, rate, req.chunk_seconds or 0.0, regions, lambda lo, hi: read_samples(wav, lo, hi))
         # what shapes one chunk's recognition: the request's engine parameters, not how the recording was cut or what is
-        # done with the words after the join (dictionary segmentation)
-        params = {k: v for k, v in prep["parameters"].items() if k not in ("chunking", "word_segmentation", "word_segmenter")}
+        # done with the words after the join (dictionary segmentation, corrections)
+        params = {k: v for k, v in prep["parameters"].items() if k not in ("chunking", "word_segmentation", "word_segmenter", "corrections")}
         store = ChunkCache(ws) if req.cache else None
         results: Dict[int, EngineResult] = {}
         todo: List[Dict[str, Any]] = []
@@ -560,6 +598,16 @@ def build_transcript(req: TranscribeRequest, prep: Dict[str, Any], result: Engin
         segments.append(Segment(id=seg_id, start=start, end=end, text=text, raw_text=raw,
                                 confidence=None if s.confidence is None else float(s.confidence), words=words, speaker_id=None).to_dict())
 
+    applied: Optional[List[Dict[str, Any]]] = None
+    if req.corrections:                 # before dictionary words, so they are split from the corrected text (ADR-047)
+        segments, applied, notes = apply_corrections(segments, req.corrections)
+        warnings.extend(notes)
+    dv = req.domain_vocabulary
+    if dv is not None and dv.get("delivered_as") is None:
+        warnings.append(f"domain_vocabulary: engine {prep['engine'].id} takes neither a prompt nor a custom vocabulary; its terms were not passed")
+    elif dv is not None and len(dv.get("terms_passed", [])) < len(dv["terms"]):
+        warnings.append(f"domain_vocabulary: {len(dv.get('terms_passed', []))} of {len(dv['terms'])} terms passed to the engine "
+                        f"(the {dv.get('delivered_as')} limit); the rest are in provenance.vocabulary.terms only")
     segmenter = prep.get("segmenter")
     if segmenter is not None:
         segments, notes = segment_dictionary_words(segments, segmenter)
@@ -581,5 +629,11 @@ def build_transcript(req: TranscribeRequest, prep: Dict[str, Any], result: Engin
     tr = Transcript(id=new_id("tr"), asset_id=asset_id, language=language, language_source=lsrc, language_confidence=lconf, duration=duration,
                     segments=segments, source=src.to_dict(), engine=result.engine_id, engine_version=result.engine_version, created_at=created,
                     provenance=prov.to_dict(), warnings=warnings)
-    return tr.to_dict()
+    doc = tr.to_dict()
+    if dv is not None:
+        doc["provenance"]["vocabulary"] = {"terms": dv["terms"], "delivered_as": dv.get("delivered_as"), "terms_passed": dv.get("terms_passed", []),
+                                           "japanese": dv["japanese"], "sources": dv["sources"]}
+    if applied is not None:
+        doc["provenance"]["corrections"] = {"rules": req.corrections, "count": len(applied), "applied": applied}
+    return doc
 

@@ -85,6 +85,8 @@ transcription transcribe dubbed.mkv --audio-stream 1       # multi-track input: 
 transcription transcribe meeting.wav --vad-filter           # skip non-speech before decoding (long recordings with real silence)
 transcription transcribe talk.mp4 --engine haas_ja --language ja --vocabulary terms.json --word-timestamps
                                                            # optional Japanese engine (Linux + NVIDIA GPU), jargon/names list
+transcription transcribe talk.mp4 --language en --programme programme.txt --slides pages/deck.json --speaker "Amaka Okonkwo" --corrections fixes.json
+                                                           # terms from the programme / slides / speakers to the engine's prompt; timed post-corrections (ADR-047)
 transcription transcribe talk.mp4 --engine speechcpp --language ja --word-timestamps
                                                            # optional engine: speech.cpp's `speech` (Metal/Vulkan/CPU, no Python ML, no CUDA)
 transcription transcribe talk.mp4 --engine speechcpp --model parakeet-tdt-0.6b-v3 --language de --word-timestamps

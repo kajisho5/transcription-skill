@@ -1002,3 +1002,63 @@
   until it is taken. A run of this repository's CI does not start on a change in diarization-skill; the failure shows
   on the next pull request or push here.
 - Contract: additive. One new key (`rule`) on the `transcription/speakers` tool entry; `contract_version` stays 1.0.
+
+## ADR-047 Domain vocabulary from the programme, and a post-correction list with every replacement timed
+- Problem: drug names, medical terms and speakers' names are what a general model gets wrong, and they are known before
+  the talk: they are in the programme, the abstracts, the slides and the speaker list (roadmap step 11). The engines
+  already take hints (faster_whisper / whisperx `initial_prompt`, haas_ja `vocabulary`), but someone had to write them
+  by hand. What is still heard wrong was fixed by hand afterwards, with no record of what changed where.
+- Decision:
+  - `domain_vocabulary` (request field; CLI `--programme FILE`, `--slides deck.json`, `--speaker NAME`, `--term TERM`,
+    `--japanese-terms`): material the caller supplies, never anything looked up. `programme` (text), `slides` (a
+    slide-sync-skill `import` manifest, `slide-sync/deck@1`, inline or as a path, or a list of page texts),
+    `speakers`, `terms`, `max_terms` (1-200, default 50), `japanese` (default false). At most 200 000 characters.
+  - Terms are selected by a fixed rule (`vocab.py`, standard library): speakers, then the caller's terms, then words of
+    the programme and slide text. A word of the text is a term when it is not one of a fixed list of common English
+    words and either looks like a name or code (a capital letter that is not the first letter of a sentence or line,
+    a digit, a hyphen, mixed case, an acronym of three letters or more) or is a plain word of seven letters or more.
+    Name-like words rank before plain words; within each group the more frequent ones come first, then the longer ones
+    (long words are the rare ones), then the first seen. Capitals at the start of a sentence or line count as no evidence. A
+    capitalised word that also appears in lower case counts as a plain word. Every term is a string of the material,
+    so the rule cannot invent a term. Terms are unique ignoring case. A word of a speaker's name is not repeated.
+  - Japanese is opt-in (`japanese: true`): katakana runs of three or more characters (loanwords, drug names) count
+    as name-like; kanji runs of four or more count as plain. The prompt is then joined with "、" and ends with "。".
+    Without the flag, kana and kanji text gives no terms.
+  - Delivery uses the engine's own mechanism, and no engine default changes. An engine with `custom_vocabulary`
+    (haas_ja) gets each term as `{term: []}`, added to the request's own `vocabulary` and never replacing an entry. An
+    engine that takes `initial_prompt` (faster_whisper, whisperx) gets the caller's prompt first, unchanged, then as
+    many terms as fit in the 500-character prompt limit, comma-separated. An engine with neither (speechcpp, qwen3_asr)
+    gets nothing, and the transcript says so in a warning. The prompt that was used is
+    `provenance.parameters.initial_prompt`, and so it is part of the cache key. `provenance.vocabulary` records
+    the terms, `delivered_as`, `terms_passed`, `japanese` and the size of each source.
+  - `corrections` (request field; CLI `--corrections FILE`): rules `{from, to, match}` in order (or `{wrong: right}`),
+    at most 500. `match` is `word` (default: whole words, ignoring case) or `substring` (anywhere, ignoring case, for
+    languages written without spaces). They are applied after recognition to segment `text`, in one pass from the left
+    with the longest `from` first, so a replacement is never matched again. `raw_text` stays the engine's text.
+    A replacement inside one word changes that word. One that spans several words joins them into one word, from
+    the first word's start to the last word's end, with the lowest confidence. Word indices are numbered again.
+    Every replacement goes to `provenance.corrections.applied` as `{rule, from (the text replaced), to, segment_id,
+    start, end, timing}`. `timing` is `word` when the time is that of the replaced words, and `segment` when the
+    segment has no words or they could not be placed in its text (then the words stay as recognised, with a warning). The rules are
+    in `provenance.parameters.corrections` and the cache key, so a different list never returns a stale transcript.
+    They are left out of the per-chunk cache key: a chunk's recognition does not depend on them (ADR-042).
+  - `transcribe --follow` takes the vocabulary, but refuses `corrections` (`follow_with_corrections`): finals are
+    emitted as recognised and never change (ADR-043).
+- Measured (`tests/fixtures/en_drugs.wav`: espeak-ng, one sentence with dapagliflozin, empagliflozin, semaglutide,
+  tirzepatide, pembrolizumab and a speaker's name; its programme is `en_drugs_programme.txt`, a session listing in
+  which the names appear among other words). faster-whisper 1.2.1, `tiny`, int8, Linux CPU:
+  - Without the vocabulary: 0 of the 5 names as whole words ("now publicly for a min, and badly flung in, semabluedite,
+    turn it back i'd and pamble in").
+  - With the terms selected from the programme plus the chair's name: 4 of 5. The one missed is dapagliflozin, heard as
+    "napagliflozin".
+  - With the two corrections of `fixtures.json` (napagliflozin -> dapagliflozin, Akonkwo -> Okonkwo): 5 of 5. Both
+    replacements are listed with word times.
+  - `DomainVocabularyTests` (integration, the smallest model) checks a gain of at least 3 names and that every
+    replacement has a time within its segment. Ranking by length mattered: with first-seen order inside a group, the
+    same programme gave 2 of 5. The plain words of the listing (failure, preserved, ejection...) crowded the names out.
+- Not verified: other models, real recordings, Japanese recognition with `japanese: true`, and haas_ja receiving
+  the terms on a GPU. The term rule is a heuristic for English-like text. It does not know which words the model
+  already knows, so common long words can still take prompt space.
+- Contract: additive. Two request fields (`domain_vocabulary`, `corrections`), two capabilities (`domain_vocabulary`,
+  `post_correction`), two optional provenance objects (`vocabulary`, `corrections`). A request without the
+  fields keeps the parameters and cache key it had. `contract_version` stays 1.0.

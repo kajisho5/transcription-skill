@@ -381,6 +381,32 @@
             }
           }
         },
+        "vocabulary": {
+          "description": "Present only when the request had domain_vocabulary (ADR-047): the terms selected from the caller's programme, slide text, speakers and terms (every one a string of that material), how they reached the engine (initial_prompt, vocabulary, or null when the engine takes neither), which were passed, and the size of each source.",
+          "type": "object",
+          "required": ["terms", "delivered_as", "terms_passed", "japanese", "sources"],
+          "properties": {
+            "terms": {"type": "array", "items": {"type": "string"}},
+            "delivered_as": {"enum": ["initial_prompt", "vocabulary", null]},
+            "terms_passed": {"type": "array", "items": {"type": "string"}},
+            "japanese": {"type": "boolean"},
+            "sources": {"type": "object"}
+          }
+        },
+        "corrections": {
+          "description": "Present only when the request had corrections (ADR-047): the rules in order, and every replacement made in segment text (raw_text keeps the engine's), with the rule index, the text it replaced, the segment and its time: the replaced words' own (timing word) or the segment's (timing segment).",
+          "type": "object",
+          "required": ["rules", "count", "applied"],
+          "properties": {
+            "rules": {"type": "array", "items": {"type": "object", "required": ["from", "to", "match"],
+                      "properties": {"from": {"type": "string"}, "to": {"type": "string"}, "match": {"enum": ["word", "substring"]}}}},
+            "count": {"type": "integer", "minimum": 0},
+            "applied": {"type": "array", "items": {"type": "object", "required": ["rule", "from", "to", "segment_id", "start", "end", "timing"],
+                        "properties": {"rule": {"type": "integer", "minimum": 0}, "from": {"type": "string"}, "to": {"type": "string"},
+                                       "segment_id": {"type": "string"}, "start": {"type": "number"}, "end": {"type": "number"},
+                                       "timing": {"enum": ["word", "segment"]}}}}
+          }
+        },
         "skill": {
           "type": "string",
           "const": "transcription-skill"

@@ -9,6 +9,7 @@ the reference texts and timing facts are in `fixtures.json`.
 | `ja_short.wav` | Japanese sentence, 1.0 s leading silence, 16 kHz mono PCM | ~300 KB |
 | `en_short.wav` | English sentences, 1.0 s leading silence, 16 kHz mono PCM | ~250 KB |
 | `speaker_id_conformance/` | diarization-skill's speaker-id conformance fixtures (`fixture_version` 1), copied unchanged; see ADR-046 | ~30 KB |
+| `en_drugs.wav` | English sentence with five drug names and a speaker's name, 1.0 s leading silence, 16 kHz mono PCM; its session programme is `en_drugs_programme.txt` (domain vocabulary, ADR-047) | ~410 KB |
 | `lecture_short.mp4` | test pattern video + the Japanese part, 1 s gap, the English part (AAC) | ~360 KB |
 
 The Japanese voice is `nitech-jp-atr503-m001` (Nagoya Institute of Technology, CC BY 3.0). The English

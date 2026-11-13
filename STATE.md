@@ -91,6 +91,15 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   long vowel marks, no whitespace/punctuation, across word and segment boundaries), then optional approximate
   (`fuzzy`, difflib ratio). Standard library only, deterministic, read-only. Unit-tested on Japanese, English and
   Chinese fixtures (`tests/test_search.py`); not yet run on a real multi-hour transcript
+- Domain vocabulary and post-correction (ADR-047, roadmap step 11) — EXPERIMENTAL: request `domain_vocabulary`
+  (programme text, slide-sync `deck.json`, speakers, terms; CLI `--programme` / `--slides` / `--speaker` / `--term`,
+  Japanese terms only with `japanese: true` / `--japanese-terms`) selects terms by a fixed rule (never looked up, every
+  term a string of the material) and passes them as `initial_prompt` (faster_whisper, whisperx, after the caller's own
+  prompt) or as haas_ja `vocabulary` entries; engines with neither get none (warning). `corrections` (`--corrections
+  FILE`) replaces wrong forms in segment text after recognition (`raw_text` kept), every replacement in
+  `provenance.corrections.applied` with its time; refused with `--follow`. Measured on `en_drugs.wav` with faster-whisper
+  `tiny`: 0/5 drug names without, 4/5 with the programme's terms, 5/5 after two corrections. Other models, real
+  recordings, Japanese recognition and haas_ja with the terms: not measured
 - Word index (ADR-039): every word carries `index`, 0-based and contiguous over the whole transcript; validator checks it
   (on every word or on none, so older documents stay valid); old cache entries are numbered on read
 - Dictionary word segmentation (ADR-039) — EXPERIMENTAL: request `word_segmentation: "dictionary"` / `--word-segmentation
@@ -328,3 +337,8 @@ two steps run this way in video-editing-skill and color-grading-skill.
   vendored `fixture_version` 1, pinned by SHA-256, compared with diarization-skill main in the unit CI; the
   `transcription/speakers` tool states the rule it follows (`rule`). Patch bump 0.12.1 in `pyproject.toml`. Contract
   additive (one key on one tool; `contract_version` 1.0); video-production-agent needs a re-pin
+- 2026-11-13: domain vocabulary from the programme and a post-correction list (ADR-047, roadmap step 11): request
+  `domain_vocabulary` -> the engine's `initial_prompt` / `vocabulary`, `corrections` with every replacement timed in
+  `provenance.corrections`. faster-whisper `tiny` on `en_drugs.wav`: 0/5 -> 4/5 drug names, 5/5 after corrections. Minor
+  bump 0.13.0 in `pyproject.toml`. Contract additive (two request fields, two capabilities, two optional provenance
+  objects; `contract_version` 1.0); video-production-agent needs a re-pin

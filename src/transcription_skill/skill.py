@@ -40,6 +40,8 @@ CAPABILITIES = [
     "follow_growing_files",     # CLI `transcribe --follow`: partial / final segments as JSON lines while the file is written; ADR-043
     "chunked_long_recordings",  # request `chunk_seconds`: cut at pauses, `parallel` chunks at a time, cached per chunk, resumable; ADR-042
     "transcript_search",        # `transcription/find`: phrase -> every timed hit (exact, normalized, optional approximate); ADR-045
+    "domain_vocabulary",        # request `domain_vocabulary`: terms from the programme / slides / speakers -> the engine's prompt or vocabulary; ADR-047
+    "post_correction",          # request `corrections`: wrong form -> right form after recognition, every replacement recorded with its time; ADR-047
 ]
 
 TOOLS: List[Dict[str, Any]] = [
@@ -53,7 +55,12 @@ TOOLS: List[Dict[str, Any]] = [
                "speaker_turns": "diarization-skill/turns@1 document | path | null (merged after recognition, never cached)",
                "chunk_seconds": "30..3600 | null (chunked long recording, cut at pauses; needs language)",
                "parallel": "1..8 (chunks recognized at a time; chunk_seconds only)",
-               "speech_regions": "media-analysis-skill speech_regions response | result | observation | path | null (chunk_seconds only)"},
+               "speech_regions": "media-analysis-skill speech_regions response | result | observation | path | null (chunk_seconds only)",
+               "domain_vocabulary": "{programme: str | list[str], slides: slide-sync/deck@1 document | path | list[str], speakers: list[str], "
+                                    "terms: list[str], max_terms: 1..200 (default 50), japanese: bool (default false)} | null (terms passed as the "
+                                    "engine's initial_prompt or custom vocabulary; recorded in provenance.vocabulary)",
+               "corrections": "list[{from: str, to: str, match: word | substring (default word)}] | {from: to} | null (applied to segment "
+                              "text after recognition; every replacement in provenance.corrections.applied with its time)"},
      "output": {"transcript": "Transcript", "cache_hit": "bool", "cache_key": "sha256 hex", "warnings": "list[str]"}, "deterministic": True,
      "side_effects": ["writes cache under workspace", "writes per-chunk cache under workspace (chunk_seconds)"]},
     {"name": "transcription/segments", "description": "Derive SpeechEvent-compatible candidates from a Transcript (one per segment, optional gap merge).",
