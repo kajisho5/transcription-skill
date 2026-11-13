@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.0 - 2026-11-13
+
+- Domain vocabulary from the programme, and timed post-corrections (ADR-047, roadmap step 11) (#62) (d377382)
+
 ## 0.12.1 - 2026-11-13
 
 - Speaker merge runs diarization-skill's speaker-id conformance fixtures (ADR-046, roadmap step 17) (#61) (fb44271)
