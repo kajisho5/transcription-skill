@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.0 - 2026-11-13
+
+- Phrase search: transcription find / search returns every timed hit (ADR-045, roadmap step 16) (#59) (625beab)
+- docs(roadmap): add the ownership decisions of 2026-11-12 (#58) (dbed9a2)
+
 ## 0.11.4 - 2026-11-12
 
 - faster_whisper: read the prepared WAV itself so PyAV 19 does not break recognition (ADR-044) (#57) (2113f2c)
