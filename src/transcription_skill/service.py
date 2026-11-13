@@ -167,7 +167,10 @@ class TranscriptionService:
         identity = engine.cache_parameters(req.model)
         if identity:                # pinned model revisions, a second model (ADR-041); empty for every other engine
             parameters = dict(parameters, **identity)
-        key = cache_key(fp, engine.id, engine.version or "unknown", engine.execution_mode, req.model, None, parameters)
+        # the delivered vocabulary is in the key too, so an engine that takes no terms never returns a transcript cached without
+        # the vocabulary record; it stays out of `parameters`, so the per-chunk key keeps to recognition parameters (ADR-047)
+        key_parameters = parameters if req.domain_vocabulary is None else dict(parameters, domain_vocabulary=req.domain_vocabulary)
+        key = cache_key(fp, engine.id, engine.version or "unknown", engine.execution_mode, req.model, None, key_parameters)
         return {"path": path, "display_name": display_name, "meta": meta, "engine": engine, "model": model, "fingerprint": fp, "cache_key": key,
                 "path_policy": policy.describe(), "segmenter": segmenter, "parameters": parameters}
 

@@ -225,7 +225,8 @@ def parse_domain_vocabulary(value: Any) -> Optional[Dict[str, Any]]:
     seen = set()
     given = speakers + terms
     parts = {p.casefold() for t in given for p in t.split()}   # "Okonkwo" is not repeated after "Amaka Okonkwo"
-    extracted = [t for t, *_ in extract_terms(programme + slides, japanese) if t.casefold() not in parts]
+    extracted = [t for t, *_ in extract_terms(programme + slides, japanese)
+                 if t.casefold() not in parts and not any(pat.search(t) for pat in CREDENTIAL_PATTERNS)]   # never a key-like token
     for t in given + extracted:
         if t and t.casefold() not in seen and len(chosen) < max_terms:
             seen.add(t.casefold())
@@ -387,6 +388,8 @@ def _edit_words(text: str, words: List[Dict[str, Any]], spans: List[Tuple[int, i
         w = dict(first)
         w.update(text=" ".join("".join(piece).split()), end=final["end"],
                  confidence=None if any(c is None for c in confs) else min(confs))
+        if any(x.get("timing") == "interpolated" for x in words[g[0]:g[-1] + 1]):
+            w["timing"] = "interpolated"              # an estimated time inside the joined word is never shown as measured
         out.append(w)
         k = g[-1] + 1
     out.extend(dict(w) for w in words[k:])

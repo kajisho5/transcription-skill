@@ -70,6 +70,10 @@ class TermSelectionTests(unittest.TestCase):
         self.assertEqual(names["Okonkwo"], 0)                                  # capital mid-sentence: name-like
         self.assertNotIn("Doses", names)                                       # sentence-initial and shorter than 7
 
+    def test_key_like_tokens_of_the_text_are_never_terms(self):
+        dv = parse_domain_vocabulary({"programme": "Keys such as sk-abcdefghijklmnopqrstuvwx and AKIAABCDEFGHIJKLMNOP stay out; Tirzepatide."})
+        self.assertEqual(dv["terms"], ["Tirzepatide"])
+
     def test_max_terms_and_terms_order(self):
         dv = parse_domain_vocabulary({"programme": PROGRAMME, "terms": ["SGLT2"], "speakers": ["A. Speaker"], "max_terms": 3})
         self.assertEqual(len(dv["terms"]), 3)
@@ -145,6 +149,12 @@ class CorrectionTests(unittest.TestCase):
         self.assertEqual(applied, [])                                          # "word": no boundary inside Japanese text
         out, applied, _ = apply_corrections([ja], parse_corrections([{"from": "ナパグリフロジン", "to": "ダパグリフロジン", "match": "substring"}]))
         self.assertEqual((out[0]["text"], out[0]["words"][0]["text"], applied[0]["timing"]), ("ダパグリフロジンを投与", "ダパグリフロジンを", "word"))
+
+    def test_joined_word_keeps_an_interpolated_marker(self):
+        s = seg("badly flung", [(1.0, 1.5, "badly", 0.4), (1.5, 2.0, "flung", 0.3)])
+        s["words"][1]["timing"] = "interpolated"
+        out, _, _ = apply_corrections([s], parse_corrections({"badly flung": "empagliflozin"}))
+        self.assertEqual((out[0]["words"][0]["text"], out[0]["words"][0]["timing"]), ("empagliflozin", "interpolated"))
 
     def test_one_pass_longest_first_no_chains(self):
         s = seg("a b c", None)
@@ -261,6 +271,24 @@ class ServiceVocabularyTests(unittest.TestCase):
         res = TranscriptionService(workspace=self.ws, engine=FakeEngine()).dry_run(req)
         self.assertEqual(res["domain_vocabulary"]["initial_prompt"], "Tirzepatide.")
         self.assertEqual(res["corrections"], 1)
+
+    def test_vocabulary_is_in_the_cache_key_even_when_the_engine_takes_none(self):
+        first = self.run_with(NoPromptEngine(segments=EN_SEGMENTS))
+        second = self.run_with(NoPromptEngine(segments=EN_SEGMENTS), domain_vocabulary={"terms": ["Tirzepatide"]})
+        self.assertFalse(second["cache_hit"])
+        self.assertNotEqual(first["cache_key"], second["cache_key"])
+        self.assertIn("vocabulary", second["transcript"]["provenance"])
+
+    def test_cli_never_writes_the_transcript_over_an_input_file(self):
+        from transcription_skill import cli
+        prog = os.path.join(self.tmp, "programme.txt")
+        Path(prog).write_text("Tirzepatide session", encoding="utf-8")
+        args = cli.build_parser().parse_args(["transcribe", self.wav, "--programme", prog, "-o", prog])
+        self.assertIn(prog, cli._transcribe_inputs(args))
+        with self.assertRaises(TranscriptionError):
+            from transcription_skill.paths import OutputPolicy
+            OutputPolicy(None).resolve_output(prog, forbid=cli._transcribe_inputs(args))
+        self.assertEqual(Path(prog).read_text(encoding="utf-8"), "Tirzepatide session")
 
     def test_follow_refuses_corrections(self):
         req = parse_request({"input": self.wav, "engine": "fake", "model": "fake-model", "language": "en", "corrections": {"a": "b"}})

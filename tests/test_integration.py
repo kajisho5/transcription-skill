@@ -437,7 +437,7 @@ class FollowTests(unittest.TestCase):
 
 
 DRUG_NAMES = REF["en_drugs.wav"]["terms"]
-# what the programme's terms must add on en_drugs.wav with the smallest model (ADR-047): measured 0 -> 4 of 5 with
+# what the programme's terms must add on en_drugs.wav with `tiny`, the model it was measured on (ADR-047): measured 0 -> 4 of 5 with
 # faster-whisper 1.2.1 `tiny` int8 on a Linux CPU; with the two corrections, 5 of 5
 VOCAB_MIN_GAIN = 3
 
@@ -457,7 +457,7 @@ class DomainVocabularyTests(unittest.TestCase):
         ws = tempfile.mkdtemp(prefix="ts_vocab_int_")
         try:
             svc = TranscriptionService(workspace=ws)
-            base = {"input": str(FX / "en_drugs.wav"), "model": LONG_MODEL, "language": "en", "word_timestamps": True, "cache": False}
+            base = {"input": str(FX / "en_drugs.wav"), "model": "tiny", "language": "en", "word_timestamps": True, "cache": False}
             plain = svc.transcribe(parse_request(dict(base)))["transcript"]
             programme = (FX / "en_drugs_programme.txt").read_text(encoding="utf-8")
             rules = REF["en_drugs.wav"]["corrections"]
@@ -474,6 +474,7 @@ class DomainVocabularyTests(unittest.TestCase):
             self.assertEqual(doc["provenance"]["vocabulary"]["delivered_as"], "initial_prompt")
             cor = doc["provenance"]["corrections"]
             self.assertEqual(cor["count"], len(cor["applied"]))
+            self.assertGreaterEqual(cor["count"], 1, cor)
             segs = {s["id"]: s for s in doc["segments"]}
             for a in cor["applied"]:                                                 # every replacement, with its time
                 s = segs[a["segment_id"]]

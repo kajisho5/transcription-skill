@@ -1044,6 +1044,12 @@
     They are left out of the per-chunk cache key: a chunk's recognition does not depend on them (ADR-042).
   - `transcribe --follow` takes the vocabulary, but refuses `corrections` (`follow_with_corrections`): finals are
     emitted as recognised and never change (ADR-043).
+  - The selected vocabulary, with how it was delivered, is part of the transcript cache key, so a request whose engine
+    takes no terms never gets back a transcript cached without its vocabulary record. It is not part of the per-chunk
+    key, which keeps to recognition parameters. A token of the text that looks like a credential is never a term. A
+    joined word that includes an interpolated word keeps `timing: interpolated`. The CLI never writes the transcript
+    over any file it reads (`--programme`, `--slides`, `--corrections`, `--vocabulary`, `--speaker-turns`,
+    `--speech-regions`).
 - Measured (`tests/fixtures/en_drugs.wav`: espeak-ng, one sentence with dapagliflozin, empagliflozin, semaglutide,
   tirzepatide, pembrolizumab and a speaker's name; its programme is `en_drugs_programme.txt`, a session listing in
   which the names appear among other words). faster-whisper 1.2.1, `tiny`, int8, Linux CPU:

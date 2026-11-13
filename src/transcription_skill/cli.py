@@ -93,6 +93,12 @@ def _load_json_file(path: str, what: str) -> Any:
         raise TranscriptionError("INVALID_INPUT", f"{what} is not valid JSON: {exc}")
 
 
+def _transcribe_inputs(args: argparse.Namespace) -> List[str]:
+    """Every file `transcribe` reads, so the transcript is never written over one of them."""
+    files = [args.input, args.vocabulary, args.speaker_turns, args.speech_regions, args.slides, args.corrections] + list(args.programme or [])
+    return [f for f in files if f]
+
+
 def _domain_vocabulary(args: argparse.Namespace) -> Optional[Dict[str, Any]]:
     """`--programme FILE` (text, repeatable), `--slides deck.json`, `--speaker NAME` (repeatable), `--term TERM` (repeatable),
     `--japanese-terms`: the request's `domain_vocabulary` (ADR-047). None when none is given."""
@@ -153,7 +159,7 @@ def cmd_follow(args: argparse.Namespace, params: Dict[str, Any]) -> int:
             if value is not None and not (0 < value <= 3600):
                 raise TranscriptionError("INVALID_INPUT", f"{name} must be in (0, 3600]")
         req = parse_request(params)
-        out = OutputPolicy(args.allowed_output).resolve_output(args.output or _default_output(args.input), forbid=[args.input])
+        out = OutputPolicy(args.allowed_output).resolve_output(args.output or _default_output(args.input), forbid=_transcribe_inputs(args))
         kw = {k: v for k, v in (("window_seconds", args.window_seconds), ("idle_seconds", args.idle_seconds),
                                 ("poll_seconds", args.poll_seconds)) if v is not None}
         doc = TranscriptionService(workspace=req.workspace).follow(req, emit, should_stop=lambda: stop["now"], **kw)
@@ -209,7 +215,7 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
             print(f"  would run ASR: {'yes' if res['would_run'] else 'no (cached)'}")
         return 0
     doc = res["transcript"]
-    out = OutputPolicy(args.allowed_output).resolve_output(args.output or _default_output(args.input), forbid=[args.input])
+    out = OutputPolicy(args.allowed_output).resolve_output(args.output or _default_output(args.input), forbid=_transcribe_inputs(args))
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, ensure_ascii=False, indent=2)
     if args.json:
