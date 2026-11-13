@@ -56,6 +56,11 @@ def _transcribe_params(args: argparse.Namespace) -> Dict[str, Any]:
         p["allowed_input_roots"] = list(args.allowed_input)
     if args.speaker_turns:
         p["speaker_turns"] = args.speaker_turns
+    dv = _domain_vocabulary(args)
+    if dv is not None:
+        p["domain_vocabulary"] = dv
+    if args.corrections:
+        p["corrections"] = _load_json_file(args.corrections, "corrections file")
     if args.chunk_seconds is not None:
         p["chunk_seconds"] = args.chunk_seconds
     if args.parallel is not None:
@@ -70,6 +75,49 @@ def _transcribe_params(args: argparse.Namespace) -> Dict[str, Any]:
     if budget:
         p["budget"] = budget
     return p
+
+
+def _read_text_file(path: str, what: str) -> str:
+    if not os.path.isfile(path):
+        raise TranscriptionError("FILE_NOT_FOUND", f"{what} not found: {path}")
+    if os.path.getsize(path) > 1024 * 1024:
+        raise TranscriptionError("INVALID_INPUT", f"{what} larger than 1 MiB")
+    with open(path, encoding="utf-8-sig") as fh:
+        return fh.read()
+
+
+def _load_json_file(path: str, what: str) -> Any:
+    try:
+        return json.loads(_read_text_file(path, what))
+    except ValueError as exc:
+        raise TranscriptionError("INVALID_INPUT", f"{what} is not valid JSON: {exc}")
+
+
+def _transcribe_inputs(args: argparse.Namespace) -> List[str]:
+    """Every file `transcribe` reads, so the transcript is never written over one of them."""
+    files = [args.input, args.vocabulary, args.speaker_turns, args.speech_regions, args.slides, args.corrections] + list(args.programme or [])
+    return [f for f in files if f]
+
+
+def _domain_vocabulary(args: argparse.Namespace) -> Optional[Dict[str, Any]]:
+    """`--programme FILE` (text, repeatable), `--slides deck.json`, `--speaker NAME` (repeatable), `--term TERM` (repeatable),
+    `--japanese-terms`: the request's `domain_vocabulary` (ADR-047). None when none is given."""
+    dv: Dict[str, Any] = {}
+    if args.programme:
+        dv["programme"] = [_read_text_file(p, "programme file") for p in args.programme]
+    if args.slides:
+        dv["slides"] = args.slides
+    if args.speaker:
+        dv["speakers"] = list(args.speaker)
+    if args.term:
+        dv["terms"] = list(args.term)
+    if not dv:
+        if args.japanese_terms:
+            raise TranscriptionError("INVALID_INPUT", "--japanese-terms needs --programme, --slides, --speaker or --term")
+        return None
+    if args.japanese_terms:
+        dv["japanese"] = True
+    return dv
 
 
 def _load_vocabulary_file(path: str) -> Any:
@@ -111,7 +159,7 @@ def cmd_follow(args: argparse.Namespace, params: Dict[str, Any]) -> int:
             if value is not None and not (0 < value <= 3600):
                 raise TranscriptionError("INVALID_INPUT", f"{name} must be in (0, 3600]")
         req = parse_request(params)
-        out = OutputPolicy(args.allowed_output).resolve_output(args.output or _default_output(args.input), forbid=[args.input])
+        out = OutputPolicy(args.allowed_output).resolve_output(args.output or _default_output(args.input), forbid=_transcribe_inputs(args))
         kw = {k: v for k, v in (("window_seconds", args.window_seconds), ("idle_seconds", args.idle_seconds),
                                 ("poll_seconds", args.poll_seconds)) if v is not None}
         doc = TranscriptionService(workspace=req.workspace).follow(req, emit, should_stop=lambda: stop["now"], **kw)
@@ -151,6 +199,11 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
             vocab = res["request"].get("vocabulary")
             if vocab:
                 print(f"  vocabulary {len(vocab)} word(s)")
+            dvr = res.get("domain_vocabulary")
+            if dvr:
+                print(f"  domain vocabulary {len(dvr['terms'])} term(s), {dvr['terms_passed']} passed as {dvr['delivered_as'] or 'nothing (engine takes neither)'}")
+            if res.get("corrections"):
+                print(f"  corrections {res['corrections']} rule(s)")
             print(f"  budget    timeout {res['budget']['timeout']:g}s, max audio {res['budget']['max_audio_seconds']:g}s")
             ck = res.get("chunking")
             if ck:
@@ -162,7 +215,7 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
             print(f"  would run ASR: {'yes' if res['would_run'] else 'no (cached)'}")
         return 0
     doc = res["transcript"]
-    out = OutputPolicy(args.allowed_output).resolve_output(args.output or _default_output(args.input), forbid=[args.input])
+    out = OutputPolicy(args.allowed_output).resolve_output(args.output or _default_output(args.input), forbid=_transcribe_inputs(args))
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, ensure_ascii=False, indent=2)
     if args.json:
@@ -494,6 +547,15 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--initial-prompt", help="vocabulary hint passed to the ASR decoder (names, terms); not an instruction")
     t.add_argument("--vocabulary", metavar="FILE", help="custom vocabulary JSON {\"written form\": [\"reading\", ...]} for engines with "
                    "custom_vocabulary (haas_ja); refused by other engines")
+    t.add_argument("--programme", action="append", metavar="FILE", help="domain vocabulary: programme or abstracts as UTF-8 text "
+                   "(repeatable); names and terms in it go to the engine's prompt or custom vocabulary (ADR-047)")
+    t.add_argument("--slides", metavar="DECK_JSON", help="domain vocabulary: slide text from `slide-sync import`'s deck.json")
+    t.add_argument("--speaker", action="append", metavar="NAME", help="domain vocabulary: a speaker's name (repeatable)")
+    t.add_argument("--term", action="append", metavar="TERM", help="domain vocabulary: a term to pass as is (repeatable)")
+    t.add_argument("--japanese-terms", action="store_true", help="domain vocabulary: also take katakana words and kanji compounds "
+                   "from the programme and slide text (opt-in)")
+    t.add_argument("--corrections", metavar="FILE", help="post-correction JSON: [{\"from\": wrong, \"to\": right, \"match\": "
+                   "\"word\"|\"substring\"}] or {wrong: right}; every replacement is recorded with its time (ADR-047)")
     t.add_argument("--asset-id", help="asset identity to stamp on the transcript (default: derived from the file fingerprint)")
     t.add_argument("--timeout", type=float, help="budget: seconds the engine may run (default 14400, same as --max-audio-seconds' default)")
     t.add_argument("--max-audio-seconds", type=float, help="budget: refuse media longer than this (default 14400)")

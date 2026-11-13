@@ -14,6 +14,16 @@
     "tail_silence": 0.5,
     "tts": "espeak-ng en-us"
   },
+  "en_drugs.wav": {
+    "language": "en",
+    "reference_text": "In this session we compare dapagliflozin, empagliflozin, semaglutide, tirzepatide and pembrolizumab in older patients. Doctor Okonkwo will present the results.",
+    "speech_onset": 1.0,
+    "tail_silence": 0.5,
+    "tts": "espeak-ng en-us",
+    "terms": ["dapagliflozin", "empagliflozin", "semaglutide", "tirzepatide", "pembrolizumab"],
+    "programme": "en_drugs_programme.txt",
+    "corrections": [{"from": "napagliflozin", "to": "dapagliflozin"}, {"from": "Akonkwo", "to": "Okonkwo"}]
+  },
   "lecture_short.mp4": {
     "parts": [
       {"language": "ja", "reference": "ja_short.wav", "offset": 0.0},

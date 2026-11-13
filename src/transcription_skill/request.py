@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from .errors import TranscriptionError
 from .validate import CREDENTIAL_PATTERNS
+from .vocab import parse_corrections, parse_domain_vocabulary
 from .words import DICTIONARY_LANGUAGES, WORD_SEGMENTATION_DICTIONARY, WORD_SEGMENTATION_ENGINE, WORD_SEGMENTATION_MODES
 
 DEFAULT_ENGINE = "faster_whisper"
@@ -25,7 +26,7 @@ MAX_VOCABULARY_CHARS = 100
 
 ALLOWED_KEYS = {"input", "language", "engine", "model", "word_timestamps", "temperature", "initial_prompt", "beam_size", "audio_stream",
                 "asset_id", "budget", "cache", "workspace", "offline", "allowed_input_roots", "vad_filter", "vocabulary",
-                "word_segmentation", "chunk_seconds", "parallel", "speech_regions"}
+                "word_segmentation", "chunk_seconds", "parallel", "speech_regions", "domain_vocabulary", "corrections"}
 FORBIDDEN_KEYS = {"command", "argv", "cmd", "shell", "exec", "args", "script", "binary", "api_key", "apikey", "token",
                   "secret", "password", "credentials", "env"}
 BUDGET_KEYS = {"timeout", "max_audio_seconds"}
@@ -72,6 +73,8 @@ class TranscribeRequest:
     parallel: int = 1                       # chunks recognized at the same time (chunk_seconds only)
     speech_regions: Optional[List[List[float]]] = None   # [[start, end], ...] from media-analysis-skill speech_regions (chunk_seconds only)
     speech_regions_fingerprint: Optional[str] = None     # the file those regions were measured on, when the document names it
+    domain_vocabulary: Optional[Dict[str, Any]] = None   # terms selected from the programme / slides / speakers (ADR-047)
+    corrections: Optional[List[Dict[str, str]]] = None   # post-correction rules {from, to, match}, applied after the engine (ADR-047)
 
     def parameters(self) -> Dict[str, Any]:
         """The parameters that shape the ASR output. Part of provenance and of the cache identity.
@@ -87,6 +90,8 @@ class TranscribeRequest:
             p["vocabulary"] = self.vocabulary
         if self.word_segmentation != WORD_SEGMENTATION_ENGINE:
             p["word_segmentation"] = self.word_segmentation
+        if self.corrections is not None:     # the delivered terms are already in initial_prompt / vocabulary (ADR-047)
+            p["corrections"] = self.corrections
         if self.chunk_seconds is not None:   # where the cuts fall shapes the result; `parallel` does not (ADR-042)
             from .chunking import regions_digest
             p["chunking"] = {"chunk_seconds": self.chunk_seconds,
@@ -210,6 +215,8 @@ def parse_request(doc: Any) -> TranscribeRequest:
                        reason="word_timestamps_required")
 
     chunk_seconds, parallel, regions, regions_fp = _parse_chunking(doc, lang)
+    domain_vocabulary = parse_domain_vocabulary(doc.get("domain_vocabulary"))
+    corrections = parse_corrections(doc.get("corrections"))
 
     budget = Budget()
     b = doc.get("budget")
@@ -227,7 +234,8 @@ def parse_request(doc: Any) -> TranscribeRequest:
                              initial_prompt=prompt, beam_size=beam, audio_stream=audio_stream, asset_id=asset_id, budget=budget, cache=cache,
                              workspace=ws, offline=offline, allowed_input_roots=roots, vad_filter=vad_filter,
                              vocabulary=vocabulary, word_segmentation=segmentation, chunk_seconds=chunk_seconds, parallel=parallel,
-                             speech_regions=regions, speech_regions_fingerprint=regions_fp)
+                             speech_regions=regions, speech_regions_fingerprint=regions_fp, domain_vocabulary=domain_vocabulary,
+                             corrections=corrections)
 
 
 def _parse_chunking(doc: Dict[str, Any], lang: Optional[str]) -> Any:
@@ -311,4 +319,6 @@ def summarize_for_display(req: TranscribeRequest) -> Dict[str, Any]:
     d["input"] = os.path.basename(req.input)
     if req.speech_regions is not None:
         d["speech_regions"] = f"{len(req.speech_regions)} regions"
+    if req.corrections is not None:
+        d["corrections"] = f"{len(req.corrections)} rules"
     return d

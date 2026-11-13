@@ -25,7 +25,7 @@ Transcript out. Standalone-usable (CLI + `run -` JSON transport); OS integration
 ## Working routine
 ```bash
 pip install -e ".[faster-whisper]"
-python -m unittest tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py tests/test_version_source.py tests/test_speechcpp.py tests/test_whisperx.py tests/test_words.py tests/test_qwen3_asr.py tests/test_chunking.py tests/test_follow.py tests/test_search.py tests/test_speaker_conformance.py
+python -m unittest tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py tests/test_version_source.py tests/test_speechcpp.py tests/test_whisperx.py tests/test_words.py tests/test_qwen3_asr.py tests/test_chunking.py tests/test_follow.py tests/test_search.py tests/test_speaker_conformance.py tests/test_vocab.py
 python -m unittest discover -s scripts/release/tests   # release tooling (runs in PR CI on Linux)
 python -m unittest tests/test_integration.py      # real faster-whisper, downloads `base` once
 python evals/run.py

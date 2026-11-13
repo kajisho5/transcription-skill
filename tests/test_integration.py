@@ -436,6 +436,59 @@ class FollowTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+DRUG_NAMES = REF["en_drugs.wav"]["terms"]
+# what the programme's terms must add on en_drugs.wav with `tiny`, the model it was measured on (ADR-047): measured 0 -> 4 of 5 with
+# faster-whisper 1.2.1 `tiny` int8 on a Linux CPU; with the two corrections, 5 of 5
+VOCAB_MIN_GAIN = 3
+
+
+def drug_hits(text: str) -> int:
+    words = set(re.findall(r"[a-z]+", text.lower()))
+    return sum(1 for d in DRUG_NAMES if d in words)
+
+
+@unittest.skipUnless(HAVE_FFMPEG and ENGINE_OK, "needs ffmpeg and faster-whisper (pip install faster-whisper)")
+class DomainVocabularyTests(unittest.TestCase):
+    """Five drug names, spoken by espeak-ng: the terms selected from the session's programme (and the chair's name) go to
+    faster-whisper as its initial_prompt, and a correction list fixes what is still heard wrong, each replacement listed
+    with its time."""
+
+    def test_programme_vocabulary_improves_the_drug_names_and_corrections_are_timed(self):
+        ws = tempfile.mkdtemp(prefix="ts_vocab_int_")
+        try:
+            svc = TranscriptionService(workspace=ws)
+            base = {"input": str(FX / "en_drugs.wav"), "model": "tiny", "language": "en", "word_timestamps": True, "cache": False}
+            plain = svc.transcribe(parse_request(dict(base)))["transcript"]
+            programme = (FX / "en_drugs_programme.txt").read_text(encoding="utf-8")
+            rules = REF["en_drugs.wav"]["corrections"]
+            doc = svc.transcribe(parse_request(dict(base, domain_vocabulary={"programme": programme, "speakers": ["Amaka Okonkwo"]},
+                                                    corrections=rules)))["transcript"]
+            self.assertTrue(validate_transcript(doc).ok)
+            before = drug_hits(" ".join(s["text"] for s in plain["segments"]))
+            heard = drug_hits(" ".join(s["raw_text"] for s in doc["segments"]))      # recognition with the vocabulary, before corrections
+            after = drug_hits(" ".join(s["text"] for s in doc["segments"]))
+            print(f"\n  drug names, {LONG_MODEL}: {before}/5 without, {heard}/5 with the programme vocabulary, {after}/5 after corrections",
+                  file=sys.stderr)
+            self.assertGreaterEqual(heard - before, VOCAB_MIN_GAIN, (plain["segments"], doc["segments"]))
+            self.assertGreaterEqual(after, heard)
+            self.assertEqual(doc["provenance"]["vocabulary"]["delivered_as"], "initial_prompt")
+            cor = doc["provenance"]["corrections"]
+            self.assertEqual(cor["count"], len(cor["applied"]))
+            self.assertGreaterEqual(cor["count"], 1, cor)
+            segs = {s["id"]: s for s in doc["segments"]}
+            for a in cor["applied"]:                                                 # every replacement, with its time
+                s = segs[a["segment_id"]]
+                self.assertIn(a["to"], s["text"])
+                self.assertIn(a["from"].lower(), s["raw_text"].lower())
+                self.assertLessEqual(s["start"] - 0.02, a["start"])
+                self.assertLess(a["start"], a["end"])
+                self.assertLessEqual(a["end"], s["end"] + 0.02)
+                if a["timing"] == "word":
+                    self.assertTrue(any(w["start"] == a["start"] and a["to"] in w["text"] for w in s["words"]), a)
+        finally:
+            shutil.rmtree(ws, ignore_errors=True)
+
+
 @unittest.skipUnless(ENGINE_OK, "needs faster-whisper (pip install faster-whisper)")
 class PreparedAudioTests(unittest.TestCase):
     """The engine reads the prepared WAV itself, with whatever PyAV is installed (ADR-044)."""
