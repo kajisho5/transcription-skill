@@ -2,8 +2,9 @@
 `speaker_id` filled. This skill still does no diarization: who spoke when comes from the turns document
 (`diarization-skill/turns@1`, written by diarization-skill's `diarize`), read here as data.
 
-The rule is diarization-skill's own ASSIGN rule (its `assign.py`, docs/turns.md), so a merge here and a
-`diarization assign` of the same pair give the same `speaker_id`s:
+The rule is diarization-skill's own ASSIGN rule (its docs/speaker_id_rule.md, which that repository owns), so a merge
+here and a `diarization assign` of the same pair give the same `speaker_id`s. Its published conformance fixtures run in
+tests/test_speaker_conformance.py, pinned to a fixture version (ADR-046):
 - only the exclusive `turns` are used (one speaker at a time);
 - a word, or a segment without words, gets the speaker whose turns overlap it longest; zero overlap or a tie
   for the longest leaves it null;
@@ -35,6 +36,15 @@ METHOD = "max_overlap_with_exclusive_turns"
 RULE = ("per word (else per segment): speaker with the longest overlap with the exclusive turns; zero overlap "
         "or a tie -> null. Segment with words: speaker with the largest assigned word duration; tie -> null.")
 TOOL = "transcription/speakers"
+# The rule this merge follows, as stated in the contract (ADR-046): diarization-skill owns it and publishes conformance
+# fixtures for it; tests/test_speaker_conformance.py runs the vendored copy of the pinned fixture version.
+SPEAKER_RULE = {
+    "owner": "diarization-skill",
+    "spec": "https://github.com/kajisho5/diarization-skill/blob/main/docs/speaker_id_rule.md",
+    "method": METHOD,
+    "conformance_fixtures": "diarization-skill/speaker-id-conformance@1",
+    "conformance_fixture_version": "1",
+}
 MAX_TURNS = 200000
 
 

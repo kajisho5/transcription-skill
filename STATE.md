@@ -82,6 +82,8 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   `speaker_turns` input on `transcription/transcribe` / `batch` items (CLI `--speaker-turns`) fill `segments[].speaker_id`
   and `words[].speaker_id` from diarization-skill's `diarization-skill/turns@1` with diarization-skill's own ASSIGN
   rule, recorded under `speaker_assignment`; checked against `diarization assign` on 490 random layouts (identical).
+  Passes diarization-skill's speaker-id conformance fixtures (`fixture_version` 1, vendored, compared with
+  diarization-skill main in CI; ADR-046, roadmap step 17); the contract states the rule under the tool's `rule`.
   Not part of the cache key; this skill still does no diarization. Not yet run on a real diarization of real audio
   (that needs diarization-skill's gated pyannote weights)
 - Phrase search (ADR-045, roadmap step 16): `transcription/find` (CLI `find T... PHRASE`, alias `search`) returns every
@@ -322,3 +324,7 @@ two steps run this way in video-editing-skill and color-grading-skill.
 - 2026-11-13: phrase search `transcription/find` (CLI `find`, alias `search`; ADR-045, roadmap step 16): every timed
   hit of a phrase, exact / normalized / optional approximate, standard library only. Minor bump 0.12.0 in
   `pyproject.toml`. Contract additive (one tool, one capability; `contract_version` 1.0); video-production-agent needs a re-pin
+- 2026-11-13: the speaker merge runs diarization-skill's speaker-id conformance fixtures (ADR-046, roadmap step 17):
+  vendored `fixture_version` 1, pinned by SHA-256, compared with diarization-skill main in the unit CI; the
+  `transcription/speakers` tool states the rule it follows (`rule`). Patch bump 0.12.1 in `pyproject.toml`. Contract
+  additive (one key on one tool; `contract_version` 1.0); video-production-agent needs a re-pin

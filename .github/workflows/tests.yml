@@ -38,6 +38,18 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install ffmpeg -y --no-progress
       - run: pip install -e .
+      # diarization-skill owns the speaker-id rule; its published conformance fixtures are vendored under
+      # tests/fixtures/speaker_id_conformance/ and must equal its main branch, so a fixture change there fails here
+      # until it is taken (ADR-046). Read-only checkout, the same way diarization-skill's CI checks out its siblings.
+      - uses: actions/checkout@v7
+        with:
+          repository: kajisho5/diarization-skill
+          path: diarization-skill
+      - name: Point the speaker-id conformance test at diarization-skill
+        shell: bash
+        run: |
+          echo "DIARIZATION_SKILL_DIR=$GITHUB_WORKSPACE/diarization-skill" >> "$GITHUB_ENV"
+          echo "TRANSCRIPTION_REQUIRE_DIARIZATION_FIXTURES=1" >> "$GITHUB_ENV"
       # one job also installs the optional [ja] extra (SudachiPy + SudachiDict core, ~75 MB, no model) so the
       # dictionary word segmentation tests run against the real tokenizer there; TRANSCRIPTION_REQUIRE_SUDACHI
       # turns their skip into a failure in that job (ADR-039). Every other job runs them with the fake segmenter.
@@ -46,7 +58,7 @@ jobs:
         run: |
           pip install -e ".[ja]"
           echo "TRANSCRIPTION_REQUIRE_SUDACHI=1" >> "$GITHUB_ENV"
-      - run: python -m unittest -v tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py tests/test_version_source.py tests/test_speechcpp.py tests/test_whisperx.py tests/test_words.py tests/test_qwen3_asr.py tests/test_chunking.py tests/test_follow.py tests/test_search.py
+      - run: python -m unittest -v tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py tests/test_version_source.py tests/test_speechcpp.py tests/test_whisperx.py tests/test_words.py tests/test_qwen3_asr.py tests/test_chunking.py tests/test_follow.py tests/test_search.py tests/test_speaker_conformance.py
       - name: Release-tooling scripts (the release decision, ADR-036)
         if: runner.os == 'Linux'
         run: python -m unittest discover -v -s scripts/release/tests

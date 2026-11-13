@@ -1,0 +1,72 @@
+{
+  "schema": "diarization-skill/speaker-id-conformance@1",
+  "fixture_version": "1",
+  "rule": "docs/speaker_id_rule.md",
+  "method": "max_overlap_with_exclusive_turns",
+  "transcript_schema": "transcription-skill/transcript/0.1",
+  "turns_schema": "diarization-skill/turns@1",
+  "cases": [
+    {
+      "id": "01_inside_one_turn",
+      "file": "cases/01_inside_one_turn.json",
+      "sha256": "91aa904594dfee960d4c41bc359a0780a45a7225817b15b26628ea3652a5077e",
+      "covers": [
+        "word_inside_turn",
+        "segment_without_words"
+      ]
+    },
+    {
+      "id": "02_word_across_turn_boundary",
+      "file": "cases/02_word_across_turn_boundary.json",
+      "sha256": "3a5946141aa126098392cf186bf30b65c4e42aa7882137cb8ec143ad14652961",
+      "covers": [
+        "word_across_turn_boundary",
+        "segment_vote_by_word_duration",
+        "null_word_does_not_vote",
+        "word_tie"
+      ]
+    },
+    {
+      "id": "03_gap_with_no_turn",
+      "file": "cases/03_gap_with_no_turn.json",
+      "sha256": "35aa77e91757d1e1d0cc0c3833365e0a9538f329cec3194eed4e15363bcef248",
+      "covers": [
+        "gap_no_turn",
+        "segment_without_words",
+        "partial_overlap",
+        "touching_boundary"
+      ]
+    },
+    {
+      "id": "04_ties",
+      "file": "cases/04_ties.json",
+      "sha256": "beea64e8214b32b1d1b756a696b4f278419e300cc4f321a27e21dd6b815c2dc6",
+      "covers": [
+        "tie",
+        "segment_tie",
+        "segment_vote_tie",
+        "segment_without_assigned_words"
+      ]
+    },
+    {
+      "id": "05_overlap",
+      "file": "cases/05_overlap.json",
+      "sha256": "c8f05a975b9e03dd3056de454ee111b30c36b43cf686af64bb5643dbd53a4b14",
+      "covers": [
+        "overlap",
+        "exclusive_turns_only",
+        "overlap_segment_ids"
+      ]
+    },
+    {
+      "id": "06_same_speaker_summed",
+      "file": "cases/06_same_speaker_summed.json",
+      "sha256": "6612c70b0cb0f0632baf863d3d9ee113ebcb6dacea6abbbd95c12b2e04000bde",
+      "covers": [
+        "same_speaker_summed",
+        "segment_without_words",
+        "word_spanning_three_turns"
+      ]
+    }
+  ]
+}

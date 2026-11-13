@@ -976,3 +976,29 @@
 - Not verified: a real multi-hour transcript from recognition.
 - Contract: additive. One new tool (`transcription/find`) and one capability (`transcript_search`); nothing else
   changes, so `contract_version` stays 1.0.
+
+## ADR-046 The speaker merge runs diarization-skill's speaker-id conformance fixtures
+- Problem: the speaker merge (ADR-037) is a copy of diarization-skill's ASSIGN rule. The ownership decisions of
+  2026-11-12 give that rule to diarization-skill, which now writes it down (its `docs/speaker_id_rule.md`, its ADR-004)
+  and publishes conformance fixtures (`conformance/speaker_id/`, `fixture_version` 1: transcript + turns -> expected
+  `speaker_id` per segment and word, `overlap_segment_ids`). A copy that is not run against the owner's cases drifts
+  unnoticed (roadmap step 17).
+- Decision:
+  - Vendor, then compare. The fixtures are copied unchanged into `tests/fixtures/speaker_id_conformance/` and pinned in
+    `tests/test_speaker_conformance.py` (`FIXTURE_VERSION`, the manifest's SHA-256, each case's SHA-256 from the
+    manifest). `.gitattributes` keeps the bytes identical on Windows checkouts. The merge, and the
+    `transcription/speakers` tool, must give the expected values for every case. Unit tests stay offline.
+  - Fail until taken. The unit CI checks out diarization-skill read-only, as diarization-skill's own CI checks out its
+    siblings (no ref: its main branch), and sets `DIARIZATION_SKILL_DIR` and `TRANSCRIPTION_REQUIRE_DIARIZATION_FIXTURES=1`.
+    The published copy must equal the vendored one byte for byte, so a fixture change there fails here until someone
+    copies the new fixtures, updates the pins and makes the merge pass. Without the variable (a local run with no
+    checkout), that one comparison skips; with it, a missing checkout fails.
+  - The contract says so. The `transcription/speakers` tool carries `rule`: `owner` (`diarization-skill`), `spec` (the
+    rule's URL), `method` (`max_overlap_with_exclusive_turns`), `conformance_fixtures`
+    (`diarization-skill/speaker-id-conformance@1`) and `conformance_fixture_version` (`1`). The test checks it against
+    the pin, so the contract cannot claim a fixture version the tests do not run.
+- Result: the merge passes all six cases of `fixture_version` 1 unchanged (no code change in the merge itself).
+- Consequences: a change of the rule in diarization-skill turns this repository's CI red on its next run, by design,
+  until it is taken. A run of this repository's CI does not start on a change in diarization-skill; the failure shows
+  on the next pull request or push here.
+- Contract: additive. One new key (`rule`) on the `transcription/speakers` tool entry; `contract_version` stays 1.0.
