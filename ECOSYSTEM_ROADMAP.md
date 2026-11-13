@@ -5,7 +5,7 @@ Written from a read-only audit of this repository on 2026-10-30. Each step below
 
 ## Where it stands
 
-0.12.0, version single-sourced from `pyproject.toml` (step 1). faster-whisper engine (plus optional haas_ja, speechcpp, whisperx and qwen3_asr), offline mode, cache, export json/srt/vtt/tsv/txt, batch, word index over the whole transcript and optional Japanese dictionary words (step 13), English and European model options with per-model language limits (step 14), Qwen3-ASR with forced-aligned word timestamps (step 15), phrase search `find` / `search` (step 16). Unit CI runs on every pull request (#41); heavy jobs are manual.
+0.12.1, version single-sourced from `pyproject.toml` (step 1). faster-whisper engine (plus optional haas_ja, speechcpp, whisperx and qwen3_asr), offline mode, cache, export json/srt/vtt/tsv/txt, batch, word index over the whole transcript and optional Japanese dictionary words (step 13), English and European model options with per-model language limits (step 14), Qwen3-ASR with forced-aligned word timestamps (step 15), phrase search `find` / `search` (step 16). Unit CI runs on every pull request (#41); heavy jobs are manual.
 
 ## What this repository owns
 
@@ -13,7 +13,7 @@ Written from a read-only audit of this repository on 2026-10-30. Each step below
 
 | Owned job | Status | Note |
 |---|---|---|
-| 文字起こし | done | one engine; one language per transcript; speaker_id null from recognition, filled from diarization-skill turns by a speaker merge (step 4), a copy of diarization-skill's assignment rule (step 17) |
+| 文字起こし | done | one engine; one language per transcript; speaker_id null from recognition, filled from diarization-skill turns by a speaker merge (step 4), a copy of diarization-skill's assignment rule, passing its conformance fixtures (step 17) |
 | 文字起こしの語句検索 | done | `transcription find` / `search` (step 16, ADR-045; [Velisa ownership decisions 2026-11-12](https://github.com/kajisho5/Velisa/blob/main/docs/ecosystem/DECISION_LOG.md)) |
 
 ## Wiring
@@ -59,7 +59,7 @@ Agent wires transcribe (ADR-024), with diarization-skill's turns as `speaker_tur
   - Done when: fake-module unit tests in the unit matrix; the real models on the Japanese and English fixtures in the manual `qwen3_asr` job still to run
 - [x] **16. `find` / `search`: phrase → timed hits** — this repository keeps 文字起こしの語句検索 and implements it ([Velisa ownership decisions 2026-11-12](https://github.com/kajisho5/Velisa/blob/main/docs/ecosystem/DECISION_LOG.md)). `transcription find <transcript.json> <phrase>` returns every hit with its start and end, segment id, word indices and `speaker_id`; Japanese is matched after the same normalisation as the word index (width, long vowel marks); standard library only, offline, deterministic; a tool in `contract --json` so the agent can wire it (video-production-agent step 33) — `transcription/find` (CLI `find`, alias `search`; ADR-045, 0.12.0): exact, then normalized (NFKC, casefold, long vowel marks, whitespace / punctuation ignored, across word and segment boundaries), then optional approximate hits with their ratio; `tests/test_search.py` — [#59](https://github.com/kajisho5/transcription-skill/pull/59)
   - Done when: a fixture with a phrase spoken three times gives three hits with word times, a phrase across a segment boundary is found, a phrase not spoken gives zero hits (not an error), and `contract --json` lists the tool
-- [ ] **17. Speaker merge shares diarization-skill's conformance fixtures** — diarization-skill owns the speaker-id assignment rule; the merge here (step 4, ADR-037) is a copy of the same rule ([Velisa ownership decisions 2026-11-12](https://github.com/kajisho5/Velisa/blob/main/docs/ecosystem/DECISION_LOG.md)). Run diarization-skill's published conformance fixtures (transcript + turns → expected `speaker_id` per word and segment) in this repository's tests, pinned to a fixture version, and say in the contract that the merge follows that rule
+- [x] **17. Speaker merge shares diarization-skill's conformance fixtures** — diarization-skill owns the speaker-id assignment rule; the merge here (step 4, ADR-037) is a copy of the same rule ([Velisa ownership decisions 2026-11-12](https://github.com/kajisho5/Velisa/blob/main/docs/ecosystem/DECISION_LOG.md)). Run diarization-skill's published conformance fixtures (transcript + turns → expected `speaker_id` per word and segment) in this repository's tests, pinned to a fixture version, and say in the contract that the merge follows that rule — vendored `fixture_version` 1 in `tests/fixtures/speaker_id_conformance/`, pinned by SHA-256 and compared with diarization-skill main in the unit CI (`tests/test_speaker_conformance.py`); the `transcription/speakers` tool states the rule under `rule` (ADR-046, 0.12.1) — [#61](https://github.com/kajisho5/transcription-skill/pull/61)
   - Needs: diarization-skill step 9 (the fixtures)
   - Done when: this repository's CI passes the shared fixtures, and a fixture change in diarization-skill fails here until it is taken
 
