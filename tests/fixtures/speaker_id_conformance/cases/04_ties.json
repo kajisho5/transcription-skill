@@ -1,0 +1,202 @@
+{
+  "schema": "diarization-skill/speaker-id-case@1",
+  "fixture_version": "1",
+  "id": "04_ties",
+  "description": "Equal longest overlap is a tie and stays null: for a segment without words, for a segment whose words vote equally, and for a word; a segment with no assigned word is null.",
+  "covers": [
+    "tie",
+    "segment_tie",
+    "segment_vote_tie",
+    "segment_without_assigned_words"
+  ],
+  "transcript": {
+    "schema": "transcription-skill/transcript/0.1",
+    "id": "tr_conformance01",
+    "asset_id": "asset_conformance0001",
+    "language": "en",
+    "language_source": "requested",
+    "language_confidence": null,
+    "duration": 10.0,
+    "segments": [
+      {
+        "id": "seg_0001",
+        "start": 1.5,
+        "end": 2.5,
+        "text": "segment 1",
+        "raw_text": "segment 1",
+        "confidence": 0.9,
+        "words": null,
+        "speaker_id": null
+      },
+      {
+        "id": "seg_0002",
+        "start": 3.0,
+        "end": 5.0,
+        "text": "alpha bravo",
+        "raw_text": "alpha bravo",
+        "confidence": 0.9,
+        "words": [
+          {
+            "start": 3.0,
+            "end": 4.0,
+            "text": "alpha",
+            "confidence": 0.9
+          },
+          {
+            "start": 4.0,
+            "end": 5.0,
+            "text": "bravo",
+            "confidence": 0.9
+          }
+        ],
+        "speaker_id": null
+      },
+      {
+        "id": "seg_0003",
+        "start": 5.5,
+        "end": 6.5,
+        "text": "alpha",
+        "raw_text": "alpha",
+        "confidence": 0.9,
+        "words": [
+          {
+            "start": 5.5,
+            "end": 6.5,
+            "text": "alpha",
+            "confidence": 0.9
+          }
+        ],
+        "speaker_id": null
+      }
+    ],
+    "source": {
+      "filename": "conformance.wav",
+      "fingerprint": "sha256:5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+      "size_bytes": 320000,
+      "media_duration": 10.0,
+      "audio_channels": 1,
+      "sample_rate": 16000,
+      "container": "wav",
+      "has_video": false
+    },
+    "engine": "faster_whisper",
+    "engine_version": "1.2.1",
+    "created_at": "2026-11-13T00:00:00Z",
+    "provenance": {
+      "engine": "faster_whisper",
+      "engine_version": "1.2.1",
+      "execution_mode": "local",
+      "model": "tiny",
+      "model_version": null,
+      "parameters": {
+        "language": "en"
+      },
+      "parameters_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "cache_key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "created_at": "2026-11-13T00:00:00Z",
+      "processing_seconds": 1.0,
+      "skill_version": "0.11.4",
+      "skill": "transcription-skill",
+      "tool": "transcription/transcribe",
+      "language_detection": null,
+      "audio_extraction": null
+    },
+    "warnings": []
+  },
+  "turns": {
+    "schema": "diarization-skill/turns@1",
+    "source": {
+      "filename": "conformance.wav",
+      "fingerprint": "sha256:5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+      "size_bytes": 320000,
+      "media_duration": 10.0,
+      "has_video": false,
+      "audio_stream": 0
+    },
+    "engine": {
+      "id": "scripted",
+      "version": "1.0",
+      "model": "conformance/scripted",
+      "revision": null,
+      "license": "MIT",
+      "attribution": "conformance fixture",
+      "execution_mode": "local",
+      "device": "cpu"
+    },
+    "parameters": {
+      "num_speakers": null,
+      "min_speakers": null,
+      "max_speakers": null
+    },
+    "speakers": [
+      "SPEAKER_00",
+      "SPEAKER_01"
+    ],
+    "speaker_count": 2,
+    "speech_seconds": 8.0,
+    "turns": [
+      {
+        "start": 0.0,
+        "end": 2.0,
+        "speaker": "SPEAKER_00"
+      },
+      {
+        "start": 2.0,
+        "end": 4.0,
+        "speaker": "SPEAKER_01"
+      },
+      {
+        "start": 4.0,
+        "end": 6.0,
+        "speaker": "SPEAKER_00"
+      },
+      {
+        "start": 6.0,
+        "end": 8.0,
+        "speaker": "SPEAKER_01"
+      }
+    ],
+    "overlap": {
+      "available": false,
+      "turns": null,
+      "regions": [],
+      "total_seconds": null
+    },
+    "audio_extraction": {
+      "tool": "ffmpeg",
+      "recipe": "mono 16000 Hz pcm_s16le",
+      "audio_stream": 0
+    },
+    "skill": "diarization-skill",
+    "skill_version": "0.3.0",
+    "tool": "diarization/diarize",
+    "created_at": "2026-11-13T00:00:00Z",
+    "processing_seconds": 0.1,
+    "warnings": []
+  },
+  "expected": {
+    "segments": [
+      {
+        "id": "seg_0001",
+        "speaker_id": null,
+        "words": null
+      },
+      {
+        "id": "seg_0002",
+        "speaker_id": null,
+        "words": [
+          "SPEAKER_01",
+          "SPEAKER_00"
+        ]
+      },
+      {
+        "id": "seg_0003",
+        "speaker_id": null,
+        "words": [
+          null
+        ]
+      }
+    ],
+    "overlap_segment_ids": []
+  }
+}

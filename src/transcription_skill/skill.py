@@ -13,7 +13,7 @@ from .engines import ENGINE_CAPABILITIES, EXECUTION_MODES, default_registry
 from .errors import TranscriptionError
 from .export import FORMATS, write
 from .search import find_tool
-from .speakers import load_json_document, merge_speakers
+from .speakers import SPEAKER_RULE, load_json_document, merge_speakers
 from .speech_events import speech_events
 from .validate import validate_transcript
 
@@ -63,7 +63,9 @@ TOOLS: List[Dict[str, Any]] = [
      "output": {"output": "path", "format": "str"},
      "deterministic": True, "side_effects": ["writes output file"]},
     {"name": "transcription/speakers", "description": "Fill segments[].speaker_id (and words[].speaker_id) of a Transcript from "
-     "diarization-skill speaker turns (diarization-skill/turns@1), with diarization-skill's own ASSIGN rule. No diarization here.",
+     "diarization-skill speaker turns (diarization-skill/turns@1), with diarization-skill's own ASSIGN rule. No diarization here. "
+     "Follows diarization-skill's speaker-id assignment rule and passes its conformance fixtures at the version in `rule`.",
+     "rule": dict(SPEAKER_RULE),
      "input": {"transcript": "Transcript | path", "turns": "diarization-skill/turns@1 document | path", "allow_source_mismatch": "bool",
                "replace": "bool"},
      "output": {"transcript": "Transcript (speaker_id filled, speaker_assignment recorded)", "warnings": "list[str]"},

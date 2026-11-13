@@ -348,7 +348,10 @@ Speaker merge (ADR-037): `run_tool("transcription/speakers", {"transcript": tran
 (CLI `transcription speakers talk.transcript.json --turns talk.turns.json`), or `speaker_turns` on
 `transcription/transcribe` (CLI `--speaker-turns`), fills `speaker_id` from
 [diarization-skill](https://github.com/kajisho5/diarization-skill)'s speaker turns (`diarization-skill/turns@1`) with
-its own ASSIGN rule. The turns come from diarization-skill; this skill still does no diarization.
+its own ASSIGN rule. The turns come from diarization-skill; this skill still does no diarization. diarization-skill
+owns that rule ([docs/speaker_id_rule.md](https://github.com/kajisho5/diarization-skill/blob/main/docs/speaker_id_rule.md));
+the merge passes its published conformance fixtures, vendored in `tests/fixtures/speaker_id_conformance/` and pinned to
+a fixture version that the contract states under the tool's `rule` (ADR-046).
 Every parameter is typed JSON. A request that contains `command`, `argv`, `shell` or a credential is
 refused with `INVALID_INPUT`. `transcription contract --json` returns the contract including every
 registered engine's `EngineSpec` (schema `transcription-skill/engine-spec/0.1`); that JSON, not this
