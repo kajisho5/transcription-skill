@@ -338,7 +338,7 @@ Tools: `transcription/transcribe`, `transcription/segments`, `transcription/expo
 
 Phrase search (ADR-045): `run_tool("transcription/find", {"transcript": "talk.transcript.json", "phrase": "sound design"})`
 (CLI `transcription find talk.transcript.json "sound design"`, alias `search`; `transcripts` / several files for many)
-returns every hit in time order with `start`, `end`, `segment_ids`, `word_indices`, `speaker_id`, the matched text and
+returns every hit (in time order within each transcript, transcripts in the order given) with `start`, `end`, `segment_ids`, `word_indices`, `speaker_id`, the matched text and
 the neighbouring segments (`context`). Matching folds width (NFKC), case and long vowel marks and ignores whitespace
 and punctuation over the joined word texts, so a phrase split across words or segments, or CJK text without spaces,
 is found. `fuzzy` (0.5-1.0) adds approximate hits labelled with their similarity ratio. Standard library only,

@@ -73,12 +73,12 @@ TOOLS: List[Dict[str, Any]] = [
      "long vowel marks, whitespace and punctuation ignored, across word and segment boundaries), then optional approximate "
      "matching labelled with its ratio. A read-only query: no margin, no cut range, no ranking.",
      "input": {"transcript": "Transcript | path (or transcripts)", "transcripts": "list[Transcript | path] (1..100; or transcript)",
-               "phrase": "str (1..500 characters)", "fuzzy": "0.5..1.0 | null (approximate matches with ratio >= fuzzy)",
+               "phrase": "str (1..500 characters)", "fuzzy": "0.5..1.0 | null (approximate matches with ratio >= fuzzy; phrase of at most 64 characters after folding)",
                "context": "0..10 (neighbouring segments each side, default 1)"},
      "output": {"phrase": "str", "normalized_phrase": "str", "normalization": "str", "fuzzy": "number | null", "context": "int",
                 "count": "int", "hits": "list[{source, transcript_id, match: exact|normalized|approximate, ratio, start, end, "
                 "timing: word|segment, segment_ids, word_indices (null when segment-timed), speaker_id, speaker_ids, text, "
-                "segment_text, context: {before, after}}] (time order; empty when the phrase is not spoken)",
+                "segment_text, context: {before, after}}] (time order within each transcript, transcripts in the order given; empty when the phrase is not spoken)",
                 "transcripts": "list[{source, transcript_id, language, segments, words, word_timed, hits}]"},
      "deterministic": True, "side_effects": []},
     {"name": "transcription/check", "description": "Validate a Transcript document against the contract.",

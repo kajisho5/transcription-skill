@@ -946,17 +946,23 @@
     character right after kana (ｰ － ― ─ ‐ – and friends) becomes ー; whitespace, punctuation (Unicode Z*, P*) and
     control characters are dropped. A dash that does not follow kana is punctuation (`e-mail` = `email`). Katakana and
     hiragana are not folded into each other, and no reading is guessed.
-  - Matching: every non-overlapping occurrence of the folded phrase. A hit is `exact` when the covered text equals the
-    phrase apart from whitespace, `normalized` when it equals it only after folding. With `fuzzy` (0.5-1.0), windows
+  - Matching: every non-overlapping occurrence of the folded phrase. A hit is `exact` when the phrase as written
+    (whitespace aside, punctuation kept) appears in the text of the units it covers, `normalized` when it matches only
+    after folding. With `fuzzy` (0.5-1.0), windows
     of the folded phrase's length ±20 % with a `difflib.SequenceMatcher` ratio of at least `fuzzy` are added as
-    `approximate`, best ratio first, never overlapping another hit. The ratio is in every hit (1.0 for exact and
-    normalized).
+    `approximate`: each start position keeps its best window (highest ratio, then shortest), and those are taken best
+    ratio first, then earliest, never overlapping another hit. The ratio is in every hit (1.0 for exact and
+    normalized). Bounded work and memory: at most one candidate per character is held; `fuzzy` needs a folded
+    phrase of at most 64 characters; and when characters x window lengths x phrase length² exceeds 300 M (about 25 s
+    on one core when every window is a near match) the search is refused as `INVALID_INPUT` instead of running for
+    minutes. An 8-hour transcript with a 10-character phrase is well inside the bound.
   - Each hit maps back to the units it covers: `start` of the first, `end` of the last, `segment_ids`, `word_indices`
     (numbered on the fly for documents written before ADR-039), `speaker_id` (the word's own after a speaker merge,
     else the segment's; null when the hit spans two speakers, `speaker_ids` lists them), `timing` (`word`, or `segment`
-    when a covered segment had no words), the matched `text`, the hit's `segment_text` and `context` (`--context N`
+    when a covered segment had no words; `word_indices` is then null), the matched `text`, the hit's `segment_text` and `context` (`--context N`
     segments before and after, default 1). A phrase inside a longer word reports that whole word's times.
-  - Hits are in time order; several transcripts give each hit's `source` (the file name, else
+  - Hits are in time order within each transcript, transcripts in the order given; several transcripts give each
+    hit's `source` (the file name, else
     `source.filename`) and a summary per transcript. Zero hits is a result, not an error.
   - Refused as `INVALID_INPUT`: no phrase, a phrase longer than 500 characters or with nothing left after folding,
     `fuzzy` outside 0.5-1.0, `context` outside 0-10, unknown keys. An invalid transcript is `VERIFICATION_FAILED`.
@@ -965,6 +971,8 @@
 - Measured: a 5000-segment synthetic Japanese transcript (60 000 characters) searches in about 0.1 s, and 0.35 s with
   `fuzzy`. `tests/test_search.py` covers the roadmap's "Done when" (three hits with word times, a hit across a segment
   boundary, zero hits, the tool in `contract --json`), plus English and Chinese fixtures and the folding rules.
+- Worst case measured: a 100 000-character run of one kana with a near-match 10-character phrase and `fuzzy` 0.5 takes
+  6.9 s (cost 50 M); 15 000 characters with a 32-character phrase take 15.8 s (cost 200 M).
 - Not verified: a real multi-hour transcript from recognition.
 - Contract: additive. One new tool (`transcription/find`) and one capability (`transcript_search`); nothing else
   changes, so `contract_version` stays 1.0.

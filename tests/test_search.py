@@ -200,6 +200,21 @@ class HitShapeTests(unittest.TestCase):
         self.assertEqual(a, json.dumps(find(ja_talk(), "音響", fuzzy=0.6), sort_keys=True))
 
 
+class MoreHitTests(unittest.TestCase):
+    def test_a_hit_across_a_word_timed_and_a_segment_timed_segment_has_no_word_indices(self):
+        res = find(ja_talk(), "まとめます。質疑")
+        h = res["hits"][0]
+        self.assertEqual((h["timing"], h["word_indices"], h["segment_ids"]), ("segment", None, ["seg_0004", "seg_0005"]))
+
+    def test_punctuation_written_in_the_phrase_keeps_the_hit_exact(self):
+        res = find(en_talk(), "design!")
+        self.assertEqual([(h["start"], h["match"]) for h in res["hits"]], [(1.0, "normalized"), (2.4, "normalized"), (5.5, "exact")])
+
+    def test_several_transcripts_keep_input_order(self):
+        res = run_tool("transcription/find", {"transcripts": [en_talk(), zh_talk()], "phrase": "design"})
+        self.assertEqual([h["source"] for h in res["hits"]], ["talk_en.wav"] * 3)
+
+
 class FuzzyTests(unittest.TestCase):
     def test_approximate_hits_only_with_fuzzy_and_labelled_with_ratio(self):
         doc = transcript([[("音教", 0.0, 0.4), ("設計の", 0.4, 0.9), ("話", 0.9, 1.2)],      # a homophone error
@@ -210,6 +225,19 @@ class FuzzyTests(unittest.TestCase):
         self.assertEqual(res["hits"][0]["ratio"], 0.75)
         self.assertEqual(res["hits"][1]["ratio"], 1.0)
         self.assertEqual(find(doc, "音響設計", fuzzy=0.8)["count"], 1)
+
+    def test_work_is_bounded(self):
+        with self.assertRaises(TranscriptionError) as cm:
+            find(ja_talk(), "あ" * 65, fuzzy=0.5)
+        self.assertEqual(cm.exception.code, "INVALID_INPUT")
+        long_text = "あ" * 40000
+        doc = transcript([(long_text, 0.0, 100.0)])
+        with self.assertRaises(TranscriptionError) as cm:
+            find(doc, "あ" * 63 + "い", fuzzy=0.5)                # 40 000 characters x 27 window lengths x 64 ** 2
+        self.assertEqual(cm.exception.code, "INVALID_INPUT")
+        res = find(doc, "ああい", fuzzy=0.6)                         # within the bound: windows of 2..4
+        self.assertTrue(res["hits"])
+        self.assertTrue(all(h["match"] == "approximate" for h in res["hits"]))
 
 
 class InputTests(unittest.TestCase):
