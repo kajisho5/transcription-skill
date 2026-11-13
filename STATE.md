@@ -62,9 +62,9 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   `cache_parameters` engine hook. Unit-tested against a fake `qwen_asr` (`tests/test_qwen3_asr.py`); the manual
   `qwen3_asr` job runs the real models on the fixtures; **never run for real yet** (that job has not run)
 - Deterministic cache keyed by content fingerprint + engine id/version/execution_mode + model/model_version + parameters
-- Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt/tsv/txt), `speakers` (ADR-037), `check`, `batch` (many transcribe
+- Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt/tsv/txt), `speakers` (ADR-037), `find` (phrase search, ADR-045), `check`, `batch` (many transcribe
   requests, one process; one item's failure never aborts the rest); CLI: doctor, transcribe, segments, export, check,
-  engines, batch, speakers, cache (size/list/clear), models (list/pull/remove), contract (alias `skill --json`, identical output), skill, `run -` (one JSON request
+  engines, batch, speakers, find (alias search), cache (size/list/clear), models (list/pull/remove), contract (alias `skill --json`, identical output), skill, `run -` (one JSON request
   in, one JSON document out)
 - `vad_filter` (opt-in, default off): request/tool/`--vad-filter` field passed straight through to
   faster-whisper's own voice-activity-detection filter (`WhisperModel.transcribe(vad_filter=...)`);
@@ -84,6 +84,11 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   rule, recorded under `speaker_assignment`; checked against `diarization assign` on 490 random layouts (identical).
   Not part of the cache key; this skill still does no diarization. Not yet run on a real diarization of real audio
   (that needs diarization-skill's gated pyannote weights)
+- Phrase search (ADR-045, roadmap step 16): `transcription/find` (CLI `find T... PHRASE`, alias `search`) returns every
+  hit with start/end, segment ids, word indices, speaker_id and neighbouring text; exact, then normalized (NFKC, casefold,
+  long vowel marks, no whitespace/punctuation, across word and segment boundaries), then optional approximate
+  (`fuzzy`, difflib ratio). Standard library only, deterministic, read-only. Unit-tested on Japanese, English and
+  Chinese fixtures (`tests/test_search.py`); not yet run on a real multi-hour transcript
 - Word index (ADR-039): every word carries `index`, 0-based and contiguous over the whole transcript; validator checks it
   (on every word or on none, so older documents stay valid); old cache entries are numbered on read
 - Dictionary word segmentation (ADR-039) — EXPERIMENTAL: request `word_segmentation: "dictionary"` / `--word-segmentation
@@ -314,3 +319,6 @@ two steps run this way in video-editing-skill and color-grading-skill.
 - 2026-11-12: PyAV 19 broke `faster_whisper` on Python 3.12+ (faster-whisper 1.2.1 passes `metadata_errors` to
   `av.open`); the engine now reads the prepared WAV and passes samples (ADR-044). heavy-tests `integration` on Python
   3.11 and 3.13. Patch bump 0.11.4 in `pyproject.toml`. Contract unchanged
+- 2026-11-13: phrase search `transcription/find` (CLI `find`, alias `search`; ADR-045, roadmap step 16): every timed
+  hit of a phrase, exact / normalized / optional approximate, standard library only. Minor bump 0.12.0 in
+  `pyproject.toml`. Contract additive (one tool, one capability; `contract_version` 1.0); video-production-agent needs a re-pin

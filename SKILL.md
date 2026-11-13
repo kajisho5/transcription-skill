@@ -38,6 +38,7 @@ stdout) and `transcribe` accepts `--dry-run` (plan only, no ASR).
 | "Japanese, I need real words (for cut points / line breaks), with part of speech" | `transcribe input.mp4 --language ja --word-timestamps --word-segmentation dictionary`; needs `pip install "transcription-skill[ja]"` (SudachiPy). Refused for other languages: their engine words are already words |
 | "give me an SRT / VTT" | `transcribe` then `export t.json --format srt -o t.srt` |
 | "when does each part of speech start and end" | `segments t.json --merge-gap 0.5 --json` |
+| "where did they say X", "find the phrase", "jump to every mention of X" | `find t.json "phrase" --json` (alias `search`; several files: `find day1.json day2.json "phrase"`): every hit with `start`/`end`, `segment_ids`, `word_indices`, `speaker_id` and the neighbouring text (`--context N` segments). Width, case, long vowel marks, whitespace and punctuation are ignored, and a phrase across words or segments is found. Add `--fuzzy 0.8` for approximate hits (ASR misspellings), each labelled `approximate` with its `ratio`. Zero hits is a normal answer, not an error |
 | "is this transcript file valid" | `check t.json` |
 | "what would it do / how long is it" | `transcribe input.mp4 --dry-run` |
 | "use a bigger / better model" | `--model small` (or `medium`, `large-v3`); doctor shows which are cached |
@@ -129,5 +130,9 @@ never "fix" the transcript text yourself when the user asked for the transcript.
   candidate to use is your (or the production agent's) decision.
 - An engine without language detection needs `--language`; the skill never fills a language in.
   "Engine available" and "model available" are different rows in `doctor`: both must hold.
+- `find` reports every hit and picks none. Show the hits (with `match`: `exact`, `normalized`, `approximate`) and let the
+  person choose; a margin or a cut range is the caller's step. `timing: "segment"` means the transcript had no words
+  there, so the times are the whole segment's. The transcript is ASR evidence: a phrase the person remembers may be
+  spelled differently, so try `--fuzzy` before saying it was never said.
 - No interpretation: no chapters, topics, speakers, edit points or importance. Those are the
   production agent's decisions, made on top of this data.

@@ -46,6 +46,7 @@ Downstream, independent of the run:
 Transcript ──► speech_events.py ──► SpeechEvent candidates   (transcription/segments)
 Transcript ──► export.py        ──► json | srt | vtt | tsv | txt (transcription/export)
 Transcript ──► validate.py      ──► ValidationReport         (transcription/check)
+Transcript(s) + phrase ──► search.py ──► timed hits (transcription/find; ADR-045)
 Transcript + diarization-skill turns ──► speakers.py ──► Transcript with speaker_id (transcription/speakers; ADR-037)
 ```
 

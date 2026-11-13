@@ -1,4 +1,4 @@
-"""CLI: `transcription doctor | transcribe | segments | export | speakers | check | batch | cache | models | engines | contract | skill | run`.
+"""CLI: `transcription doctor | transcribe | segments | export | speakers | find | check | batch | cache | models | engines | contract | skill | run`.
 
 stdout carries either human-readable text or, with --json, exactly one JSON document. Errors are
 structured: with --json they are the JSON document on stdout; otherwise one `error:` line on stderr.
@@ -239,6 +239,27 @@ def cmd_speakers(args: argparse.Namespace) -> int:
 def _default_speakers_output(transcript: str) -> str:
     base = transcript[:-len(".json")] if transcript.endswith(".json") else transcript
     return base + ".speakers.json"
+
+
+def cmd_find(args: argparse.Namespace) -> int:
+    params: Dict[str, Any] = {"transcripts": list(args.transcripts), "phrase": args.phrase, "context": args.context}
+    if args.fuzzy is not None:
+        params["fuzzy"] = args.fuzzy
+    res = run_tool("transcription/find", params)
+    if args.json:
+        _print_json(dict(res, ok=True))
+        return 0
+    many = len(args.transcripts) > 1
+    for i, h in enumerate(res["hits"], 1):
+        kind = h["match"] + (f" ({h['ratio']:.2f})" if h["match"] == "approximate" else "")
+        where = f"{h['source']}  " if many else ""
+        timing = "" if h["timing"] == "word" else "  (segment times)"
+        before = ("…" + h["context"]["before"] + " | ") if h["context"]["before"] else ""
+        after = (" | " + h["context"]["after"] + "…") if h["context"]["after"] else ""
+        print(f"#{i}  {where}{_fmt_time(h['start'])} --> {_fmt_time(h['end'])}  [{h['speaker_id'] or '-'}] {kind}{timing}  "
+              f"{before}{h['segment_text']}{after}")
+    print(f"{res['count']} hit(s) for {res['phrase']!r}")
+    return 0
 
 
 def cmd_check(args: argparse.Namespace) -> int:
@@ -527,6 +548,17 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--allowed-output", action="append", metavar="DIR", help="only write inside DIR (repeatable)")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_speakers)
+
+    fd = sub.add_parser("find", aliases=["search"], help="find a phrase in transcripts: every hit with its times, segment ids, "
+                        "word indices and speaker (read-only)")
+    fd.add_argument("transcripts", nargs="+", metavar="transcript.json", help="one or more transcript JSON files")
+    fd.add_argument("phrase", help="the phrase to find (matched across word and segment boundaries, width / case / "
+                    "punctuation ignored)")
+    fd.add_argument("--fuzzy", type=float, metavar="RATIO", help="also return approximate hits with a similarity of at least "
+                    "RATIO (0.5..1.0), labelled with their ratio")
+    fd.add_argument("--context", type=int, default=1, metavar="N", help="neighbouring segments of text each side (default 1)")
+    fd.add_argument("--json", action="store_true")
+    fd.set_defaults(func=cmd_find)
 
     c = sub.add_parser("check", help="validate a transcript JSON against the contract")
     c.add_argument("transcript")
