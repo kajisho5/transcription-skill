@@ -463,8 +463,10 @@ class DoctorTests(unittest.TestCase):
         self.assertTrue(subs <= {"--version", "models", "devices"}, subs)
 
     def test_doctor_without_speech(self):
+        ws = tempfile.mkdtemp(prefix="ts_doc_")
+        self.addCleanup(shutil.rmtree, ws, True)
         with unittest.mock.patch.object(S, "_find_binary", return_value=None):
-            rows = {r["check"]: r for r in run_doctor(workspace=tempfile.mkdtemp(prefix="ts_doc_"))["checks"]}
+            rows = {r["check"]: r for r in run_doctor(workspace=ws)["checks"]}
         self.assertEqual(rows["engine:speechcpp"]["status"], "MISSING")
         self.assertEqual(rows["speechcpp:binary"]["status"], "MISSING")
 

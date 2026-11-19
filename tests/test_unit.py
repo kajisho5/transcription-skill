@@ -1578,7 +1578,9 @@ class LeakTests(unittest.TestCase):
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                cli.main(["doctor", "--json", "--workspace", tempfile.mkdtemp(prefix="ts_doc_")])
+                ws = tempfile.mkdtemp(prefix="ts_doc_")
+                self.addCleanup(shutil.rmtree, ws, True)
+                cli.main(["doctor", "--json", "--workspace", ws])
                 cli.main(["skill", "--json"])
             self.assertNotIn("secretsecret", buf.getvalue())
             for pat in V.CREDENTIAL_PATTERNS:
