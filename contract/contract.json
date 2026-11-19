@@ -2,7 +2,7 @@
  "id": "transcription-skill",
  "skill_id": "transcription-skill",
  "name": "Transcription Skill",
- "version": "0.13.0",
+ "version": "0.13.1",
  "contract_version": "1.0",
  "description": "Speech recognition: audio/video in, structured Transcript (segments, optional word timestamps, language, provenance) and SpeechEvent candidates out. Not an agent, not a subtitle renderer, not a media analyzer.",
  "capabilities": [
