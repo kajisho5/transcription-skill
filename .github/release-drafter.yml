@@ -32,7 +32,7 @@ version-resolver:
   minor:
     labels: ["minor", "feature"]
   patch:
-    labels: ["patch", "fix", "bug", "chore"]
+    labels: ["patch", "fix", "bug", "dependencies"]
   default: patch
 
 # This repo's actual merged-PR titles do not use Conventional Commits prefixes (e.g. "feat:", "fix:")

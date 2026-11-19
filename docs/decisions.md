@@ -1076,3 +1076,11 @@
 The release commit is pushed with the default token, so no workflow runs on it on main. On 2026-11-19 two skills' mains broke this way (sound-design-skill, hyperframes-skill). The release job now commits locally, then runs the unit tests from the CI list that need no FFmpeg (`test_chunking`, `test_follow` and `test_unit` need it), and only then pushes. A failure pushes nothing. `scripts/release/tests/test_release_workflow.py` keeps the step between the commit and every push.
 
 The release rule itself does not change. ADR-036 already releases nothing when only `.github/`, `docs/`, `tests/`, release tooling or Markdown files changed since the tag. That covers the ecosystem rule that chore / ci / docs / test pull requests release nothing (Velisa ADR-023). It decides by the paths changed, not by labels.
+
+## ADR-049 A Dependabot (`dependencies`) pull request releases a patch
+
+2026-11-19. The ecosystem rule is the addendum to Velisa ADR-023 (decision D37): every Skill releases a pull request labelled `dependencies` as a patch.
+
+ADR-036 decides by the paths changed since the tag, so a GitHub Actions update from Dependabot, which touches only `.github/`, released nothing. `scripts/release/release_scope.py --dependency-labels` now also reads the labels of the pull requests merged since the tag (`gh api`, label names only). One labelled `dependencies` makes the push releasable, whatever it changed. Every other path rule of ADR-036 is unchanged. release-drafter's `version-resolver` maps `dependencies` to a patch and no longer lists `chore` (its `default: patch` already gave a chore change that reached it a patch). Test: `test_dependency_pull_request_releases_whatever_it_changed`.
+
+Repository checks also gained Velisa's reusable `changelog-check.yml` and `release-guard.yml` (Velisa ADR-022, decision D36).

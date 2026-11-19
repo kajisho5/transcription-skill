@@ -294,6 +294,16 @@ class ReleaseScopeTests(unittest.TestCase):
         self.assertTrue(release_scope.decide_release("manual", ["docs/decisions.md"]))
         self.assertTrue(release_scope.decide_release("manual", []))
 
+    def test_dependency_pull_request_releases_whatever_it_changed(self):
+        # ADR-049 (Velisa D37 addendum): a Dependabot pull request releases, as a patch, even when it changed only .github/
+        self.assertTrue(release_scope.has_dependency_pull([["chore"], ["dependencies", "github_actions"]]))
+        self.assertTrue(release_scope.has_dependency_pull([["Dependencies"]]))
+        self.assertFalse(release_scope.has_dependency_pull([["chore"], ["ci", "documentation"], []]))
+        self.assertFalse(release_scope.has_dependency_pull([]))
+        self.assertTrue(release_scope.decide_release("auto", [".github/workflows/tests.yml"], dependency_pull=True))
+        self.assertFalse(release_scope.decide_release("auto", [".github/workflows/tests.yml"], dependency_pull=False))
+        self.assertTrue(release_scope.decide_release("auto", [], dependency_pull=True))
+
     def test_unknown_mode_rejected(self):
         with self.assertRaises(ValueError):
             release_scope.decide_release("weird", ["src/a.py"])
@@ -330,7 +340,7 @@ class ReleaseScopeTests(unittest.TestCase):
         self.addCleanup(out_dir.cleanup)
         out_file = Path(out_dir.name) / "gh_output"  # outside the repo, so the next commit() does not add it
         doc = self._cli("--repo", str(self.repo), "--since", "v1.0.0", "--github-output", str(out_file))
-        self.assertEqual(doc, {"releasable": False, "changed": [".github/ci.yml"], "releasing": []})
+        self.assertEqual(doc, {"releasable": False, "changed": [".github/ci.yml"], "releasing": [], "dependency_pull": False})
         self.assertEqual(out_file.read_text(encoding="utf-8"), "releasable=false\n")
         commit(self.repo, "fix: thing", "pyproject.toml")
         doc = self._cli("--repo", str(self.repo), "--since", "v1.0.0", "--github-output", str(out_file))
