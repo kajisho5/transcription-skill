@@ -180,6 +180,15 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # The release commit is pushed with GITHUB_TOKEN, so no workflow runs on it on main: test it here, before
+      # it is pushed (the unit tests that need no FFmpeg). A failure stops the release; main and the tags stay as
+      # they were (Velisa ADR-023).
+      - name: Test the release commit before pushing it
+        if: steps.commit.outputs.changed == 'true'
+        run: |
+          python3 -m pip install -q -e .
+          python3 -m unittest tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py tests/test_version_source.py tests/test_speechcpp.py tests/test_whisperx.py tests/test_words.py tests/test_qwen3_asr.py tests/test_search.py tests/test_speaker_conformance.py tests/test_vocab.py tests/test_contract_file.py tests/test_tmp_dirs.py
+
       - name: Push release commit
         if: steps.commit.outputs.changed == 'true'
         run: git push origin HEAD:main
