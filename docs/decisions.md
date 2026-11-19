@@ -1068,3 +1068,11 @@
 - Contract: additive. Two request fields (`domain_vocabulary`, `corrections`), two capabilities (`domain_vocabulary`,
   `post_correction`), two optional provenance objects (`vocabulary`, `corrections`). A request without the
   fields keeps the parameters and cache key it had. `contract_version` stays 1.0.
+
+## ADR-048 The release job tests its commit before pushing it
+
+2026-11-19. The ecosystem rule is Velisa ADR-023 (decision D37).
+
+The release commit is pushed with the default token, so no workflow runs on it on main. On 2026-11-19 two skills' mains broke this way (sound-design-skill, hyperframes-skill). The release job now commits locally, then runs the unit tests from the CI list that need no FFmpeg (`test_chunking`, `test_follow` and `test_unit` need it), and only then pushes. A failure pushes nothing. `scripts/release/tests/test_release_workflow.py` keeps the step between the commit and every push.
+
+The release rule itself does not change. ADR-036 already releases nothing when only `.github/`, `docs/`, `tests/`, release tooling or Markdown files changed since the tag. That covers the ecosystem rule that chore / ci / docs / test pull requests release nothing (Velisa ADR-023). It decides by the paths changed, not by labels.
