@@ -364,6 +364,14 @@ the contract and the implementation diverge (tools, engines, capabilities, schem
 prints that JSON with or without `--json` (ADR-031). Without `--json`, `transcription skill` still prints a short
 human-readable summary.
 
+`contract/contract.json` is the contract committed as a file: the `contract --json` output with every engine entry in
+its machine-independent form (`version` null, `available` false, a fixed `unavailable_reason`, `capabilities`
+`["local_execution"]`, empty language / model lists; what this machine has installed is `doctor`'s business), written
+with indent 1, no ASCII escapes and a final newline. It is byte for byte what video-production-agent pins, so any
+release's contract is `git show vX.Y.Z:contract/contract.json`, with nothing installed or run. Regenerate it with
+`python contract/generate.py`; `tests/test_contract_file.py` fails when it is stale, and the release workflow
+regenerates it after the version bump.
+
 `skill --json` also carries the fields the OS's `CapabilityContract` reads: `skill_id` (canonical identity;
 `id` is kept for 0.2.0 consumers), `contract_version` (the shape's own version, `1.0`, independent of the
 package version and bumped only for a breaking shape change), `dependencies` (empty: this Skill invokes no
