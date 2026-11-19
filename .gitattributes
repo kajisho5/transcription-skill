@@ -1,1 +1,3 @@
+# Vendored from diarization-skill and pinned by SHA-256 (ADR-046): keep the bytes identical on every OS.
+tests/fixtures/speaker_id_conformance/** -text
 contract/contract.json -text
