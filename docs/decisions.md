@@ -1084,3 +1084,18 @@ The release rule itself does not change. ADR-036 already releases nothing when o
 ADR-036 decides by the paths changed since the tag, so a GitHub Actions update from Dependabot, which touches only `.github/`, released nothing. `scripts/release/release_scope.py --dependency-labels` now also reads the labels of the pull requests merged since the tag (`gh api`, label names only). One labelled `dependencies` makes the push releasable, whatever it changed. Every other path rule of ADR-036 is unchanged. release-drafter's `version-resolver` maps `dependencies` to a patch and no longer lists `chore` (its `default: patch` already gave a chore change that reached it a patch). Test: `test_dependency_pull_request_releases_whatever_it_changed`.
 
 Repository checks also gained Velisa's reusable `changelog-check.yml` and `release-guard.yml` (Velisa ADR-022, decision D36).
+
+## ADR-050 Selections for editing by transcript: word ranges and segments in, removed spans with their gaps out
+
+2026-11-20. The ecosystem rule is Velisa ADR-032 (decision D47).
+
+A person picks sentences or words of a transcript and says "remove these" or "keep only these"; the picture and sound are cut there and the gaps closed. This repository knows where the words are, so it turns the selection into times. It does not place a cut: margins, silences and frames are video-editing-skill's `ripple`.
+
+- **Input** (`transcription/select`, CLI `select`): `mode` `remove` | `keep`; `words`, inclusive ranges of `index` (ADR-039); `segments`, whole segments by `id`. Their union is the selection. Never seconds. A segment without word timings is one unit, named by its id only.
+- **Spans.** Removed units with no kept unit starting between them in time form one span; `start` / `end` are the speech it covers. `keep` also removes the time before the first kept unit and after the last one (a span with no units, `start` = `end`).
+- **Windows.** `in` = [end of the kept speech before, the span's start] (0 when there is none); `out` = [the span's end, start of the kept speech after] (the duration when there is none). Neighbours are found by time, not by index, so the windows hold with several speakers.
+- **Overlap.** A kept unit overlapping a removed span cannot be kept by any cut of one mixed track. The validator already refuses overlapping words and segments, so this happens only inside the 0.01 s containment tolerance at a segment edge, or in a merged document. Default: refused with `INVALID_INPUT`, reason `selection_overlaps_kept_speech`, listing the units; `overlap: include` removes them too and lists them.
+- **Shown to a person.** The sentences touched (`whole` / `part`, with the removed text), the speakers, `speech_seconds` and `most_seconds` (the widest cuts the windows allow). `applied: false`.
+- **Refusals** are `INVALID_INPUT` with `details.reason`: `empty_selection`, `bad_word_ranges`, `word_index_out_of_range`, `word_ranges_overlap`, `bad_segment_ids`, `unknown_segment_id`, `duplicate_segment_id`, `nothing_removed`, `nothing_kept`, `empty_transcript`, `selection_overlaps_kept_speech`.
+- **Conformance.** `tests/fixtures/selection_conformance/cases.json` (fixture version 1): each case a compact transcript, a selection and the expected spans or refusal; `tests/test_select.py` runs them. Another implementation can run the same file.
+- Contract: additive. One tool (with its `rule`), one capability (`transcript_selection`). `contract_version` stays 1.0.

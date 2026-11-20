@@ -62,9 +62,9 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   `cache_parameters` engine hook. Unit-tested against a fake `qwen_asr` (`tests/test_qwen3_asr.py`); the manual
   `qwen3_asr` job runs the real models on the fixtures; **never run for real yet** (that job has not run)
 - Deterministic cache keyed by content fingerprint + engine id/version/execution_mode + model/model_version + parameters
-- Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt/tsv/txt), `speakers` (ADR-037), `find` (phrase search, ADR-045), `check`, `batch` (many transcribe
+- Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt/tsv/txt), `speakers` (ADR-037), `find` (phrase search, ADR-045), `select` (selection -> removed spans with their gaps, ADR-050), `check`, `batch` (many transcribe
   requests, one process; one item's failure never aborts the rest); CLI: doctor, transcribe, segments, export, check,
-  engines, batch, speakers, find (alias search), cache (size/list/clear), models (list/pull/remove), contract (alias `skill --json`, identical output), skill, `run -` (one JSON request
+  engines, batch, speakers, find (alias search), select, cache (size/list/clear), models (list/pull/remove), contract (alias `skill --json`, identical output), skill, `run -` (one JSON request
   in, one JSON document out)
 - `vad_filter` (opt-in, default off): request/tool/`--vad-filter` field passed straight through to
   faster-whisper's own voice-activity-detection filter (`WhisperModel.transcribe(vad_filter=...)`);
@@ -86,6 +86,10 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   diarization-skill main in CI; ADR-046, roadmap step 17); the contract states the rule under the tool's `rule`.
   Not part of the cache key; this skill still does no diarization. Not yet run on a real diarization of real audio
   (that needs diarization-skill's gated pyannote weights)
+- Selections (ADR-050, roadmap step 18, Velisa ADR-032): `transcription/select` (CLI `select T --mode remove|keep --words N-M --segments ID`)
+  returns the removed spans of a selection of words and sentences, each with its `in` / `out` window (the gap to kept speech, by time),
+  the sentences, speakers and seconds touched; overlapping kept speech refused unless `overlap: include`. Read-only, no margin, no cut;
+  conformance cases in `tests/fixtures/selection_conformance/` — CURRENT
 - Phrase search (ADR-045, roadmap step 16): `transcription/find` (CLI `find T... PHRASE`, alias `search`) returns every
   hit with start/end, segment ids, word indices, speaker_id and neighbouring text; exact, then normalized (NFKC, casefold,
   long vowel marks, no whitespace/punctuation, across word and segment boundaries), then optional approximate

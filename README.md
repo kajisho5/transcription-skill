@@ -336,7 +336,7 @@ run_tool("transcription/export", {"transcript": transcript, "format": "srt", "ou
 run_tool("transcription/check", {"transcript": "lecture.transcript.json"})
 ```
 
-Tools: `transcription/transcribe`, `transcription/segments`, `transcription/export`, `transcription/speakers`, `transcription/find`, `transcription/check`, `transcription/batch`.
+Tools: `transcription/transcribe`, `transcription/segments`, `transcription/export`, `transcription/speakers`, `transcription/find`, `transcription/select`, `transcription/check`, `transcription/batch`.
 
 Phrase search (ADR-045): `run_tool("transcription/find", {"transcript": "talk.transcript.json", "phrase": "sound design"})`
 (CLI `transcription find talk.transcript.json "sound design"`, alias `search`; `transcripts` / several files for many)
@@ -345,6 +345,14 @@ the neighbouring segments (`context`). Matching folds width (NFKC), case and lon
 and punctuation over the joined word texts, so a phrase split across words or segments, or CJK text without spaces,
 is found. `fuzzy` (0.5-1.0) adds approximate hits labelled with their similarity ratio. Standard library only,
 deterministic, read-only: no margin, cut range or ranking.
+
+Selections (ADR-050, rule `transcript-selection@1`): `run_tool("transcription/select", {"transcript": "talk.transcript.json",
+"mode": "remove", "words": [[12, 40]], "segments": ["seg_0007"]})` (CLI `transcription select talk.transcript.json --mode remove
+--words 12-40 --segments seg_0007`) turns words and sentences a person picked into the time spans that would be removed. Each span has
+`in` / `out` windows: the gap to the kept speech before and after it, found by time, where a cut edge may go. `keep` removes everything
+else, including the time before the first kept word and after the last one. A kept word that overlaps removed speech is refused
+(`selection_overlaps_kept_speech`) unless `overlap: include`. The sentences touched, their speakers and the seconds of speech are
+listed. Nothing is cut: video-editing-skill `ripple` places the cuts and retimes the transcript.
 
 Speaker merge (ADR-037): `run_tool("transcription/speakers", {"transcript": transcript, "turns": "talk.turns.json"})`
 (CLI `transcription speakers talk.transcript.json --turns talk.turns.json`), or `speaker_turns` on

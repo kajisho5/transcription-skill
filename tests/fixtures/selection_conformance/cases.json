@@ -1,0 +1,819 @@
+{
+ "fixture_version": 1,
+ "rule": "transcript-selection@1",
+ "note": "Each case: a transcript written compactly (segments of [text, start, end] words, or {text, start, end} for a segment without words; speaker per segment), a selection, and the expected spans (id, start, end, in, out, word_ranges, segment_ids) or the refusal reason. Times in seconds; duration is the last end + 1.",
+ "cases": [
+  {
+   "name": "remove one word inside a sentence",
+   "language": "en",
+   "segments": [
+    [
+     [
+      "We",
+      0.5,
+      0.7
+     ],
+     [
+      "measured",
+      0.8,
+      1.3
+     ],
+     [
+      "um",
+      1.5,
+      1.7
+     ],
+     [
+      "the",
+      2.0,
+      2.1
+     ],
+     [
+      "noise",
+      2.15,
+      2.6
+     ]
+    ]
+   ],
+   "params": {
+    "mode": "remove",
+    "words": [
+     [
+      2,
+      2
+     ]
+    ]
+   },
+   "expect": {
+    "spans": [
+     {
+      "id": "r1",
+      "start": 1.5,
+      "end": 1.7,
+      "in": {
+       "lo": 1.3,
+       "hi": 1.5,
+       "after_kept": true
+      },
+      "out": {
+       "lo": 1.7,
+       "hi": 2.0,
+       "before_kept": true
+      },
+      "word_ranges": [
+       [
+        2,
+        2
+       ]
+      ],
+      "segment_ids": [
+       "seg_0001"
+      ]
+     }
+    ],
+    "speech_seconds": 0.2
+   }
+  },
+  {
+   "name": "remove a whole sentence by its id",
+   "language": "en",
+   "segments": [
+    [
+     [
+      "Hello",
+      0.0,
+      0.4
+     ],
+     [
+      "all.",
+      0.5,
+      0.9
+     ]
+    ],
+    [
+     [
+      "Sorry,",
+      2.0,
+      2.4
+     ],
+     [
+      "wrong",
+      2.5,
+      2.9
+     ],
+     [
+      "slide.",
+      3.0,
+      3.5
+     ]
+    ],
+    [
+     [
+      "Now",
+      4.5,
+      4.8
+     ],
+     [
+      "results.",
+      4.9,
+      5.6
+     ]
+    ]
+   ],
+   "params": {
+    "mode": "remove",
+    "segments": [
+     "seg_0002"
+    ]
+   },
+   "expect": {
+    "spans": [
+     {
+      "id": "r1",
+      "start": 2.0,
+      "end": 3.5,
+      "in": {
+       "lo": 0.9,
+       "hi": 2.0,
+       "after_kept": true
+      },
+      "out": {
+       "lo": 3.5,
+       "hi": 4.5,
+       "before_kept": true
+      },
+      "word_ranges": [
+       [
+        2,
+        4
+       ]
+      ],
+      "segment_ids": [
+       "seg_0002"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "remove from the first word: the window starts at 0",
+   "language": "en",
+   "segments": [
+    [
+     [
+      "Testing",
+      0.6,
+      1.0
+     ],
+     [
+      "one",
+      1.1,
+      1.3
+     ],
+     [
+      "two.",
+      1.4,
+      1.7
+     ]
+    ],
+    [
+     [
+      "Welcome.",
+      3.0,
+      3.6
+     ]
+    ]
+   ],
+   "params": {
+    "mode": "remove",
+    "segments": [
+     "seg_0001"
+    ]
+   },
+   "expect": {
+    "spans": [
+     {
+      "id": "r1",
+      "start": 0.6,
+      "end": 1.7,
+      "in": {
+       "lo": 0.0,
+       "hi": 0.6,
+       "after_kept": false
+      },
+      "out": {
+       "lo": 1.7,
+       "hi": 3.0,
+       "before_kept": true
+      },
+      "word_ranges": [
+       [
+        0,
+        2
+       ]
+      ],
+      "segment_ids": [
+       "seg_0001"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "keep one sentence: lead-in and tail are removed too",
+   "language": "en",
+   "segments": [
+    [
+     [
+      "Okay",
+      1.0,
+      1.3
+     ],
+     [
+      "so",
+      1.4,
+      1.6
+     ]
+    ],
+    [
+     [
+      "The",
+      2.0,
+      2.2
+     ],
+     [
+      "answer",
+      2.3,
+      2.8
+     ],
+     [
+      "is",
+      2.9,
+      3.0
+     ],
+     [
+      "yes.",
+      3.1,
+      3.5
+     ]
+    ],
+    [
+     [
+      "Thanks.",
+      5.0,
+      5.5
+     ]
+    ]
+   ],
+   "params": {
+    "mode": "keep",
+    "segments": [
+     "seg_0002"
+    ]
+   },
+   "expect": {
+    "spans": [
+     {
+      "id": "r1",
+      "start": 1.0,
+      "end": 1.6,
+      "in": {
+       "lo": 0.0,
+       "hi": 1.0,
+       "after_kept": false
+      },
+      "out": {
+       "lo": 1.6,
+       "hi": 2.0,
+       "before_kept": true
+      },
+      "word_ranges": [
+       [
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "id": "r2",
+      "start": 5.0,
+      "end": 5.5,
+      "in": {
+       "lo": 3.5,
+       "hi": 5.0,
+       "after_kept": true
+      },
+      "out": {
+       "lo": 5.5,
+       "hi": 6.5,
+       "before_kept": false
+      },
+      "word_ranges": [
+       [
+        6,
+        6
+       ]
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "keep from the first word: a lead-in span with no words",
+   "language": "en",
+   "segments": [
+    [
+     [
+      "First",
+      0.8,
+      1.2
+     ],
+     [
+      "point.",
+      1.3,
+      1.8
+     ]
+    ],
+    [
+     [
+      "Aside.",
+      3.0,
+      3.5
+     ]
+    ]
+   ],
+   "params": {
+    "mode": "keep",
+    "words": [
+     [
+      0,
+      1
+     ]
+    ]
+   },
+   "expect": {
+    "spans": [
+     {
+      "id": "r1",
+      "start": 0.0,
+      "end": 0.0,
+      "in": {
+       "lo": 0.0,
+       "hi": 0.0,
+       "after_kept": false
+      },
+      "out": {
+       "lo": 0.0,
+       "hi": 0.8,
+       "before_kept": true
+      },
+      "word_ranges": []
+     },
+     {
+      "id": "r2",
+      "start": 3.0,
+      "end": 3.5,
+      "in": {
+       "lo": 1.8,
+       "hi": 3.0,
+       "after_kept": true
+      },
+      "out": {
+       "lo": 3.5,
+       "hi": 4.5,
+       "before_kept": false
+      },
+      "word_ranges": [
+       [
+        2,
+        2
+       ]
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "two speakers in turn: neighbours by time",
+   "language": "en",
+   "speakers": [
+    "SPEAKER_00",
+    "SPEAKER_01",
+    "SPEAKER_00"
+   ],
+   "segments": [
+    [
+     [
+      "Question?",
+      0.0,
+      0.8
+     ]
+    ],
+    [
+     [
+      "Well,",
+      1.2,
+      1.5
+     ],
+     [
+      "hmm,",
+      1.6,
+      1.9
+     ],
+     [
+      "yes.",
+      2.4,
+      2.8
+     ]
+    ],
+    [
+     [
+      "Thanks.",
+      3.5,
+      4.0
+     ]
+    ]
+   ],
+   "params": {
+    "mode": "remove",
+    "words": [
+     [
+      2,
+      2
+     ]
+    ]
+   },
+   "expect": {
+    "spans": [
+     {
+      "id": "r1",
+      "start": 1.6,
+      "end": 1.9,
+      "in": {
+       "lo": 1.5,
+       "hi": 1.6,
+       "after_kept": true
+      },
+      "out": {
+       "lo": 1.9,
+       "hi": 2.4,
+       "before_kept": true
+      },
+      "word_ranges": [
+       [
+        2,
+        2
+       ]
+      ],
+      "speaker_ids": [
+       "SPEAKER_01"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "crosstalk: a kept word of the other speaker overlaps the removed one",
+   "language": "en",
+   "speakers": [
+    "SPEAKER_00",
+    "SPEAKER_01"
+   ],
+   "segments": [
+    [
+     [
+      "I",
+      0.0,
+      0.2
+     ],
+     [
+      "think",
+      0.3,
+      0.6
+     ],
+     [
+      "basically",
+      0.7,
+      1.405
+     ]
+    ],
+    [
+     [
+      "Right.",
+      1.4,
+      1.7
+     ]
+    ]
+   ],
+   "params": {
+    "mode": "remove",
+    "words": [
+     [
+      2,
+      2
+     ]
+    ]
+   },
+   "expect": {
+    "error_reason": "selection_overlaps_kept_speech"
+   },
+   "note": "a transcript never holds overlapping words except within the 0.01 s containment tolerance at a segment edge (or from a merged document); the refusal guards that"
+  },
+  {
+   "name": "crosstalk with overlap include: the overlapping word goes too",
+   "language": "en",
+   "speakers": [
+    "SPEAKER_00",
+    "SPEAKER_01"
+   ],
+   "segments": [
+    [
+     [
+      "I",
+      0.0,
+      0.2
+     ],
+     [
+      "think",
+      0.3,
+      0.6
+     ],
+     [
+      "basically",
+      0.7,
+      1.405
+     ]
+    ],
+    [
+     [
+      "Right.",
+      1.4,
+      1.7
+     ]
+    ]
+   ],
+   "params": {
+    "mode": "remove",
+    "words": [
+     [
+      2,
+      2
+     ]
+    ],
+    "overlap": "include"
+   },
+   "expect": {
+    "spans": [
+     {
+      "id": "r1",
+      "start": 0.7,
+      "end": 1.7,
+      "in": {
+       "lo": 0.6,
+       "hi": 0.7,
+       "after_kept": true
+      },
+      "out": {
+       "lo": 1.7,
+       "hi": 2.7,
+       "before_kept": false
+      },
+      "word_ranges": [
+       [
+        2,
+        3
+       ]
+      ]
+     }
+    ],
+    "included_by_overlap": [
+     3
+    ]
+   },
+   "note": "a transcript never holds overlapping words except within the 0.01 s containment tolerance at a segment edge (or from a merged document); the refusal guards that"
+  },
+  {
+   "name": "Japanese: words joined without spaces",
+   "language": "ja",
+   "segments": [
+    [
+     [
+      "本日は",
+      0.0,
+      0.6
+     ],
+     [
+      "えー",
+      0.8,
+      1.2
+     ],
+     [
+      "音響",
+      1.4,
+      1.8
+     ],
+     [
+      "設計の",
+      1.8,
+      2.3
+     ],
+     [
+      "話です。",
+      2.3,
+      2.9
+     ]
+    ]
+   ],
+   "params": {
+    "mode": "remove",
+    "words": [
+     [
+      1,
+      1
+     ]
+    ]
+   },
+   "expect": {
+    "spans": [
+     {
+      "id": "r1",
+      "start": 0.8,
+      "end": 1.2,
+      "in": {
+       "lo": 0.6,
+       "hi": 0.8,
+       "after_kept": true
+      },
+      "out": {
+       "lo": 1.2,
+       "hi": 1.4,
+       "before_kept": true
+      },
+      "word_ranges": [
+       [
+        1,
+        1
+       ]
+      ],
+      "text": "えー"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a segment without words is named by its id",
+   "language": "en",
+   "segments": [
+    [
+     [
+      "Intro.",
+      0.0,
+      0.6
+     ]
+    ],
+    {
+     "text": "[applause]",
+     "start": 1.0,
+     "end": 3.0
+    },
+    [
+     [
+      "Thank",
+      3.4,
+      3.7
+     ],
+     [
+      "you.",
+      3.8,
+      4.1
+     ]
+    ]
+   ],
+   "params": {
+    "mode": "remove",
+    "segments": [
+     "seg_0002"
+    ]
+   },
+   "expect": {
+    "spans": [
+     {
+      "id": "r1",
+      "start": 1.0,
+      "end": 3.0,
+      "in": {
+       "lo": 0.6,
+       "hi": 1.0,
+       "after_kept": true
+      },
+      "out": {
+       "lo": 3.0,
+       "hi": 3.4,
+       "before_kept": true
+      },
+      "word_ranges": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "overlapping word ranges are refused",
+   "language": "en",
+   "segments": [
+    [
+     [
+      "a",
+      0.0,
+      0.2
+     ],
+     [
+      "b",
+      0.3,
+      0.5
+     ],
+     [
+      "c",
+      0.6,
+      0.8
+     ]
+    ]
+   ],
+   "params": {
+    "mode": "remove",
+    "words": [
+     [
+      0,
+      1
+     ],
+     [
+      1,
+      2
+     ]
+    ]
+   },
+   "expect": {
+    "error_reason": "word_ranges_overlap"
+   }
+  },
+  {
+   "name": "an index past the last word is refused",
+   "language": "en",
+   "segments": [
+    [
+     [
+      "a",
+      0.0,
+      0.2
+     ],
+     [
+      "b",
+      0.3,
+      0.5
+     ]
+    ]
+   ],
+   "params": {
+    "mode": "remove",
+    "words": [
+     [
+      1,
+      2
+     ]
+    ]
+   },
+   "expect": {
+    "error_reason": "word_index_out_of_range"
+   }
+  },
+  {
+   "name": "removing everything is refused",
+   "language": "en",
+   "segments": [
+    [
+     [
+      "a",
+      0.0,
+      0.2
+     ],
+     [
+      "b",
+      0.3,
+      0.5
+     ]
+    ]
+   ],
+   "params": {
+    "mode": "remove",
+    "words": [
+     [
+      0,
+      1
+     ]
+    ]
+   },
+   "expect": {
+    "error_reason": "nothing_kept"
+   }
+  }
+ ]
+}
