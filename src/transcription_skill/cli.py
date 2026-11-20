@@ -1,4 +1,4 @@
-"""CLI: `transcription doctor | transcribe | segments | export | speakers | find | check | batch | cache | models | engines | contract | skill | run`.
+"""CLI: `transcription doctor | transcribe | segments | export | speakers | find | select | check | batch | cache | models | engines | contract | skill | run`.
 
 stdout carries either human-readable text or, with --json, exactly one JSON document. Errors are
 structured: with --json they are the JSON document on stdout; otherwise one `error:` line on stderr.
@@ -315,6 +315,38 @@ def cmd_find(args: argparse.Namespace) -> int:
     return 0
 
 
+def _word_ranges(text: str) -> List[List[int]]:
+    out: List[List[int]] = []
+    for part in (p.strip() for p in text.split(",")):
+        if not part:
+            continue
+        a, _, b = part.partition("-")
+        try:
+            out.append([int(a), int(b or a)])
+        except ValueError:
+            raise TranscriptionError("INVALID_INPUT", f"--words: {part!r} is not N or N-M (word indices)", {"reason": "bad_word_ranges"})
+    return out
+
+
+def cmd_select(args: argparse.Namespace) -> int:
+    params: Dict[str, Any] = {"transcript": args.transcript, "mode": args.mode, "overlap": args.overlap}
+    if args.words:
+        params["words"] = _word_ranges(args.words)
+    if args.segments:
+        params["segments"] = [s.strip() for s in args.segments.split(",") if s.strip()]
+    res = run_tool("transcription/select", params)
+    if args.json:
+        _print_json(dict(res, ok=True))
+        return 0
+    for sp in res["spans"]:
+        who = ",".join(sp["speaker_ids"]) or "-"
+        print(f"{sp['id']:4s} {_fmt_time(sp['start'])} --> {_fmt_time(sp['end'])}  [{who}]  {sp['speech_seconds']:.2f}s speech  {sp['text']}")
+    c = res["counts"]
+    print(f"{c['spans']} span(s), {c['removed_units']} unit(s), {res['speech_seconds']:.2f}s of speech; "
+          f"{c['sentences_whole']} whole and {c['sentences_part']} partial sentence(s) ({res['mode']}). Nothing is cut here.")
+    return 0
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     res = run_tool("transcription/check", {"transcript": args.transcript})
     if args.json:
@@ -621,6 +653,16 @@ def build_parser() -> argparse.ArgumentParser:
     fd.add_argument("--context", type=int, default=1, metavar="N", help="neighbouring segments of text each side (default 1)")
     fd.add_argument("--json", action="store_true")
     fd.set_defaults(func=cmd_find)
+
+    sl = sub.add_parser("select", help="words / sentences to remove or keep -> the time spans and the gaps around them (read-only)")
+    sl.add_argument("transcript", help="transcript JSON file")
+    sl.add_argument("--mode", choices=["remove", "keep"], required=True)
+    sl.add_argument("--words", metavar="N-M,...", help="word index ranges, inclusive (e.g. 12-40,55)")
+    sl.add_argument("--segments", metavar="ID,...", help="whole segments by id (e.g. seg_0003,seg_0007)")
+    sl.add_argument("--overlap", choices=["refuse", "include"], default="refuse",
+                    help="a kept word that overlaps removed speech: refuse (default) or remove it too")
+    sl.add_argument("--json", action="store_true")
+    sl.set_defaults(func=cmd_select)
 
     c = sub.add_parser("check", help="validate a transcript JSON against the contract")
     c.add_argument("transcript")

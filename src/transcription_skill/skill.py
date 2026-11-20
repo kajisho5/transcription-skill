@@ -13,6 +13,7 @@ from .engines import ENGINE_CAPABILITIES, EXECUTION_MODES, default_registry
 from .errors import TranscriptionError
 from .export import FORMATS, write
 from .search import find_tool
+from .selection import RULE as SELECT_RULE, select_tool
 from .speakers import SPEAKER_RULE, load_json_document, merge_speakers
 from .speech_events import speech_events
 from .validate import validate_transcript
@@ -42,6 +43,7 @@ CAPABILITIES = [
     "transcript_search",        # `transcription/find`: phrase -> every timed hit (exact, normalized, optional approximate); ADR-045
     "domain_vocabulary",        # request `domain_vocabulary`: terms from the programme / slides / speakers -> the engine's prompt or vocabulary; ADR-047
     "post_correction",          # request `corrections`: wrong form -> right form after recognition, every replacement recorded with its time; ADR-047
+    "transcript_selection",     # `transcription/select`: word ranges / segment ids -> removed spans with the gaps around them; ADR-050
 ]
 
 TOOLS: List[Dict[str, Any]] = [
@@ -89,6 +91,24 @@ TOOLS: List[Dict[str, Any]] = [
                 "timing: word|segment, segment_ids, word_indices (null when segment-timed), speaker_id, speaker_ids, text, "
                 "segment_text, context: {before, after}}] (time order within each transcript, transcripts in the order given; empty when the phrase is not spoken)",
                 "transcripts": "list[{source, transcript_id, language, segments, words, word_timed, hits}]"},
+     "deterministic": True, "side_effects": []},
+    {"name": "transcription/select", "description": "Turn a selection of words and sentences (word index ranges and / or segment "
+     "ids, to remove or to keep) into the time spans that would be removed, each with the window its in and out edges may use: the "
+     "gap to the kept speech before and after it, found by time. Also the sentences touched, their speakers and the seconds of speech. "
+     "A kept word that overlaps removed speech is refused (selection_overlaps_kept_speech) unless overlap is include. A read-only "
+     "query: no margin, no cut (video-editing-skill ripple places the cuts).",
+     "rule": dict(SELECT_RULE),
+     "input": {"transcript": "Transcript | path", "mode": "remove | keep", "words": "list[[first, last]] (inclusive word indices) | null",
+               "segments": "list[segment id] | null (whole segments; at least one of words / segments)",
+               "overlap": "refuse | include (default refuse)"},
+     "output": {"rule": "the rule (version transcript-selection@1)", "mode": "str", "overlap": "str", "transcript_id": "str",
+                "asset_id": "str", "language": "str", "duration": "seconds", "selection": "{words, segments}",
+                "counts": "{units, words, removed_units, removed_words, kept_units, spans, sentences_whole, sentences_part}",
+                "speech_seconds": "seconds of removed speech", "most_seconds": "seconds the widest cuts would remove",
+                "spans": "list[{id, start, end, in: {lo, hi, after_kept}, out: {lo, hi, before_kept}, word_ranges, units, segment_ids, "
+                         "speaker_ids, text, speech_seconds, most_seconds}] (time order)",
+                "sentences": "list[{segment_id, speaker_id, start, end, text, removed: whole | part, removed_text, removed_units, units, speech_seconds}]",
+                "included_by_overlap": "list[{word_index, segment_id, text, start, end, speaker_id}]", "applied": "false", "next": "str"},
      "deterministic": True, "side_effects": []},
     {"name": "transcription/check", "description": "Validate a Transcript document against the contract.",
      "input": {"transcript": "Transcript | path"}, "output": {"ok": "bool", "errors": "list[str]", "warnings": "list[str]"}, "deterministic": True, "side_effects": []},
@@ -210,6 +230,8 @@ def run_tool(name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         return {"transcript": merged, "warnings": [w for w in merged["warnings"] if w.startswith("speaker_id:")]}
     if name == "transcription/find":
         return find_tool(params)
+    if name == "transcription/select":
+        return select_tool(params)
     if name == "transcription/check":
         extra = set(params) - {"transcript"}
         if extra:
