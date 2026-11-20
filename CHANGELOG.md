@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.0 - 2026-11-20
+
+- Selections for editing by transcript: transcription/select turns word ranges and segments into removed spans with their gaps (ADR-050, Velisa ADR-032, roadmap step 18) (#72) (4bacd61)
+- ci: Velisa's reusable changelog-check/release-guard; dependencies PRs release a patch (D36, D37) (#69) (7df1e90)
+- ci(release): test the release commit before pushing it (#68) (0cbe863)
+- ci: run contract-diff on every pull request (#66) (4be7156)
+- ci: call Velisa's contract-diff on contract changes, one run per pull request (#65) (e22add0)
+- fix(tests): remove the doctor tests' temporary workspaces (#64) (2bcc5d7)
+
 ## 0.13.1 - 2026-11-19
 
 - ci: commit the contract as contract/contract.json (#63) (201c927)
