@@ -68,12 +68,14 @@ jobs:
           python3 scripts/release/version_state.py --pyproject pyproject.toml --repo . | tee state.json
           python3 scripts/release/ci_write_state_outputs.py
 
+      # ADR-049: a pull request labelled `dependencies` merged since the tag releases too, whatever paths it changed.
       - name: Check for releasable changes since the latest tag (auto mode only)
         id: scope
         if: steps.state.outputs.mode == 'auto'
         env:
           LATEST_TAG_VERSION: ${{ steps.state.outputs.latest_tag_version }}
-        run: python3 scripts/release/release_scope.py --repo . --since "v$LATEST_TAG_VERSION" --github-output "$GITHUB_OUTPUT"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/release/release_scope.py --repo . --since "v$LATEST_TAG_VERSION" --dependency-labels --github-output "$GITHUB_OUTPUT"
 
       # Dependabot labels a pull request `major` when the dependency it bumps moved a major version, which says
       # nothing about this product's version. A release-level label on a Dependabot pull request counts only when a
