@@ -202,6 +202,24 @@ is no plugin loader, and only implemented engines are registered.
 | Selector | constraint filtering with reasons | rank, prefer, choose |
 | Agent (`video-production-agent`) | final policy: which candidate to adopt, whether remote is acceptable | import engine internals |
 
+### Choosing an engine/model for English
+
+The default stays `faster_whisper` with `base`. For English, these opt-in choices are already supported. Pass them per run;
+nothing changes unless you ask for it:
+
+| choice | how | licence | size on disk | notes |
+|--------|-----|---------|--------------|-------|
+| Whisper large-v3-turbo | `--model large-v3-turbo` (default engine) | MIT | `model.bin` 1.62 GB | large-v3 with a pruned decoder (809M parameters); multilingual, with language detection |
+| Whisper small | `--model small` (default engine) | MIT | `model.bin` 484 MB | when disk is tight; multilingual, with language detection |
+| parakeet-tdt-0.6b-v3 | `--engine speechcpp --model parakeet-tdt-0.6b-v3:q8_0 --language en` (`speech pull parakeet-tdt-0.6b-v3:q8_0` once) | CC-BY-4.0 (attribute NVIDIA) | 0.67 GB | fast on a CPU; English and 24 other European languages; `--language` is required (no detection) |
+
+Not yet supported: Moonshine (English-only streaming ASR). It is not an engine here, so it cannot be selected.
+
+```bash
+transcription models pull large-v3-turbo        # once, before going --offline
+transcription transcribe talk_en.mp4 --model large-v3-turbo --language en
+```
+
 ### Optional Japanese engine: `haas_ja` (Haas-ja-v1.0)
 
 For Japanese talks, conferences and medical sessions where Whisper's accuracy, speed or handling of names
