@@ -209,11 +209,14 @@ nothing changes unless you ask for it:
 
 | choice | how | licence | size on disk | notes |
 |--------|-----|---------|--------------|-------|
-| Whisper large-v3-turbo | `--model large-v3-turbo` (default engine) | MIT | `model.bin` 1.62 GB | large-v3 with a pruned decoder (809M parameters); multilingual, with language detection |
+| Whisper large-v3-turbo | `--model large-v3-turbo` (default engine; needs faster-whisper 1.1.0 or later) | MIT | `model.bin` 1.62 GB | large-v3 with a pruned decoder (809M parameters); multilingual, with language detection |
 | Whisper small | `--model small` (default engine) | MIT | `model.bin` 484 MB | when disk is tight; multilingual, with language detection |
-| parakeet-tdt-0.6b-v3 | `--engine speechcpp --model parakeet-tdt-0.6b-v3:q8_0 --language en` (`speech pull parakeet-tdt-0.6b-v3:q8_0` once) | CC-BY-4.0 (attribute NVIDIA) | 0.67 GB | fast on a CPU; English and 24 other European languages; `--language` is required (no detection) |
+| parakeet-tdt-0.6b-v3 | `--engine speechcpp --model parakeet-tdt-0.6b-v3:q8_0 --language en`; fetch both models once with `speech pull parakeet-tdt-0.6b-v3:q8_0 silero-vad` (the engine recognizes by silero-vad regions) | CC-BY-4.0 (attribute NVIDIA) | 0.67 GB + 1.2 MB | fast on a CPU; English and 24 other European languages; `--language` is required (no detection) |
 
 Not yet supported: Moonshine (English-only streaming ASR). It is not an engine here, so it cannot be selected.
+
+The `faster-whisper` extra allows faster-whisper 1.0 and later, but `large-v3-turbo` (and `turbo`) are known to faster-whisper
+only from 1.1.0. With an older version, upgrade it first: `pip install -U faster-whisper`.
 
 ```bash
 transcription models pull large-v3-turbo        # once, before going --offline
@@ -260,7 +263,7 @@ transcription transcribe talk.mp4 --engine speechcpp --language ja --word-timest
 
 - Models: `reazonspeech-v2` (default), `parakeet-tdt_ctc-0.6b-ja`, `haas-ja-v1.0` (Japanese, segments and word
   timestamps from speech.cpp's token times), `parakeet-tdt-0.6b-v3` (English and 24 other European languages, segments
-  and word timestamps; `speech pull parakeet-tdt-0.6b-v3:q8_0` is 0.67 GB), `qwen3-asr-0.6b`, `qwen3-asr-1.7b` (30
+  and word timestamps; `speech pull parakeet-tdt-0.6b-v3:q8_0 silero-vad` fetches it (0.67 GB) with the region detector), `qwen3-asr-0.6b`, `qwen3-asr-1.7b` (30
   languages; speech.cpp gives no times for them, so each detected speech region is a segment and `words` is null).
   `NAME:q4_k` and the other weight types of speech.cpp's catalog work too. All have licences that allow commercial use
   (table in [docs/engines.md](docs/engines.md#model-licences-verified-2026-10-31); both parakeet models are CC-BY-4.0:
