@@ -179,8 +179,64 @@ def cmd_follow(args: argparse.Namespace, params: Dict[str, Any]) -> int:
     return 0
 
 
+def cmd_microphones(args: argparse.Namespace, params: Dict[str, Any]) -> int:
+    """`transcribe --per-channel`: transcription/microphones over the input and every more-input."""
+    files = [args.input] + list(args.more_inputs)
+    for flag in ("dry_run", "follow"):
+        if getattr(args, flag):
+            raise TranscriptionError("INVALID_INPUT", f"--{flag.replace('_', '-')} does not go with --per-channel")
+    if args.audio_stream is not None or args.speaker_turns:
+        raise TranscriptionError("INVALID_INPUT", "--audio-stream / --speaker-turns do not go with --per-channel")
+    shared = {k: v for k, v in params.items() if k not in ("input", "audio_stream", "dry_run", "speaker_turns")}
+    return _run_microphones(files, list(args.channel_name or []), args.crosstalk_margin_db, shared, args.output, args.allowed_output,
+                            args.json, _transcribe_inputs(args) + files)
+
+
+def cmd_microphones_command(args: argparse.Namespace) -> int:
+    """`microphones`: the same as `transcribe --per-channel`, with the common recognition options."""
+    shared: Dict[str, Any] = {"engine": args.engine, "cache": not args.no_cache, "offline": bool(args.offline)}
+    for key in ("model", "language", "workspace"):
+        if getattr(args, key):
+            shared[key] = getattr(args, key)
+    if args.allowed_input:
+        shared["allowed_input_roots"] = list(args.allowed_input)
+    return _run_microphones(list(args.inputs), list(args.name or []), args.crosstalk_margin_db, shared, args.output, args.allowed_output,
+                            args.json, list(args.inputs))
+
+
+def _run_microphones(files: List[str], names: List[str], margin: Optional[float], shared: Dict[str, Any], output: Optional[str],
+                     allowed_output: Optional[List[str]], as_json: bool, forbid: List[str]) -> int:
+    if names and len(names) != len(files):
+        raise TranscriptionError("INVALID_INPUT", f"{len(names)} microphone name(s) for {len(files)} microphone file(s)")
+    p = dict(shared, word_timestamps=True)
+    p["microphones"] = [dict({"input": f}, **({"name": names[k]} if names else {})) for k, f in enumerate(files)]
+    if margin is not None:
+        p["crosstalk_margin_db"] = margin
+    res = run_tool("transcription/microphones", p)
+    doc = res["transcript"]
+    out = OutputPolicy(allowed_output).resolve_output(output or _default_output(files[0]), forbid=forbid)
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, ensure_ascii=False, indent=2)
+    if as_json:
+        _print_json({"ok": True, "output": os.path.abspath(out), "microphones": res["microphones"], "warnings": res["warnings"], "transcript": doc})
+        return 0
+    mm = doc["microphone_merge"]
+    print(f"{len(files)} microphones, {mm['counts']['segments']} segment(s), {mm['counts']['words']} word(s), "
+          f"{mm['counts']['words_dropped_as_crosstalk']} dropped as cross-talk, {mm['counts']['overlapping_words']} said over someone else")
+    for seg in doc["segments"]:
+        print(f"  {_fmt_time(seg['start'])} --> {_fmt_time(seg['end'])}  [{seg['speaker_id']}] {seg['text']}")
+    for w in list(res["warnings"]) + list(doc["warnings"]):
+        sys.stderr.write(f"warning: {w}\n")
+    print(f"wrote {out}")
+    return 0
+
+
 def cmd_transcribe(args: argparse.Namespace) -> int:
     params = _transcribe_params(args)
+    if args.per_channel:
+        return cmd_microphones(args, params)
+    if args.more_inputs or args.channel_name or args.crosstalk_margin_db is not None:
+        raise TranscriptionError("INVALID_INPUT", "more inputs, --channel-name and --crosstalk-margin-db need --per-channel")
     if args.follow:
         return cmd_follow(args, params)
     res = run_tool("transcription/transcribe", params)
@@ -566,6 +622,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     t = sub.add_parser("transcribe", help="transcribe an audio/video file into a Transcript JSON")
     t.add_argument("input")
+    t.add_argument("more_inputs", nargs="*", metavar="more-input", help="with --per-channel: the other microphones' files, in order")
+    t.add_argument("--per-channel", action="store_true", help="one microphone per file (input and every more-input, 2..8; split a "
+                   "polyphonic file per channel first): each transcribed on its own, merged by time with speaker_id = the microphone "
+                   "(transcription/microphones); words heard louder on another microphone that recognized speech there are dropped as cross-talk")
+    t.add_argument("--channel-name", action="append", metavar="NAME", help="with --per-channel: the microphones' names in order "
+                   "(the speaker_id; default MIC_01, MIC_02, ...)")
+    t.add_argument("--crosstalk-margin-db", type=float, metavar="DB", help="with --per-channel: how much louder another microphone must "
+                   "be over a word for it to count as cross-talk (0-40, default 6)")
     t.add_argument("--language", help="ISO 639-1 code (ja, en, ...); default: auto-detect, recorded as unknown when uncertain")
     t.add_argument("--engine", default="faster_whisper")
     t.add_argument("--model", help="model name (default: the engine's default; faster_whisper: base, haas_ja: Haas-ja-v1.0, speechcpp: reazonspeech-v2, whisperx: large-v3)")
@@ -663,6 +727,24 @@ def build_parser() -> argparse.ArgumentParser:
                     help="a kept word that overlaps removed speech: refuse (default) or remove it too")
     sl.add_argument("--json", action="store_true")
     sl.set_defaults(func=cmd_select)
+
+    mc = sub.add_parser("microphones", help="one transcript per microphone: 2..8 microphone files of one recording, each transcribed, "
+                        "merged by time with speaker_id = the microphone, cross-talk dropped by level (same as transcribe --per-channel)")
+    mc.add_argument("inputs", nargs="+", metavar="input", help="one file per microphone, in order")
+    mc.add_argument("--name", action="append", metavar="NAME", help="the microphones' names in order (the speaker_id; default MIC_01, ...)")
+    mc.add_argument("--crosstalk-margin-db", type=float, metavar="DB", help="how much louder another microphone must be over a word "
+                    "for it to count as cross-talk (0-40, default 6)")
+    mc.add_argument("--language", help="ISO 639-1 code; default: auto-detect per microphone")
+    mc.add_argument("--engine", default=DEFAULT_ENGINE)
+    mc.add_argument("--model", help="model name (default: the engine's default)")
+    mc.add_argument("--workspace", help="cache/tmp directory")
+    mc.add_argument("--no-cache", action="store_true")
+    mc.add_argument("--offline", action="store_true")
+    mc.add_argument("--allowed-input", action="append", metavar="DIR")
+    mc.add_argument("--allowed-output", action="append", metavar="DIR")
+    mc.add_argument("-o", "--output", help="transcript JSON path (default <first input>.transcript.json)")
+    mc.add_argument("--json", action="store_true")
+    mc.set_defaults(func=cmd_microphones_command)
 
     c = sub.add_parser("check", help="validate a transcript JSON against the contract")
     c.add_argument("transcript")

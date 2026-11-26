@@ -1099,3 +1099,35 @@ A person picks sentences or words of a transcript and says "remove these" or "ke
 - **Refusals** are `INVALID_INPUT` with `details.reason`: `empty_selection`, `bad_word_ranges`, `word_index_out_of_range`, `word_ranges_overlap`, `bad_segment_ids`, `unknown_segment_id`, `duplicate_segment_id`, `nothing_removed`, `nothing_kept`, `empty_transcript`, `selection_overlaps_kept_speech`.
 - **Conformance.** `tests/fixtures/selection_conformance/cases.json` (fixture version 1): each case a compact transcript, a selection and the expected spans or refusal; `tests/test_select.py` runs them. Another implementation can run the same file.
 - Contract: additive. One tool (with its `rule`), one capability (`transcript_selection`). `contract_version` stays 1.0.
+
+## ADR-051 One transcript per microphone: speaker = microphone, cross-talk dropped by level
+
+2026-11-26. ECOSYSTEM_ROADMAP step 12.
+
+A discussion recorded with one microphone per person (separate tracks) already says who spoke: the microphone. Each
+voice also reaches the other microphones (bleed), so recognizing every track gives the same words twice, the second
+time on the wrong person's track, often misheard.
+
+- **Tool** `transcription/microphones` (CLI `transcribe A B ... --per-channel [--channel-name N]...`, or `microphones A
+  B ... [--name N]...`): 2..8 files, one per microphone. Each goes through `transcription/transcribe` unchanged (same
+  engine, model, parameters and cache; `word_timestamps` forced on), then the transcripts are merged
+  (`microphones.py`, pure apart from reading the PCM each engine was given).
+- **Speaker** = the microphone's name (default `MIC_01`, ...). No diarization; the names are what the caller gave.
+- **Cross-talk.** A word on microphone m is dropped when another microphone j is louder by at least
+  `crosstalk_margin_db` (default 6 dB; bleed from a lapel microphone a metre away is typically 10-20 dB down) over the
+  word's span, by RMS of the 16 kHz PCM, and j recognized a word overlapping the span. Both conditions: a word is
+  never dropped on level alone (j's engine may have missed it), and two people talking at once, each louder on their
+  own microphone, are both kept. Text is not compared: bleed is often recognized as different words.
+- **Overlap.** Transcript segments never overlap (`transcript/0.1`, the validator refuses it), and that is not
+  relaxed: consumers number and cut by a single timeline. A segment that starts before the placed segments end goes,
+  for its words starting in that time, to the new top-level `overlapping_segments`; its later words stay on the
+  timeline as their own segment. Every kept word is in exactly one of the two.
+- **Polyphonic files** (one file, one channel per microphone) are not split here: the extraction recipe is fixed
+  (mono downmix); split them per channel first (ffmpeg-skill `audio --channel N`).
+- **Test** (`tests/test_microphones.py`, the Done when): two microphones with -10.5 dB bleed, tone words read back by
+  `fake_tones.ToneEngine` from the audio itself, real ffmpeg extraction. Every word once under the right speaker; the 7
+  bleed words recognized on the other microphone dropped; the two words said at once kept, one on each list; the
+  second run from the cache gives the same words.
+- Contract: additive. One tool (with its `rule`), new top-level transcript keys `overlapping_segments` and
+  `microphone_merge` (present only on a per-microphone transcript). `contract_version` stays 1.0.
+

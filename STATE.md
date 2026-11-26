@@ -86,6 +86,12 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   diarization-skill main in CI; ADR-046, roadmap step 17); the contract states the rule under the tool's `rule`.
   Not part of the cache key; this skill still does no diarization. Not yet run on a real diarization of real audio
   (that needs diarization-skill's gated pyannote weights)
+- One transcript per microphone (ADR-051, roadmap step 12): `transcription/microphones` (CLI `transcribe A B --per-channel`,
+  or `microphones A B`): 2..8 microphone files, each through `transcription/transcribe`, merged by time with
+  `speaker_id` = the microphone's name; a word is dropped as cross-talk when another microphone is >= 6 dB (default)
+  louder over it and recognized a word there; words said over someone else go to `overlapping_segments`; recorded under
+  `microphone_merge`. Unit-tested on synthetic tone tracks with real ffmpeg extraction; not yet run on a real
+  recording with a real engine
 - Selections (ADR-050, roadmap step 18, Velisa ADR-032): `transcription/select` (CLI `select T --mode remove|keep --words N-M --segments ID`)
   returns the removed spans of a selection of words and sentences, each with its `in` / `out` window (the gap to kept speech, by time),
   the sentences, speakers and seconds touched; overlapping kept speech refused unless `overlap: include`. Read-only, no margin, no cut;

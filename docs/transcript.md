@@ -214,6 +214,32 @@ importance is inferred. The shape mirrors a timeline event (type, start/end, sou
 metadata with evidence ids) so a consumer's adapter can lift it into its own Event model; this
 repository imports no such model.
 
+## One transcript per microphone (ADR-051)
+
+Input: 2..8 microphone files of one recording (one person per microphone), transcribed one by one with word
+timestamps. Output: one Transcript whose `source`, `language`, `provenance` and `asset_id` are the first
+microphone's, with:
+
+- `segments`: every microphone's segments with the words that survive the cross-talk rule, ordered by start,
+  renumbered `seg_0001`..., word `index` renumbered over the document; `speaker_id` of each segment and word is the
+  microphone's name (default `MIC_01`, `MIC_02`, ...). A segment that lost words gets its text rebuilt from the kept
+  ones (`text` = `raw_text`, no space between Japanese / Chinese words).
+- `overlapping_segments` (new top-level key, always present here): the words said while an earlier placed segment
+  was still going (someone else talking), as segments of the same shape with ids `ovl_0001`... and words without
+  `index`. Segments never overlap (this schema), so this is where simultaneous speech is kept.
+- `duration`: the longest microphone's.
+- `warnings`: each microphone's own, prefixed with its name, then the merge's notes.
+- `microphone_merge`: `skill`, `skill_version`, `tool` (`transcription/microphones`), `created_at`, `method`
+  (`per_microphone_transcripts_merged_by_time`), `rule`, `crosstalk_margin_db`, `level`, `speaker_ids`,
+  `microphones` (per microphone: `name`, `segments_in`, `words_in`, `words_kept`, `words_dropped_as_crosstalk`,
+  `transcript_id`, `language`, `source`, `cache_key`), `counts` (`segments`, `words`, `words_dropped_as_crosstalk`,
+  `overlapping_segments`, `overlapping_words`), `dropped` (each dropped word: `microphone`, `segment_id`, `text`,
+  `start`, `end`, `level_db`, `louder_microphone`, `louder_level_db`).
+
+Rule: a word recognized on microphone m is dropped when another microphone j is at least `crosstalk_margin_db`
+louder over the word's span (RMS dBFS of the 16 kHz mono PCM each engine was given) and j's transcript has a word
+overlapping that span. Otherwise it is kept: a word is never dropped on level alone.
+
 ## Speaker merge (ADR-037)
 
 Input: a Transcript and a diarization-skill speaker-turns document (`diarization-skill/turns@1`, written by
