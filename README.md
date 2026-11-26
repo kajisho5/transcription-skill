@@ -384,9 +384,11 @@ For 2..8 microphone files of one recording, one person per microphone. Each is t
 model and cache as `transcribe`, word timestamps on), then merged by time. `speaker_id` is the microphone's name, so no
 diarization is needed. A word is dropped as cross-talk (bleed) when, over its span, another microphone is at least
 `crosstalk_margin_db` (default 6) louder, by RMS of the audio the engine was given, and recognized a word there.
-A word is never dropped on level alone, and two people talking at once on their own microphones are both kept.
+A word is never dropped on level alone. Two people talking at once on their own microphones are both kept as long as
+neither is `crosstalk_margin_db` louder than the other over the other's words (a much louder voice can make the quieter
+one's simultaneous words read as cross-talk).
 Segments never overlap, so words said while someone else was talking go to `overlapping_segments` (same shape,
-ids `ovl_0001`...). What was done is in `microphone_merge`: per microphone the words in, kept and dropped, every
+ids `ovl_0001`...; only the `json` export carries them). What was done is in `microphone_merge`: per microphone the words in, kept and dropped, every
 dropped word with both levels, and the counts. A polyphonic file is split per channel first (ffmpeg-skill
 `audio --channel N`).
 

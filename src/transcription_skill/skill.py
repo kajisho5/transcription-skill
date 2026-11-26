@@ -121,8 +121,8 @@ TOOLS: List[Dict[str, Any]] = [
               ">= crosstalk_margin_db (RMS dBFS over the word's span) and recognized an overlapping word", "default_crosstalk_margin_db": 6.0},
      "input": {"microphones": "list[{input: path, name: str | null (default MIC_01, MIC_02, ...), audio_stream: int >= 0 | null}] (2..8)",
                "crosstalk_margin_db": "0..40 (default 6)",
-               "...": "every transcription/transcribe input except input, audio_stream, speaker_turns, dry_run (shared by all microphones; "
-                      "word_timestamps is always true)"},
+               "...": "every transcription/transcribe input except input, audio_stream, speaker_turns, dry_run, speech_regions (shared by "
+                      "all microphones; word_timestamps is always true); the files must agree in length within 0.5 s"},
      "output": {"transcript": "Transcript (speaker_id = microphone name, microphone_merge recorded)",
                 "microphones": "list[{name, cache_hit, cache_key}]", "warnings": "list[str]"},
      "deterministic": True, "side_effects": ["writes cache under workspace, once per microphone"]},

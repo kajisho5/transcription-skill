@@ -31,7 +31,7 @@ The validator in `validate.py` is the executable form of this document; `transcr
 | `raw_text` | string | engine text verbatim |
 | `confidence` | number in [0,1] \| null | engine metric (faster-whisper: `exp(avg_logprob)`); `null` when the engine gives none |
 | `words` | Word[] \| null | `null` when word timestamps were not requested or the engine could not provide consistent ones |
-| `speaker_id` | string \| null | `null` from recognition (this skill does no diarization). Filled only by a speaker merge (ADR-037): `transcription/speakers`, or `speaker_turns` on `transcription/transcribe`, copies an anonymous `SPEAKER_nn` id from diarization-skill turns; `null` where no turn overlaps or two speakers tie. Never an empty string. |
+| `speaker_id` | string \| null | `null` from recognition (this skill does no diarization). Filled only by a speaker merge (ADR-037): `transcription/speakers`, or `speaker_turns` on `transcription/transcribe`, copies an anonymous `SPEAKER_nn` id from diarization-skill turns; `null` where no turn overlaps or two speakers tie. A per-microphone transcript (`transcription/microphones`, ADR-051) has the microphone's name instead (the caller's, default `MIC_01`, ...): it names a microphone, not a diarized voice. Never an empty string. |
 
 ## Word
 
@@ -226,8 +226,10 @@ microphone's, with:
   ones (`text` = `raw_text`, no space between Japanese / Chinese words).
 - `overlapping_segments` (new top-level key, always present here): the words said while an earlier placed segment
   was still going (someone else talking), as segments of the same shape with ids `ovl_0001`... and words without
-  `index`. Segments never overlap (this schema), so this is where simultaneous speech is kept.
-- `duration`: the longest microphone's.
+  `index`. Segments never overlap (this schema), so this is where simultaneous speech is kept. Only the `json`
+  export carries it: `srt`, `vtt`, `tsv` and `txt` write `segments` only.
+- `duration`: microphone 1's; the files must agree in length within 0.5 s (else `INVALID_INPUT`
+  `microphone_durations_differ`: they are not one timeline).
 - `warnings`: each microphone's own, prefixed with its name, then the merge's notes.
 - `microphone_merge`: `skill`, `skill_version`, `tool` (`transcription/microphones`), `created_at`, `method`
   (`per_microphone_transcripts_merged_by_time`), `rule`, `crosstalk_margin_db`, `level`, `speaker_ids`,

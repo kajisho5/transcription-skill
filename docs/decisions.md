@@ -1122,6 +1122,8 @@ time on the wrong person's track, often misheard.
   relaxed: consumers number and cut by a single timeline. A segment that starts before the placed segments end goes,
   for its words starting in that time, to the new top-level `overlapping_segments`; its later words stay on the
   timeline as their own segment. Every kept word is in exactly one of the two.
+- **One timeline.** The files must agree in length within 0.5 s (else `microphone_durations_differ`); `duration` and
+  `source` are microphone 1's. A file that changed between recognition and the level measurement is refused.
 - **Polyphonic files** (one file, one channel per microphone) are not split here: the extraction recipe is fixed
   (mono downmix); split them per channel first (ffmpeg-skill `audio --channel N`).
 - **Test** (`tests/test_microphones.py`, the Done when): two microphones with -10.5 dB bleed, tone words read back by

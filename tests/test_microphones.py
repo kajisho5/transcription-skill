@@ -137,6 +137,31 @@ class MicrophoneMergeTests(unittest.TestCase):
                 M.microphones_tool(dict(base, **p), engine=ToneEngine())
             self.assertEqual(cm.exception.code, "INVALID_INPUT", p)
 
+    def test_names_default_per_microphone_and_lengths_must_agree(self):
+        res = M.microphones_tool({"microphones": [{"input": self.mic_a, "name": "Alice"}, {"input": self.mic_b, "name": None}], "engine": "fake",
+                                  "model": "fake-model", "language": "en", "workspace": self.ws}, engine=ToneEngine())
+        self.assertEqual({s["speaker_id"] for s in res["transcript"]["segments"]}, {"Alice", "MIC_02"})
+        short = os.path.join(self.tmp, "short.wav")
+        with wave.open(self.mic_b, "rb") as src, wave.open(short, "wb") as dst:
+            dst.setparams(src.getparams())
+            dst.writeframes(src.readframes(int(5.0 * RATE)))
+        with self.assertRaises(TranscriptionError) as cm:
+            M.microphones_tool({"microphones": [{"input": self.mic_a}, {"input": short}], "engine": "fake", "model": "fake-model",
+                                "language": "en", "workspace": self.ws}, engine=ToneEngine())
+        self.assertEqual(cm.exception.details["reason"], "microphone_durations_differ")
+        with self.assertRaises(TranscriptionError):                     # speech regions are measured per file
+            M.microphones_tool({"microphones": [{"input": self.mic_a}, {"input": self.mic_b}], "engine": "fake", "model": "fake-model",
+                                "language": "en", "workspace": self.ws, "speech_regions": [[0, 1]]}, engine=ToneEngine())
+
+    def test_place_partitions_by_start_not_by_position(self):
+        a = {"id": "s1", "start": 1.0, "end": 1.012, "text": "a", "raw_text": "a", "confidence": None, "speaker_id": "A",
+             "words": [{"start": 1.0, "end": 1.012, "text": "a", "confidence": None}]}
+        b = {"id": "s2", "start": 1.0, "end": 1.03, "text": "x y", "raw_text": "x y", "confidence": None, "speaker_id": "B",
+             "words": [{"start": 1.025, "end": 1.03, "text": "x", "confidence": None}, {"start": 1.0, "end": 1.02, "text": "y", "confidence": None}]}
+        placed, over = M._place([(1.0, 0, a), (1.0, 1, b)], "en")
+        texts = sorted(w["text"] for s in placed + over for w in s["words"])
+        self.assertEqual(texts, ["a", "x", "y"])                         # every word once, none doubled or lost
+
     def test_level_of_a_span(self):
         a, b = M.Levels(self.mic_a), M.Levels(self.mic_b)
         self.assertAlmostEqual(b.db(2.8, 3.1) - a.db(2.8, 3.1), -20 * math.log10(BLEED), delta=0.3)   # B's word, bleed on A

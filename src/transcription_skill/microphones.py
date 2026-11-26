@@ -43,6 +43,7 @@ RULE = ("speaker_id = the microphone; a word is dropped as cross-talk when anoth
         "crosstalk_margin_db over the word's span and recognized a word overlapping it; otherwise kept")
 MIN_MICROPHONES, MAX_MICROPHONES = 2, 8
 DEFAULT_CROSSTALK_MARGIN_DB = 6.0
+DURATION_SPREAD = 0.5         # seconds the microphones' files may differ in length (validate.END_TOLERANCE: a later word still fits)
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$")
 FRAME_SECONDS = 0.01
 SILENCE_DB = -120.0
@@ -126,6 +127,10 @@ def merge_microphones(transcripts: Sequence[Dict[str, Any]], levels: Sequence[Le
         if missing:
             raise _bad(f"microphone {names[k]!r}: {len(missing)} segment(s) have no word timestamps; cross-talk is decided per word",
                        reason="word_timestamps_missing", segment_ids=missing[:10])
+    lengths = [float(d["duration"]) for d in transcripts]
+    if max(lengths) - min(lengths) > DURATION_SPREAD:
+        raise _bad(f"the microphones' files differ in length by {max(lengths) - min(lengths):.3f} s (more than {DURATION_SPREAD} s): they must share "
+                   "one timeline (tracks of one recording, started together)", reason="microphone_durations_differ", durations=lengths)
     spans = [[(float(w["start"]), float(w["end"])) for s in doc["segments"] for w in s["words"]] for doc in transcripts]
     merged: List[Tuple[float, int, Dict[str, Any]]] = []
     stats = []
@@ -164,7 +169,7 @@ def merge_microphones(transcripts: Sequence[Dict[str, Any]], levels: Sequence[Le
     out["id"] = new_id("tr")
     out["segments"] = with_word_indices(segments)
     out["overlapping_segments"] = overlapping
-    out["duration"] = max(float(d["duration"]) for d in transcripts)
+    # duration and source stay microphone 1's (the lengths agree within DURATION_SPREAD; validate.END_TOLERANCE covers the rest)
     out["created_at"] = now_iso()
     notes = [w for k, d in enumerate(transcripts) for w in (f"{names[k]}: {x}" for x in d.get("warnings") or [])]
     total_dropped = sum(s["words_dropped_as_crosstalk"] for s in stats)
@@ -218,7 +223,7 @@ def _place(candidates: List[Tuple[float, int, Dict[str, Any]]], language: Option
             last_end = float(seg["end"]) if last_end is None else max(last_end, float(seg["end"]))
             continue
         early = [w for w in seg["words"] if float(w["start"]) < last_end - tol]
-        rest = seg["words"][len(early):]
+        rest = [w for w in seg["words"] if float(w["start"]) >= last_end - tol]
         if early:
             o = _segment_of(early, seg, language)
             o["id"] = f"ovl_{len(over) + 1:04d}"
@@ -238,7 +243,7 @@ def _join_words(texts: List[str], language: Optional[str]) -> str:
     return sep.join(t.strip() for t in texts if t.strip()).strip()
 
 
-SHARED_EXCLUDED = ("input", "audio_stream", "speaker_turns", "dry_run")
+SHARED_EXCLUDED = ("input", "audio_stream", "speaker_turns", "dry_run", "speech_regions")   # speech_regions are measured per file
 
 
 def microphones_tool(params: Dict[str, Any], engine: Any = None) -> Dict[str, Any]:
@@ -249,7 +254,8 @@ def microphones_tool(params: Dict[str, Any], engine: Any = None) -> Dict[str, An
     import shutil
     import uuid
 
-    from .media import extract_audio
+    from .chunking import same_fingerprint
+    from .media import extract_audio, fingerprint_file
     from .paths import PathPolicy, make_run_dir
     from .request import parse_request
     from .service import TranscriptionService
@@ -272,8 +278,8 @@ def microphones_tool(params: Dict[str, Any], engine: Any = None) -> Dict[str, An
         if m.get("audio_stream") is not None:
             item["audio_stream"] = m["audio_stream"]
         reqs.append(parse_request(item))
-    given = [m.get("name") for m in mics]
-    names = check_names(None if all(g is None for g in given) else given, len(mics))
+    defaults = check_names(None, len(mics))
+    names = check_names([m.get("name") if m.get("name") is not None else defaults[k] for k, m in enumerate(mics)], len(mics))
     seen = set()
     for r in reqs:
         ident = (os.path.realpath(r.input), r.audio_stream or 0)
@@ -288,8 +294,13 @@ def microphones_tool(params: Dict[str, Any], engine: Any = None) -> Dict[str, An
         levels = []
         for k, r in enumerate(reqs):
             wav = os.path.join(run_dir, f"mic{k}.wav")
-            extract_audio(PathPolicy(r.allowed_input_roots).resolve_input(r.input), wav, audio_stream=r.audio_stream or 0)
+            path = PathPolicy(r.allowed_input_roots).resolve_input(r.input)
+            extract_audio(path, wav, audio_stream=r.audio_stream or 0)
             levels.append(Levels(wav))
+            # the levels must describe the audio that was transcribed: the file must not have changed in between
+            if not same_fingerprint(fingerprint_file(path), results[k]["transcript"]["source"]["fingerprint"]):
+                raise TranscriptionError("INVALID_INPUT", f"{names[k]}: {os.path.basename(r.input)} changed while it was being transcribed",
+                                         {"reason": "input_changed", "microphone": names[k]})
     finally:
         shutil.rmtree(run_dir, ignore_errors=True)
     merged = merge_microphones([x["transcript"] for x in results], levels, names, margin)
