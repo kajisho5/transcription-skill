@@ -40,6 +40,7 @@ stdout) and `transcribe` accepts `--dry-run` (plan only, no ASR).
 | "when does each part of speech start and end" | `segments t.json --merge-gap 0.5 --json` |
 | "where did they say X", "find the phrase", "jump to every mention of X" | `find t.json "phrase" --json` (alias `search`; several files: `find day1.json day2.json "phrase"`): every hit with `start`/`end`, `segment_ids`, `word_indices`, `speaker_id` and the neighbouring text (`--context N` segments). Width, case, long vowel marks, whitespace and punctuation are ignored, and a phrase across words or segments is found. Add `--fuzzy 0.8` for approximate hits (ASR misspellings), each labelled `approximate` with its `ratio`. Zero hits is a normal answer, not an error |
 | "cut these sentences", "remove words 12-40", "keep only this answer" (as times) | `select t.json --mode remove --segments seg_0003,seg_0007 --json` (or `--words 12-40`, or `--mode keep`): the time spans that would go, each with the `in` / `out` window its cut edges may use, the sentences (`whole` / `part`), speakers and `speech_seconds`. It cuts nothing; pass the result to video-editing-skill `ripple`. A refusal with `selection_overlaps_kept_speech` lists kept words that overlap the removed speech; say so, do not add `--overlap include` without the user |
+| "one microphone per person", "pin mics recorded on separate tracks", "who said what in the discussion" | `transcribe mic1.wav mic2.wav mic3.wav --per-channel --channel-name Chair --channel-name Smith --channel-name Tanaka --language en` (or `microphones mic1.wav mic2.wav --name ...`): each microphone transcribed on its own, merged by time, `speaker_id` = the microphone's name, words heard louder on another microphone that recognized speech there dropped as cross-talk (`--crosstalk-margin-db`, default 6). Words said while someone else was talking are in `overlapping_segments`, not lost. A polyphonic file: split it per channel first (ffmpeg-skill `audio --channel N`) |
 | "is this transcript file valid" | `check t.json` |
 | "what would it do / how long is it" | `transcribe input.mp4 --dry-run` |
 | "use a bigger / better model" | `--model small` (or `medium`, `large-v3`); doctor shows which are cached |
@@ -94,6 +95,9 @@ never "fix" the transcript text yourself when the user asked for the transcript.
   turns.json`, or `transcribe --speaker-turns turns.json`) with turns from diarization-skill (`diarization diarize`).
   This skill does no diarization itself. Merged ids are anonymous (`SPEAKER_00`, ...): they say which voice, never
   who the person is; a `null` left after a merge means no turn covered the segment or two speakers tied.
+  A per-microphone transcript (`transcribe --per-channel`, `microphones`) has `speaker_id` = the microphone name
+  the caller gave (default `MIC_01`, ...), and `overlapping_segments` beside `segments` for speech said over someone
+  else (segments never overlap).
 - `MODEL_UNAVAILABLE` with `availability: MODEL_MISSING` under `--offline` means the model is not on
   this machine; either run once online (`MODEL_DOWNLOAD_REQUIRED` shows a download will happen) or pick
   a model that `engines --engine faster_whisper --offline` lists as `MODEL_AVAILABLE`.

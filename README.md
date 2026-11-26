@@ -336,6 +336,8 @@ transcription transcribe lecture.mp4 --offline         # hard no-network constra
 transcription engines --offline --language ja          # which engines satisfy these constraints
 transcription batch manifest.json                      # many requests, one process; one item's failure doesn't stop the rest
 transcription transcribe day1.mp4 --language en --chunk-seconds 600 --parallel 2   # long recording: chunked at pauses, resumable (ADR-042)
+transcription transcribe mic1.wav mic2.wav --per-channel --channel-name Chair --channel-name Guest --language en
+                                                       # one microphone per person: one transcript, speaker = microphone (ADR-051)
 ```
 
 `manifest.json` for `batch`: `{"items": [{"input": "a.mp4", "language": "ja"}, {"input": "b.mp4", "output": "b.transcript.json"}]}` --
@@ -357,7 +359,7 @@ run_tool("transcription/export", {"transcript": transcript, "format": "srt", "ou
 run_tool("transcription/check", {"transcript": "lecture.transcript.json"})
 ```
 
-Tools: `transcription/transcribe`, `transcription/segments`, `transcription/export`, `transcription/speakers`, `transcription/find`, `transcription/select`, `transcription/check`, `transcription/batch`.
+Tools: `transcription/transcribe`, `transcription/segments`, `transcription/export`, `transcription/speakers`, `transcription/find`, `transcription/select`, `transcription/check`, `transcription/microphones`, `transcription/batch`.
 
 Phrase search (ADR-045): `run_tool("transcription/find", {"transcript": "talk.transcript.json", "phrase": "sound design"})`
 (CLI `transcription find talk.transcript.json "sound design"`, alias `search`; `transcripts` / several files for many)
@@ -374,6 +376,21 @@ Selections (ADR-050, rule `transcript-selection@1`): `run_tool("transcription/se
 else, including the time before the first kept word and after the last one. A kept word that overlaps removed speech is refused
 (`selection_overlaps_kept_speech`) unless `overlap: include`. The sentences touched, their speakers and the seconds of speech are
 listed. Nothing is cut: video-editing-skill `ripple` places the cuts and retimes the transcript.
+
+One transcript per microphone (ADR-051): `run_tool("transcription/microphones", {"microphones": [{"input": "mic1.wav",
+"name": "Chair"}, {"input": "mic2.wav", "name": "Guest"}], "language": "en"})` (CLI `transcribe mic1.wav mic2.wav
+--per-channel --channel-name Chair --channel-name Guest`, or `microphones mic1.wav mic2.wav --name Chair --name Guest`).
+For 2..8 microphone files of one recording, one person per microphone. Each is transcribed on its own (same engine,
+model and cache as `transcribe`, word timestamps on), then merged by time. `speaker_id` is the microphone's name, so no
+diarization is needed. A word is dropped as cross-talk (bleed) when, over its span, another microphone is at least
+`crosstalk_margin_db` (default 6) louder, by RMS of the audio the engine was given, and recognized a word there.
+A word is never dropped on level alone. Two people talking at once on their own microphones are both kept as long as
+neither is `crosstalk_margin_db` louder than the other over the other's words (a much louder voice can make the quieter
+one's simultaneous words read as cross-talk).
+Segments never overlap, so words said while someone else was talking go to `overlapping_segments` (same shape,
+ids `ovl_0001`...; only the `json` export carries them). What was done is in `microphone_merge`: per microphone the words in, kept and dropped, every
+dropped word with both levels, and the counts. A polyphonic file is split per channel first (ffmpeg-skill
+`audio --channel N`).
 
 Speaker merge (ADR-037): `run_tool("transcription/speakers", {"transcript": transcript, "turns": "talk.turns.json"})`
 (CLI `transcription speakers talk.transcript.json --turns talk.turns.json`), or `speaker_turns` on

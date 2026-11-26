@@ -112,6 +112,20 @@ TOOLS: List[Dict[str, Any]] = [
      "deterministic": True, "side_effects": []},
     {"name": "transcription/check", "description": "Validate a Transcript document against the contract.",
      "input": {"transcript": "Transcript | path"}, "output": {"ok": "bool", "errors": "list[str]", "warnings": "list[str]"}, "deterministic": True, "side_effects": []},
+    {"name": "transcription/microphones", "description": "One transcript per microphone: 2..8 microphone tracks of one recording "
+     "(one person per microphone), each transcribed on its own with word timestamps through transcription/transcribe, merged by time "
+     "into one Transcript whose speaker_id is the microphone's name (no diarization). A word recognized on one microphone is dropped as "
+     "cross-talk when another microphone is louder by at least crosstalk_margin_db over the word's span and recognized a word there; "
+     "otherwise it is kept, so two people talking at once are both kept. Recorded under microphone_merge.",
+     "rule": {"method": "per_microphone_transcripts_merged_by_time", "crosstalk": "drop a word when another microphone is louder by "
+              ">= crosstalk_margin_db (RMS dBFS over the word's span) and recognized an overlapping word", "default_crosstalk_margin_db": 6.0},
+     "input": {"microphones": "list[{input: path, name: str | null (default MIC_01, MIC_02, ...), audio_stream: int >= 0 | null}] (2..8)",
+               "crosstalk_margin_db": "0..40 (default 6)",
+               "...": "every transcription/transcribe input except input, audio_stream, speaker_turns, dry_run, speech_regions (shared by "
+                      "all microphones; word_timestamps is always true); the files must agree in length within 0.5 s"},
+     "output": {"transcript": "Transcript (speaker_id = microphone name, microphone_merge recorded)",
+                "microphones": "list[{name, cache_hit, cache_key}]", "warnings": "list[str]"},
+     "deterministic": True, "side_effects": ["writes cache under workspace, once per microphone"]},
     {"name": "transcription/batch", "description": "Run many transcription/transcribe requests in one process. One item's failure "
      "does not abort the others; each result is reported independently in order.",
      "input": {"items": "list[transcription/transcribe input]"},
@@ -238,6 +252,9 @@ def run_tool(name: str, params: Dict[str, Any]) -> Dict[str, Any]:
             raise TranscriptionError("INVALID_INPUT", f"unknown keys {sorted(extra)}")
         doc = load_transcript(params.get("transcript"))
         return validate_transcript(doc).to_dict()
+    if name == "transcription/microphones":
+        from .microphones import microphones_tool
+        return microphones_tool(params)
     if name == "transcription/batch":
         extra = set(params) - {"items"}
         if extra:
