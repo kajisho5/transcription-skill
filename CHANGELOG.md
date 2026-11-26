@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.0 - 2026-11-26
+
+- feat: one transcript per microphone (transcribe --per-channel, transcription/microphones) (#75) (9b64a71)
+- docs(readme): parakeet needs silero-vad too; large-v3-turbo needs faster-whisper 1.1.0+ (#74) (4dbffe6)
+- docs(readme): choosing an engine/model for English (opt-in, defaults unchanged) (#73) (d79b463)
+
 ## 0.14.0 - 2026-11-20
 
 - Selections for editing by transcript: transcription/select turns word ranges and segments into removed spans with their gaps (ADR-050, Velisa ADR-032, roadmap step 18) (#72) (4bacd61)
