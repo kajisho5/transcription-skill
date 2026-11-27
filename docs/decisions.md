@@ -1133,3 +1133,54 @@ time on the wrong person's track, often misheard.
 - Contract: additive. One tool (with its `rule`), new top-level transcript keys `overlapping_segments` and
   `microphone_merge` (present only on a per-microphone transcript). `contract_version` stays 1.0.
 
+
+## ADR-052 Script alignment: a known script aligned with stable-ts (`stable_ts`), unplaced words listed, never timed
+
+2026-11-27. ECOSYSTEM_ROADMAP step 8.
+
+When the words are already known (a 台本, a reading, the speaker's own text), recognising them again only adds
+recognition errors. What is needed is when each given word is said.
+
+- **Engine.** `stable_ts`, optional (`pip install "transcription-skill[stable-ts]"`): [stable-ts](https://github.com/jianfch/stable-ts)
+  2.19.1 (MIT, read from the repository's `LICENSE` and the package metadata) `align()` on a faster-whisper model
+  (`stable_whisper.load_faster_whisper`). The weights are the same Whisper checkpoints `faster_whisper` uses, from the
+  same Hugging Face cache: Systran's CTranslate2 conversions of OpenAI Whisper (model cards `license: mit`, read
+  2026-11-27 for `Systran/faster-whisper-tiny` and `-base`; OpenAI's `whisper` repository is MIT). stable-ts pulls
+  PyTorch and openai-whisper; `stable_whisper` is imported only inside `transcribe()`, so listing engines and the
+  contract never load PyTorch. The prepared WAV is passed as samples (stable-ts would start ffmpeg for a path).
+  Offline once the model is in the cache; `models pull MODEL --engine stable_ts` fetches it.
+- **Request.** `script_text` (string, one line per sentence or cue, at most 200 000 characters; CLI `--script FILE`,
+  which implies `--word-timestamps`). Data only. `language` is required (the script is tokenised in it). Refused with it:
+  `chunk_seconds`, `initial_prompt`, `vocabulary`, `domain_vocabulary`, `corrections` (recognition options) and
+  `--follow`. Any other engine refuses `script_text` (`script_alignment_unsupported`); `stable_ts` refuses a request
+  without it (`script_required`). The script's SHA-256 and line count are in `provenance.parameters.script` and so in
+  the cache key; requests without a script keep their keys.
+- **Transcript.** The same `transcript/0.1` schema, additively: top-level `alignment` with `source: "aligned"`, the rule
+  `script-alignment@1`, counts, `unaligned_lines` and `unaligned_words`; each segment is one script line with
+  `script_line` (1-based line number in the given text) and the line as `text`.
+- **Never invented.** stable-ts returns a time for every word; one it could not find has no duration where it gave
+  up. A word shorter than 0.02 s is not placed: it is not in `words` and is listed under `alignment.unaligned_words`
+  (line, position, text). A line with fewer than half of its words placed is not spoken: no segment, all its words
+  listed, the line in `alignment.unaligned_lines`. A segment's start and end are its first and last placed word.
+- **Japanese.** Supported. stable-ts aligns Japanese (and zh, th, lo, my) per Whisper token rather than per
+  space-separated word, so Japanese words are tokens (often one character), the same granularity `faster_whisper`
+  gives; `word_segmentation: "dictionary"` can regroup them (ADR-039).
+- **Measured** (`tests/test_stable_ts.py`, `RealAlignmentTests`; the manual `stable_ts` job of heavy-tests.yml).
+  Fixtures `en_script.wav` / `ja_script.wav` (`make_script_fixtures.py`): each English word / Japanese phrase
+  synthesised alone (espeak-ng, open-jtalk), trimmed, joined with 0.08 s gaps (0.6 s between lines), so every unit's
+  start is known exactly; each script has a second line that is not in the audio. Median start error, a spoken unit
+  without a placed word counted as infinite, CPU int8:
+
+  | model | en (17 words) | ja (8 phrases) | unspoken line reported |
+  |---|---|---|---|
+  | `tiny` (default) | 0.070 s | 0.047 s | yes, both |
+  | `base` | 0.198 s | 0.017 s | yes, both |
+  | `small` | 0.211 s | 0.026 s | yes, both |
+
+  In every run the first word after the unspoken line ("Our", "最") was not placed (listed, not timed). Two runs of each
+  gave identical times (`deterministic: true`). The default model is `tiny` because it is the one that met the bound
+  in both languages; on English `base` and `small` put word starts about 0.2 s early. Natural speech (no gaps
+  between words), real recordings and longer scripts are not measured.
+- Contract: additive. One request key (`script_text`), one engine (`stable_ts`), one engine capability
+  (`script_alignment`), one Skill capability (`script_alignment`), optional `alignment` and `segments[].script_line`.
+  `contract_version` stays 1.0.

@@ -106,6 +106,12 @@ class TranscriptionService:
             raise TranscriptionError("INVALID_INPUT", f"engine {engine.id} does not take a custom vocabulary; use an engine with the "
                                      f"custom_vocabulary capability, or initial_prompt for a faster_whisper vocabulary hint",
                                      {"engine": engine.id, "reason": "custom_vocabulary_unsupported"})
+        if req.script_text is not None and not engine.supports_script_alignment():
+            raise TranscriptionError("INVALID_INPUT", f"engine {engine.id} recognises speech and does not align a script; use an engine with "
+                                     "the script_alignment capability (stable_ts)", {"engine": engine.id, "reason": "script_alignment_unsupported"})
+        if req.script_text is None and engine.supports_script_alignment():
+            raise TranscriptionError("INVALID_INPUT", f"engine {engine.id} aligns a known script and needs 'script_text'",
+                                     {"engine": engine.id, "reason": "script_required"})
         unsupported = engine.unsupported_parameters(req.parameters())
         if unsupported:
             raise TranscriptionError("INVALID_INPUT", f"engine {engine.id} cannot honour {', '.join(unsupported)}; remove them from the request",
@@ -195,7 +201,7 @@ class TranscriptionService:
             "path_policy": prep["path_policy"],
             "engine": {"id": eng.id, "version": eng.version, "execution_mode": eng.execution_mode, "requires_network": eng.requires_network,
                        "capabilities": eng.capabilities(), "word_timestamps": eng.supports_word_timestamps(), "supported_languages": len(eng.supported_languages),
-                       "custom_vocabulary": eng.supports_vocabulary()},
+                       "custom_vocabulary": eng.supports_vocabulary(), "script_alignment": eng.supports_script_alignment()},
             "model": prep["model"].to_dict(),
             "language": req.language or "auto",
             "word_timestamps": req.word_timestamps,
@@ -249,7 +255,7 @@ class TranscriptionService:
             extraction = extract_audio(prep["path"], wav, audio_stream=req.audio_stream if req.audio_stream is not None else 0)
             ereq = EngineRequest(audio_path=wav, language=req.language, model=req.model, word_timestamps=req.word_timestamps,
                                  temperature=req.temperature, initial_prompt=req.initial_prompt, beam_size=req.beam_size, offline=req.offline,
-                                 vad_filter=req.vad_filter, vocabulary=req.vocabulary, timeout=req.budget.timeout)
+                                 vad_filter=req.vad_filter, vocabulary=req.vocabulary, timeout=req.budget.timeout, script_text=req.script_text)
             t_engine = time.time()
             chunking: Optional[Dict[str, Any]] = None
             if req.chunk_seconds is not None:
@@ -290,6 +296,9 @@ class TranscriptionService:
         if req.word_segmentation == WORD_SEGMENTATION_DICTIONARY:   # finals are emitted with engine words and must not change after
             raise TranscriptionError("INVALID_INPUT", "follow emits engine words; word_segmentation 'dictionary' cannot be combined with it",
                                      {"reason": "follow_with_dictionary_segmentation"})
+        if req.script_text is not None:
+            raise TranscriptionError("INVALID_INPUT", "follow recognises a recording while it grows; align a script against the finished file",
+                                     {"reason": "follow_with_script"})
         if req.corrections is not None:   # finals are emitted as recognised and never change afterwards (ADR-047)
             raise TranscriptionError("INVALID_INPUT", "follow emits finals as recognised; corrections cannot be combined with it: apply them "
                                      "with a batch run of the finished file", {"reason": "follow_with_corrections"})
@@ -600,6 +609,8 @@ def build_transcript(req: TranscribeRequest, prep: Dict[str, Any], result: Engin
                 words = None
         segments.append(Segment(id=seg_id, start=start, end=end, text=text, raw_text=raw,
                                 confidence=None if s.confidence is None else float(s.confidence), words=words, speaker_id=None).to_dict())
+        if getattr(s, "script_line", None) is not None:     # an aligned segment says which script line it is (ADR-052)
+            segments[-1]["script_line"] = int(s.script_line)
 
     applied: Optional[List[Dict[str, Any]]] = None
     if req.corrections:                 # before dictionary words, so they are split from the corrected text (ADR-047)
@@ -636,6 +647,8 @@ def build_transcript(req: TranscribeRequest, prep: Dict[str, Any], result: Engin
     if dv is not None:
         doc["provenance"]["vocabulary"] = {"terms": dv["terms"], "delivered_as": dv.get("delivered_as"), "terms_passed": dv.get("terms_passed", []),
                                            "japanese": dv["japanese"], "sources": dv["sources"]}
+    if result.alignment is not None:    # what the aligner placed and what it could not (ADR-052)
+        doc["alignment"] = result.alignment
     if applied is not None:
         doc["provenance"]["corrections"] = {"rules": req.corrections, "count": len(applied), "applied": applied}
     return doc

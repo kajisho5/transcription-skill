@@ -30,7 +30,8 @@
   "transcript_search",
   "domain_vocabulary",
   "post_correction",
-  "transcript_selection"
+  "transcript_selection",
+  "script_alignment"
  ],
  "engine_contract": {
   "schema": "transcription-skill/engine-spec/0.1",
@@ -46,7 +47,8 @@
    "model_download",
    "word_timestamps",
    "language_detection",
-   "custom_vocabulary"
+   "custom_vocabulary",
+   "script_alignment"
   ],
   "offline": false
  },
@@ -120,6 +122,23 @@
    "models": []
   },
   {
+   "id": "stable_ts",
+   "version": null,
+   "execution_mode": "local",
+   "description": "stable-ts forced alignment: a known script aligned to the audio on a Whisper (faster-whisper) model, instead of recognised. Needs `script_text` and `language`; words the aligner cannot place are listed, never timed. Optional engine.",
+   "available": false,
+   "unavailable_reason": "pinned snapshot: availability comes from the installed Skill's contract / doctor",
+   "requires_network": false,
+   "deterministic": true,
+   "capabilities": [
+    "local_execution"
+   ],
+   "supported_languages": [],
+   "supported_models": [],
+   "default_model": "tiny",
+   "models": []
+  },
+  {
    "id": "whisperx",
    "version": null,
    "execution_mode": "local",
@@ -169,7 +188,8 @@
     "parallel": "1..8 (chunks recognized at a time; chunk_seconds only)",
     "speech_regions": "media-analysis-skill speech_regions response | result | observation | path | null (chunk_seconds only)",
     "domain_vocabulary": "{programme: str | list[str], slides: slide-sync/deck@1 document | path | list[str], speakers: list[str], terms: list[str], max_terms: 1..200 (default 50), japanese: bool (default false)} | null (terms passed as the engine's initial_prompt or custom vocabulary; recorded in provenance.vocabulary)",
-    "corrections": "list[{from: str, to: str, match: word | substring (default word)}] | {from: to} | null (applied to segment text after recognition; every replacement in provenance.corrections.applied with its time)"
+    "corrections": "list[{from: str, to: str, match: word | substring (default word)}] | {from: to} | null (applied to segment text after recognition; every replacement in provenance.corrections.applied with its time)",
+    "script_text": "str | null (a known script, one line per sentence or cue, aligned to the audio instead of recognised: engine with the script_alignment capability (stable_ts), language required; the transcript has alignment.source 'aligned', segments[].script_line, and every script line and word that could not be placed under alignment, never timed)"
    },
    "output": {
     "transcript": "Transcript",

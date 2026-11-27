@@ -20,6 +20,7 @@ The validator in `validate.py` is the executable form of this document; `transcr
 | `created_at` | string | UTC `YYYY-MM-DDTHH:MM:SSZ` |
 | `provenance` | Provenance | how it was produced |
 | `warnings` | string[] | non-fatal facts about the run (dropped empty segments, unknown language, cache recompute) |
+| `alignment` | object | only on a transcript aligned from a known script (`script_text`, engine `stable_ts`, ADR-052): `source` `aligned`, `rule` `script-alignment@1`, `lines`, `aligned_lines`, `words`, `placed_words`, `unaligned_lines[]` `{line, text, words, placed}` (lines not found in the audio: no segment), `unaligned_words[]` `{line, position, text}` (words given no time, in no `words` list) |
 
 ## Segment
 
@@ -31,6 +32,7 @@ The validator in `validate.py` is the executable form of this document; `transcr
 | `raw_text` | string | engine text verbatim |
 | `confidence` | number in [0,1] \| null | engine metric (faster-whisper: `exp(avg_logprob)`); `null` when the engine gives none |
 | `words` | Word[] \| null | `null` when word timestamps were not requested or the engine could not provide consistent ones |
+| `script_line` | integer | aligned transcripts only (ADR-052): the 1-based line of the script this segment is; `text` is that line |
 | `speaker_id` | string \| null | `null` from recognition (this skill does no diarization). Filled only by a speaker merge (ADR-037): `transcription/speakers`, or `speaker_turns` on `transcription/transcribe`, copies an anonymous `SPEAKER_nn` id from diarization-skill turns; `null` where no turn overlaps or two speakers tie. A per-microphone transcript (`transcription/microphones`, ADR-051) has the microphone's name instead (the caller's, default `MIC_01`, ...): it names a microphone, not a diarized voice. Never an empty string. |
 
 ## Word

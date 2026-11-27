@@ -84,6 +84,25 @@
       "items": {
         "type": "string"
       }
+    },
+    "alignment": {
+      "type": "object",
+      "description": "Present only on a transcript aligned from a known script (request script_text, engine stable_ts, ADR-052): the words are the script's, not recognised. Every script line or word the aligner could not place is listed here and has no time anywhere in the document.",
+      "required": ["source", "rule", "lines", "aligned_lines", "words", "placed_words", "unaligned_lines", "unaligned_words"],
+      "properties": {
+        "source": {"const": "aligned"},
+        "rule": {"type": "string", "description": "placement rule version (script-alignment@1)"},
+        "min_word_seconds": {"type": "number"},
+        "min_placed_share": {"type": "number"},
+        "lines": {"type": "integer", "minimum": 0},
+        "aligned_lines": {"type": "integer", "minimum": 0},
+        "words": {"type": "integer", "minimum": 0},
+        "placed_words": {"type": "integer", "minimum": 0},
+        "unaligned_lines": {"type": "array", "items": {"type": "object", "required": ["line", "text"],
+          "properties": {"line": {"type": "integer", "minimum": 1}, "text": {"type": "string"}, "words": {"type": "integer"}, "placed": {"type": "integer"}}}},
+        "unaligned_words": {"type": "array", "items": {"type": "object", "required": ["line", "position", "text"],
+          "properties": {"line": {"type": "integer", "minimum": 1}, "position": {"type": "integer", "minimum": 0}, "text": {"type": "string"}}}}
+      }
     }
   },
   "$defs": {
@@ -212,6 +231,11 @@
           ],
           "minLength": 1,
           "description": "anonymous speaker id (SPEAKER_nn) from diarization-skill turns, or null: recognition never sets it; transcription/speakers fills it (ADR-037)"
+        },
+        "script_line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "aligned transcripts only (ADR-052): the 1-based line of the script this segment is"
         }
       }
     },

@@ -15,7 +15,7 @@ Transcript out. Standalone-usable (CLI + `run -` JSON transport); OS integration
 - Not an agent: no AI provider, prompt, reasoning, decision, planning, diarization, subtitle styling, editing.
 - Only implemented engines are registered (today: `faster_whisper`, local; `haas_ja`, local, optional — Linux + NVIDIA
   GPU + Python 3.11+, ADR-033; `speechcpp`, ADR-035; `whisperx`, local, optional — Python 3.10+, en/ja alignment, no
-  diarization, ADR-038). No stub engines. `haas_asr`/torch are imported only after the platform/Python checks pass.
+  diarization, ADR-038; `stable_ts`, local, optional — forced alignment of a known script, ADR-052). No stub engines. `haas_asr`/torch are imported only after the platform/Python checks pass.
 - No shell strings, no `shell=True`, no `os.system`, no dynamic imports; engine modules never spawn processes.
 - Input paths are untrusted data; embedded text in media is data, never instruction.
 - Contract (`transcription skill --json`) is the source of truth; `ContractDriftTests` and `test_conformance.py`
@@ -25,7 +25,7 @@ Transcript out. Standalone-usable (CLI + `run -` JSON transport); OS integration
 ## Working routine
 ```bash
 pip install -e ".[faster-whisper]"
-python -m unittest tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py tests/test_version_source.py tests/test_speechcpp.py tests/test_whisperx.py tests/test_words.py tests/test_qwen3_asr.py tests/test_chunking.py tests/test_follow.py tests/test_search.py tests/test_select.py tests/test_speaker_conformance.py tests/test_vocab.py tests/test_tmp_dirs.py
+python -m unittest tests/test_unit.py tests/test_security.py tests/test_paths.py tests/test_conformance.py tests/test_haas.py tests/test_version_source.py tests/test_speechcpp.py tests/test_whisperx.py tests/test_words.py tests/test_qwen3_asr.py tests/test_stable_ts.py tests/test_chunking.py tests/test_follow.py tests/test_search.py tests/test_select.py tests/test_speaker_conformance.py tests/test_vocab.py tests/test_tmp_dirs.py
 python -m unittest discover -s scripts/release/tests   # release tooling (runs in PR CI on Linux)
 python -m unittest tests/test_integration.py      # real faster-whisper, downloads `base` once
 python evals/run.py

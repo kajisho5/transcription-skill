@@ -82,12 +82,14 @@ def default_registry() -> EngineRegistry:
         from .haas import HaasJaEngine
         from .qwen3_asr import Qwen3AsrEngine
         from .speechcpp import SpeechCppEngine
+        from .stable_ts import StableTsEngine
         from .whisperx import WhisperXEngine
         r = EngineRegistry()
         r.register(FasterWhisperEngine)
         r.register(HaasJaEngine)
         r.register(Qwen3AsrEngine)
         r.register(SpeechCppEngine)
+        r.register(StableTsEngine)
         r.register(WhisperXEngine)
         _DEFAULT = r
     return _DEFAULT
