@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.16.0 - 2026-11-27
+
+- feat: script alignment with stable-ts (engine stable_ts, ADR-052, roadmap step 8) (#76) (63331aa)
+
 ## 0.15.0 - 2026-11-26
 
 - feat: one transcript per microphone (transcribe --per-channel, transcription/microphones) (#75) (9b64a71)
