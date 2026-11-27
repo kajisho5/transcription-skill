@@ -23,10 +23,11 @@ MAX_INITIAL_PROMPT_CHARS = 500
 MAX_VOCABULARY_WORDS = 500
 MAX_VOCABULARY_READINGS = 20
 MAX_VOCABULARY_CHARS = 100
+MAX_SCRIPT_CHARS = 200_000    # a known script to align (ADR-052): about three hours of speech
 
 ALLOWED_KEYS = {"input", "language", "engine", "model", "word_timestamps", "temperature", "initial_prompt", "beam_size", "audio_stream",
                 "asset_id", "budget", "cache", "workspace", "offline", "allowed_input_roots", "vad_filter", "vocabulary",
-                "word_segmentation", "chunk_seconds", "parallel", "speech_regions", "domain_vocabulary", "corrections"}
+                "word_segmentation", "chunk_seconds", "parallel", "speech_regions", "domain_vocabulary", "corrections", "script_text"}
 FORBIDDEN_KEYS = {"command", "argv", "cmd", "shell", "exec", "args", "script", "binary", "api_key", "apikey", "token",
                   "secret", "password", "credentials", "env"}
 BUDGET_KEYS = {"timeout", "max_audio_seconds"}
@@ -75,6 +76,7 @@ class TranscribeRequest:
     speech_regions_fingerprint: Optional[str] = None     # the file those regions were measured on, when the document names it
     domain_vocabulary: Optional[Dict[str, Any]] = None   # terms selected from the programme / slides / speakers (ADR-047)
     corrections: Optional[List[Dict[str, str]]] = None   # post-correction rules {from, to, match}, applied after the engine (ADR-047)
+    script_text: Optional[str] = None    # a known script aligned to the audio instead of recognised (engines with script_alignment, ADR-052)
 
     def parameters(self) -> Dict[str, Any]:
         """The parameters that shape the ASR output. Part of provenance and of the cache identity.
@@ -92,6 +94,9 @@ class TranscribeRequest:
             p["word_segmentation"] = self.word_segmentation
         if self.corrections is not None:     # the delivered terms are already in initial_prompt / vocabulary (ADR-047)
             p["corrections"] = self.corrections
+        if self.script_text is not None:     # the words of an aligned transcript are the script's (ADR-052)
+            p["script"] = {"sha256": hashlib.sha256(self.script_text.encode("utf-8")).hexdigest(),
+                           "lines": sum(1 for line in self.script_text.splitlines() if line.strip())}
         if self.chunk_seconds is not None:   # where the cuts fall shapes the result; `parallel` does not (ADR-042)
             from .chunking import regions_digest
             p["chunking"] = {"chunk_seconds": self.chunk_seconds,
@@ -217,6 +222,16 @@ def parse_request(doc: Any) -> TranscribeRequest:
     chunk_seconds, parallel, regions, regions_fp = _parse_chunking(doc, lang)
     domain_vocabulary = parse_domain_vocabulary(doc.get("domain_vocabulary"))
     corrections = parse_corrections(doc.get("corrections"))
+    script_text = parse_script_text(doc.get("script_text"))
+    if script_text is not None:
+        clash = [k for k, v in (("chunk_seconds", chunk_seconds), ("domain_vocabulary", domain_vocabulary), ("corrections", corrections),
+                                ("initial_prompt", prompt), ("vocabulary", vocabulary)) if v is not None]
+        if clash:
+            raise _bad(f"'script_text' aligns the given words; {', '.join(clash)} cannot be combined with it", reason="script_with_recognition_option",
+                       parameters=clash)
+        if lang is None:
+            raise _bad("'script_text' needs \"language\": the script is tokenised in it and the language is never detected",
+                       reason="language_required_for_alignment")
 
     budget = Budget()
     b = doc.get("budget")
@@ -235,7 +250,23 @@ def parse_request(doc: Any) -> TranscribeRequest:
                              workspace=ws, offline=offline, allowed_input_roots=roots, vad_filter=vad_filter,
                              vocabulary=vocabulary, word_segmentation=segmentation, chunk_seconds=chunk_seconds, parallel=parallel,
                              speech_regions=regions, speech_regions_fingerprint=regions_fp, domain_vocabulary=domain_vocabulary,
-                             corrections=corrections)
+                             corrections=corrections, script_text=script_text)
+
+
+def parse_script_text(value: Any) -> Optional[str]:
+    """A known script (台本, the speaker's own text): a string, one line per sentence or cue. Data only: its words are aligned,
+    never followed. None for null; refused when empty, too long or with NUL (ADR-052)."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise _bad("'script_text' must be a string (the script, one line per sentence or cue)")
+    if "\x00" in value:
+        raise _bad("'script_text' contains illegal characters")
+    if len(value) > MAX_SCRIPT_CHARS:
+        raise _bad(f"'script_text' longer than {MAX_SCRIPT_CHARS} characters")
+    if not value.strip():
+        raise _bad("'script_text' is empty")
+    return value.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _parse_chunking(doc: Dict[str, Any], lang: Optional[str]) -> Any:
@@ -321,4 +352,6 @@ def summarize_for_display(req: TranscribeRequest) -> Dict[str, Any]:
         d["speech_regions"] = f"{len(req.speech_regions)} regions"
     if req.corrections is not None:
         d["corrections"] = f"{len(req.corrections)} rules"
+    if req.script_text is not None:
+        d["script_text"] = f"{len(req.script_text)} characters"
     return d

@@ -61,6 +61,9 @@ def _transcribe_params(args: argparse.Namespace) -> Dict[str, Any]:
         p["domain_vocabulary"] = dv
     if args.corrections:
         p["corrections"] = _load_json_file(args.corrections, "corrections file")
+    if args.script:
+        p["script_text"] = _read_text_file(args.script, "script file")
+        p["word_timestamps"] = True
     if args.chunk_seconds is not None:
         p["chunk_seconds"] = args.chunk_seconds
     if args.parallel is not None:
@@ -95,7 +98,7 @@ def _load_json_file(path: str, what: str) -> Any:
 
 def _transcribe_inputs(args: argparse.Namespace) -> List[str]:
     """Every file `transcribe` reads, so the transcript is never written over one of them."""
-    files = [args.input, args.vocabulary, args.speaker_turns, args.speech_regions, args.slides, args.corrections] + list(args.programme or [])
+    files = [args.input, args.vocabulary, args.speaker_turns, args.speech_regions, args.slides, args.corrections, args.script] + list(args.programme or [])
     return [f for f in files if f]
 
 
@@ -652,6 +655,8 @@ def build_parser() -> argparse.ArgumentParser:
                    "from the programme and slide text (opt-in)")
     t.add_argument("--corrections", metavar="FILE", help="post-correction JSON: [{\"from\": wrong, \"to\": right, \"match\": "
                    "\"word\"|\"substring\"}] or {wrong: right}; every replacement is recorded with its time (ADR-047)")
+    t.add_argument("--script", metavar="FILE", help="align this known script (UTF-8 text, one line per sentence or cue) to the audio "
+                   "instead of recognising; engine stable_ts, needs --language, implies --word-timestamps (ADR-052)")
     t.add_argument("--asset-id", help="asset identity to stamp on the transcript (default: derived from the file fingerprint)")
     t.add_argument("--timeout", type=float, help="budget: seconds the engine may run (default 14400, same as --max-audio-seconds' default)")
     t.add_argument("--max-audio-seconds", type=float, help="budget: refuse media longer than this (default 14400)")

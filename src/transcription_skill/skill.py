@@ -44,6 +44,7 @@ CAPABILITIES = [
     "domain_vocabulary",        # request `domain_vocabulary`: terms from the programme / slides / speakers -> the engine's prompt or vocabulary; ADR-047
     "post_correction",          # request `corrections`: wrong form -> right form after recognition, every replacement recorded with its time; ADR-047
     "transcript_selection",     # `transcription/select`: word ranges / segment ids -> removed spans with the gaps around them; ADR-050
+    "script_alignment",         # request `script_text` (engine stable_ts): a known script aligned to the audio, unplaced words listed; ADR-052
 ]
 
 TOOLS: List[Dict[str, Any]] = [
@@ -62,7 +63,11 @@ TOOLS: List[Dict[str, Any]] = [
                                     "terms: list[str], max_terms: 1..200 (default 50), japanese: bool (default false)} | null (terms passed as the "
                                     "engine's initial_prompt or custom vocabulary; recorded in provenance.vocabulary)",
                "corrections": "list[{from: str, to: str, match: word | substring (default word)}] | {from: to} | null (applied to segment "
-                              "text after recognition; every replacement in provenance.corrections.applied with its time)"},
+                              "text after recognition; every replacement in provenance.corrections.applied with its time)",
+               "script_text": "str | null (a known script, one line per sentence or cue, aligned to the audio instead of recognised: engine "
+                              "with the script_alignment capability (stable_ts), language required; the transcript has alignment.source "
+                              "'aligned', segments[].script_line, and every script line and word that could not be placed under alignment, "
+                              "never timed)"},
      "output": {"transcript": "Transcript", "cache_hit": "bool", "cache_key": "sha256 hex", "warnings": "list[str]"}, "deterministic": True,
      "side_effects": ["writes cache under workspace", "writes per-chunk cache under workspace (chunk_seconds)"]},
     {"name": "transcription/segments", "description": "Derive SpeechEvent-compatible candidates from a Transcript (one per segment, optional gap merge).",

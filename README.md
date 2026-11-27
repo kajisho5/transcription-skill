@@ -172,6 +172,7 @@ is chosen by constraints, never by the skill's own judgement.
 | `speechcpp` | `local` | **implemented, optional**: [speech.cpp](https://github.com/nyosegawa/speech.cpp)'s `speech` command (0.10.0+ on PATH) on Metal, Vulkan or the CPU; ReazonSpeech v2 / parakeet-tdt_ctc-0.6b-ja / Haas-ja-v1.0 (Japanese, word timestamps), parakeet-tdt-0.6b-v3 (25 European languages, word timestamps; [ADR-040](docs/decisions.md#adr-040-parakeet-tdt-06b-v3-on-speechcpp-distil-large-v35-on-faster_whisper-and-per-model-language-limits)) and Qwen3-ASR (30 languages, words null); models fetched with `speech pull`, never by the skill; unit-tested against a fake `speech`, the real binary runs in the `engines` CI job ([ADR-035](docs/decisions.md#adr-035-speechcpp-is-an-optional-local-engine-speechcpp-run-as-its-speech-command-through-mediarun_program)) |
 | `whisperx` | `local` | **implemented, optional**: [whisperX](https://github.com/m-bain/whisperX) (Python 3.10+, `pip install whisperx`): faster-whisper batched over voice-activity regions plus wav2vec2 forced alignment for word timestamps; English and Japanese (alignment models Apache-2.0); no diarization (speakers come from diarization-skill, ADR-037); unit-tested against a fake `whisperx`, **not yet run for real** ([ADR-038](docs/decisions.md#adr-038-whisperx-is-an-optional-local-engine-whisperx-for-wav2vec2-aligned-word-timestamps-it-does-not-diarize)) |
 | `qwen3_asr` | `local` | **implemented, optional**: [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) with [Qwen3-ForcedAligner-0.6B](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B) word timestamps (both Apache-2.0, pinned revisions) via qwen-asr (Python 3.10+, the `[qwen3-asr]` extra), on a CUDA GPU or the CPU; 11 languages; never downloads while transcribing (`models pull` once); unit-tested against a fake `qwen_asr`, the real models in the manual `qwen3_asr` job, **not yet run** ([ADR-041](docs/decisions.md#adr-041-qwen3-asr-17b-with-qwen3-forcedaligner-06b-is-an-optional-local-engine-qwen3_asr-for-word-timestamps)) |
+| `stable_ts` | `local` | **implemented, optional**: script alignment, not recognition: a known script (`script_text`, CLI `--script FILE`) aligned to the audio with [stable-ts](https://github.com/jianfch/stable-ts) (MIT) on the faster-whisper Whisper checkpoints (MIT), the `[stable-ts]` extra (pulls PyTorch); English and Japanese measured (median word-start error 0.070 s / 0.047 s with `tiny` on synthetic fixtures); script lines and words it cannot place are listed under `alignment`, never timed ([ADR-052](docs/decisions.md#adr-052-script-alignment-a-known-script-aligned-with-stable-ts-stable_ts-unplaced-words-listed-never-timed)) |
 | cloud ASR (any vendor) | `remote` | future possible engine: expressible by the contract, **not implemented** |
 | whisper.cpp | `local` | future possible engine: expressible by the contract, **not implemented** |
 
@@ -292,6 +293,20 @@ transcription transcribe talk.mp4 --engine whisperx --language en --word-timesta
   `--speaker-turns` (ADR-037) to fill `speaker_id`.
 - Words the aligner cannot time (e.g. digits) join the neighbouring word, with a warning; segment `confidence` is null.
   `vad_filter` cannot be turned off (whisperX always decodes voice-activity regions).
+
+### Optional engine: `stable_ts` (align a known script)
+
+When the words are already known (a script, a reading), align them instead of recognising them:
+
+```bash
+pip install "transcription-skill[stable-ts]"
+transcription models pull tiny --engine stable_ts
+transcription transcribe talk.wav --engine stable_ts --language ja --script script.txt -o aligned.json
+```
+
+- One script line per sentence or cue; each line becomes a segment with `script_line`. `--language` is required.
+- `alignment.unaligned_lines` lists the lines not found in the audio, `alignment.unaligned_words` every word that got
+  no time; neither appears with a time anywhere. Japanese words are Whisper tokens.
 
 ### Optional engine: `qwen3_asr` (Qwen3-ASR with aligned words)
 

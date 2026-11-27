@@ -1,0 +1,179 @@
+{
+ "_comment": "Script-alignment fixtures (ADR-052), made by make_script_fixtures.py. `units` are the spoken units with the exact second their sound starts in the file; the line with spoken=false is in the script, not in the audio.",
+ "rate": 16000,
+ "lead": 1.0,
+ "word_gap": 0.08,
+ "line_gap": 0.6,
+ "en_script.wav": {
+  "language": "en",
+  "script": "Good morning and welcome to the annual meeting.\nPlease silence your phones before we begin.\nOur first speaker will talk about sleep and memory.\n",
+  "unspoken_lines": [
+   1
+  ],
+  "units": [
+   {
+    "line": 0,
+    "text": "Good",
+    "start": 1.0,
+    "end": 1.3181
+   },
+   {
+    "line": 0,
+    "text": "morning",
+    "start": 1.3981,
+    "end": 1.9395
+   },
+   {
+    "line": 0,
+    "text": "and",
+    "start": 2.0195,
+    "end": 2.4274
+   },
+   {
+    "line": 0,
+    "text": "welcome",
+    "start": 2.5074,
+    "end": 3.1079
+   },
+   {
+    "line": 0,
+    "text": "to",
+    "start": 3.1879,
+    "end": 3.5099
+   },
+   {
+    "line": 0,
+    "text": "the",
+    "start": 3.5899,
+    "end": 3.8921
+   },
+   {
+    "line": 0,
+    "text": "annual",
+    "start": 3.9721,
+    "end": 4.4943
+   },
+   {
+    "line": 0,
+    "text": "meeting.",
+    "start": 4.5743,
+    "end": 5.0729
+   },
+   {
+    "line": 2,
+    "text": "Our",
+    "start": 5.6729,
+    "end": 6.0448
+   },
+   {
+    "line": 2,
+    "text": "first",
+    "start": 6.1248,
+    "end": 6.5912
+   },
+   {
+    "line": 2,
+    "text": "speaker",
+    "start": 6.6712,
+    "end": 7.1894
+   },
+   {
+    "line": 2,
+    "text": "will",
+    "start": 7.2694,
+    "end": 7.6864
+   },
+   {
+    "line": 2,
+    "text": "talk",
+    "start": 7.7664,
+    "end": 8.1382
+   },
+   {
+    "line": 2,
+    "text": "about",
+    "start": 8.2182,
+    "end": 8.7539
+   },
+   {
+    "line": 2,
+    "text": "sleep",
+    "start": 8.8339,
+    "end": 9.3104
+   },
+   {
+    "line": 2,
+    "text": "and",
+    "start": 9.3904,
+    "end": 9.7984
+   },
+   {
+    "line": 2,
+    "text": "memory.",
+    "start": 9.8784,
+    "end": 10.369
+   }
+  ],
+  "duration": 10.869,
+  "tts": "espeak-ng en-us, one word at a time"
+ },
+ "ja_script.wav": {
+  "language": "ja",
+  "script": "本日の講演を始めます。\n携帯電話の電源をお切りください。\n最初の演者は睡眠と記憶について話します。\n",
+  "unspoken_lines": [
+   1
+  ],
+  "units": [
+   {
+    "line": 0,
+    "text": "本日の",
+    "start": 1.0,
+    "end": 1.6021
+   },
+   {
+    "line": 0,
+    "text": "講演を",
+    "start": 1.6821,
+    "end": 2.1681
+   },
+   {
+    "line": 0,
+    "text": "始めます。",
+    "start": 2.2481,
+    "end": 2.7656
+   },
+   {
+    "line": 2,
+    "text": "最初の",
+    "start": 3.3656,
+    "end": 3.8697
+   },
+   {
+    "line": 2,
+    "text": "演者は",
+    "start": 3.9497,
+    "end": 4.3721
+   },
+   {
+    "line": 2,
+    "text": "睡眠と",
+    "start": 4.4521,
+    "end": 5.0364
+   },
+   {
+    "line": 2,
+    "text": "記憶について",
+    "start": 5.1164,
+    "end": 5.9102
+   },
+   {
+    "line": 2,
+    "text": "話します。",
+    "start": 5.9902,
+    "end": 6.5213
+   }
+  ],
+  "duration": 7.0213,
+  "tts": "open-jtalk with hts-voice-nitech-jp-atr503-m001 (CC BY 3.0, Nagoya Institute of Technology), one phrase at a time"
+ }
+}

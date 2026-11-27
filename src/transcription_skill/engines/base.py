@@ -30,8 +30,9 @@ CAP_MODEL_DOWNLOAD = "model_download"        # the engine can fetch a missing mo
 CAP_WORD_TIMESTAMPS = "word_timestamps"
 CAP_LANGUAGE_DETECTION = "language_detection"
 CAP_CUSTOM_VOCABULARY = "custom_vocabulary"  # takes a request `vocabulary` ({written form: [readings]}) to bias decoding
+CAP_SCRIPT_ALIGNMENT = "script_alignment"    # aligns a request `script_text` to the audio instead of recognising (ADR-052)
 ENGINE_CAPABILITIES = (CAP_LOCAL_EXECUTION, CAP_REMOTE_EXECUTION, CAP_NETWORK_REQUIRED, CAP_LOCAL_MODEL, CAP_MODEL_DOWNLOAD,
-                       CAP_WORD_TIMESTAMPS, CAP_LANGUAGE_DETECTION, CAP_CUSTOM_VOCABULARY)
+                       CAP_WORD_TIMESTAMPS, CAP_LANGUAGE_DETECTION, CAP_CUSTOM_VOCABULARY, CAP_SCRIPT_ALIGNMENT)
 
 # model availability, separate from doctor's AVAILABLE/MISSING/UNKNOWN status
 MODEL_AVAILABLE = "MODEL_AVAILABLE"                  # usable now, no network
@@ -91,6 +92,7 @@ class EngineRequest:
     vad_filter: bool = False             # skip non-speech before decoding (engine capability pass-through; unchanged default)
     vocabulary: Optional[Dict[str, List[str]]] = None   # written form -> readings; only for engines with custom_vocabulary
     timeout: Optional[float] = None      # the request's budget.timeout, for an engine that runs a program of its own (ADR-035)
+    script_text: Optional[str] = None    # the known script to align (engines with script_alignment only, ADR-052)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -118,6 +120,7 @@ class EngineSegment:
     text: str
     confidence: Optional[float] = None
     words: Optional[List[EngineWord]] = None
+    script_line: Optional[int] = None        # aligned engines: the 1-based script line this segment is (ADR-052)
 
 
 @dataclass
@@ -131,6 +134,7 @@ class EngineResult:
     language: Optional[str] = None           # detected code, or None when the engine did not detect
     language_probability: Optional[float] = None
     warnings: List[str] = field(default_factory=list)
+    alignment: Optional[Dict[str, Any]] = None   # aligned engines: the placement record (transcript `alignment`, ADR-052)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -140,10 +144,11 @@ class EngineResult:
         segs = []
         for s in d.get("segments") or []:
             words = None if s.get("words") is None else [EngineWord(**w) for w in s["words"]]
-            segs.append(EngineSegment(start=s["start"], end=s["end"], text=s["text"], confidence=s.get("confidence"), words=words))
+            segs.append(EngineSegment(start=s["start"], end=s["end"], text=s["text"], confidence=s.get("confidence"), words=words,
+                                      script_line=s.get("script_line")))
         return cls(engine_id=d["engine_id"], engine_version=d["engine_version"], model=d["model"], model_version=d.get("model_version"),
                    segments=segs, language=d.get("language"), language_probability=d.get("language_probability"),
-                   warnings=list(d.get("warnings") or []))
+                   warnings=list(d.get("warnings") or []), alignment=d.get("alignment"))
 
 
 def refuse_model_language(engine_id: str, model: str, language: Optional[str], languages: Optional[Sequence[str]]) -> None:
@@ -202,6 +207,10 @@ class TranscriptionEngine:
         """Whether the engine takes a custom vocabulary (request `vocabulary`). Default: no."""
         return False
 
+    def supports_script_alignment(self) -> bool:
+        """Whether the engine aligns a known script (request `script_text`) instead of recognising. Default: no (ADR-052)."""
+        return False
+
     def unsupported_parameters(self, parameters: Dict[str, Any]) -> List[str]:
         """Names of request parameters (TranscribeRequest.parameters()) set to a value this engine cannot
         honour; the service refuses such a request instead of silently ignoring them. Default: none."""
@@ -257,6 +266,8 @@ class TranscriptionEngine:
             caps.append(CAP_LANGUAGE_DETECTION)
         if self.supports_vocabulary():
             caps.append(CAP_CUSTOM_VOCABULARY)
+        if self.supports_script_alignment():
+            caps.append(CAP_SCRIPT_ALIGNMENT)
         return caps
 
     def model_capabilities(self) -> List[str]:

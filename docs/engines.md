@@ -128,6 +128,7 @@ contract tests and is never in the default registry (`tests/test_security.py` as
 | `speechcpp` | local | `engines/speechcpp.py` | optional (speech.cpp's `speech` 0.10.0+ on PATH); unit-tested with a fake `speech`, real binary in the `engines` CI job |
 | `whisperx` | local | `engines/whisperx.py` | optional (Python 3.10+, `pip install whisperx`); en/ja with wav2vec2 alignment; unit-tested with a fake `whisperx`, not yet run for real |
 | `qwen3_asr` | local | `engines/qwen3_asr.py` | optional (Python 3.10+, the `[qwen3-asr]` extra); Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B word timestamps, 11 languages; unit-tested with a fake `qwen_asr`, real models in the manual `qwen3_asr` job (not yet run) |
+| `stable_ts` | local | `engines/stable_ts.py` | optional (the `[stable-ts]` extra); aligns a known script (`script_text`) instead of recognising; real `tiny` on the en/ja script fixtures in the manual `stable_ts` job and by hand (ADR-052) |
 | cloud ASR | remote | none | future possible engine (contract only) |
 | whisper.cpp | local | none | future possible engine (contract only) |
 
@@ -386,6 +387,22 @@ transcription transcribe talk.mp4 --engine speechcpp --model parakeet-tdt-0.6b-v
   from diarization-skill's turns (ADR-037).
 - `vad_filter`: whisperX always decodes voice-activity regions, so `false` is reported as a warning. `deterministic:
   false` until two real runs are shown identical.
+
+## stable_ts (optional script alignment, ADR-052)
+
+- Program: [stable-ts](https://github.com/jianfch/stable-ts) 2.19.1 (MIT), `align()` on a faster-whisper model
+  (`stable_whisper.load_faster_whisper`), `pip install "transcription-skill[stable-ts]"` (pulls PyTorch and openai-whisper).
+  Imported only inside `transcribe()`.
+- Weights: the `faster_whisper` checkpoints in the same Hugging Face cache (Systran's CTranslate2 conversions of OpenAI
+  Whisper, MIT on the model cards); default `tiny`. `models pull MODEL --engine stable_ts` fetches one; offline after that.
+- It does not recognise: the request's `script_text` (one line per sentence or cue) and `language` are required; the
+  transcript's words are the script's. `alignment.source` is `aligned`; each segment is one line (`script_line`).
+- A word the aligner gives less than 0.02 s is not placed; a line with fewer than half its words placed is not spoken.
+  Both are listed under `alignment` and never get a time.
+- Japanese: supported, aligned per Whisper token (as stable-ts does for languages without spaces).
+- Measured on synthetic fixtures with known word starts: median start error `tiny` en 0.070 s / ja 0.047 s; `base`
+  0.198 / 0.017; `small` 0.211 / 0.026 (ADR-052). Refuses `vad_filter`, `initial_prompt`, `vocabulary`, `corrections`,
+  `chunk_seconds`; `beam_size` / `temperature` have no effect (warning).
 
 ## qwen3_asr (optional Qwen3-ASR engine with forced-aligned words, ADR-041)
 

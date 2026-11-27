@@ -61,6 +61,13 @@ Vocabulary: CURRENT (exists, tested) · EXPERIMENTAL (exists, contract may move)
   `engine_identity` (both revisions, dtype) in `provenance.parameters` and the cache key through the new
   `cache_parameters` engine hook. Unit-tested against a fake `qwen_asr` (`tests/test_qwen3_asr.py`); the manual
   `qwen3_asr` job runs the real models on the fixtures; **never run for real yet** (that job has not run)
+- Optional engine `stable_ts` (ADR-052, roadmap step 8) — EXPERIMENTAL: script alignment, not recognition. stable-ts
+  2.19.1 (MIT) `align()` on the faster-whisper checkpoints (MIT; same cache, default `tiny`), the `[stable-ts]` extra
+  (pulls PyTorch). Request `script_text` (CLI `--script FILE`) + `language`; transcript `alignment` (`source: aligned`,
+  unaligned lines and words listed, never timed), `segments[].script_line`. Japanese per Whisper token. Run for real
+  here on CPU on `en_script.wav` / `ja_script.wav` (synthetic, known starts): median start error `tiny` en 0.070 s /
+  ja 0.047 s, `base` 0.198 / 0.017, `small` 0.211 / 0.026; the unspoken line reported in every run; repeat runs
+  identical. The manual `stable_ts` job of heavy-tests.yml has not run yet; natural speech and real recordings UNKNOWN
 - Deterministic cache keyed by content fingerprint + engine id/version/execution_mode + model/model_version + parameters
 - Tools: `transcription/transcribe`, `segments`, `export` (json/srt/vtt/tsv/txt), `speakers` (ADR-037), `find` (phrase search, ADR-045), `select` (selection -> removed spans with their gaps, ADR-050), `check`, `batch` (many transcribe
   requests, one process; one item's failure never aborts the rest); CLI: doctor, transcribe, segments, export, check,
@@ -352,3 +359,6 @@ two steps run this way in video-editing-skill and color-grading-skill.
   `provenance.corrections`. faster-whisper `tiny` on `en_drugs.wav`: 0/5 -> 4/5 drug names, 5/5 after corrections. Minor
   bump 0.13.0 in `pyproject.toml`. Contract additive (two request fields, two capabilities, two optional provenance
   objects; `contract_version` 1.0); video-production-agent needs a re-pin
+- 2026-11-27: optional engine `stable_ts` (ADR-052, roadmap step 8): a known script aligned to the audio with stable-ts;
+  `script_text`, transcript `alignment` and `segments[].script_line`. Contract additive (request key, engine, engine and
+  Skill capability `script_alignment`); video-production-agent needs a re-pin

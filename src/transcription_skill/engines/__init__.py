@@ -3,21 +3,22 @@
 Implemented today: faster_whisper (local, the reference engine), haas_ja (local, optional: Linux +
 NVIDIA GPU + Python 3.11+, Japanese only), speechcpp (local, optional: speech.cpp's `speech` command on
 PATH, ADR-035), whisperx (local, optional: Python 3.10+, wav2vec2 word alignment for en/ja, ADR-038) and qwen3_asr (local,
-optional: Python 3.10+, Qwen3-ASR-1.7B with Qwen3-ForcedAligner-0.6B word timestamps, ADR-041). Remote engines are
+optional: Python 3.10+, Qwen3-ASR-1.7B with Qwen3-ForcedAligner-0.6B word timestamps, ADR-041) and stable_ts (local, optional:
+forced alignment of a known script with stable-ts, ADR-052). Remote engines are
 expressible through the same contract but none is implemented or registered here."""
 from __future__ import annotations
 
 from typing import Dict, List
 
 from .base import (CAP_CUSTOM_VOCABULARY, CAP_LANGUAGE_DETECTION, CAP_LOCAL_EXECUTION, CAP_LOCAL_MODEL, CAP_MODEL_DOWNLOAD, CAP_NETWORK_REQUIRED,
-                   CAP_REMOTE_EXECUTION, CAP_WORD_TIMESTAMPS, ENGINE_CAPABILITIES, EXECUTION_LOCAL, EXECUTION_MODES, EXECUTION_REMOTE,
+                   CAP_REMOTE_EXECUTION, CAP_SCRIPT_ALIGNMENT, CAP_WORD_TIMESTAMPS, ENGINE_CAPABILITIES, EXECUTION_LOCAL, EXECUTION_MODES, EXECUTION_REMOTE,
                    MODEL_AVAILABLE, MODEL_DOWNLOAD_REQUIRED, MODEL_MISSING, MODEL_UNKNOWN, EngineRequest, EngineResult, EngineSegment,
                    EngineSpec, EngineWord, ModelStatus, TranscriptionEngine)
 from .registry import EngineRegistry, default_registry
 from .selector import EngineRequirements, Selection, require_engine, select_engines
 
 __all__ = ["CAP_CUSTOM_VOCABULARY", "CAP_LANGUAGE_DETECTION", "CAP_LOCAL_EXECUTION", "CAP_LOCAL_MODEL", "CAP_MODEL_DOWNLOAD", "CAP_NETWORK_REQUIRED",
-           "CAP_REMOTE_EXECUTION", "CAP_WORD_TIMESTAMPS", "ENGINE_CAPABILITIES", "EXECUTION_LOCAL", "EXECUTION_MODES", "EXECUTION_REMOTE",
+           "CAP_REMOTE_EXECUTION", "CAP_SCRIPT_ALIGNMENT", "CAP_WORD_TIMESTAMPS", "ENGINE_CAPABILITIES", "EXECUTION_LOCAL", "EXECUTION_MODES", "EXECUTION_REMOTE",
            "MODEL_AVAILABLE", "MODEL_DOWNLOAD_REQUIRED", "MODEL_MISSING", "MODEL_UNKNOWN", "EngineRequest", "EngineResult", "EngineSegment",
            "EngineSpec", "EngineWord", "ModelStatus", "TranscriptionEngine", "EngineRegistry", "EngineRequirements", "Selection",
            "default_registry", "require_engine", "select_engines", "engine_ids", "get_engine", "all_engines"]
