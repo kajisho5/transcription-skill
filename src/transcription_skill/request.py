@@ -262,6 +262,10 @@ def parse_script_text(value: Any) -> Optional[str]:
         raise _bad("'script_text' must be a string (the script, one line per sentence or cue)")
     if "\x00" in value:
         raise _bad("'script_text' contains illegal characters")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:   # a lone surrogate such as "\ud800" parses from JSON but is not text
+        raise _bad("'script_text' is not valid Unicode text (lone surrogate)") from None
     if len(value) > MAX_SCRIPT_CHARS:
         raise _bad(f"'script_text' longer than {MAX_SCRIPT_CHARS} characters")
     if not value.strip():

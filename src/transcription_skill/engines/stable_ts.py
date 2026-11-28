@@ -42,6 +42,7 @@ ENGINE_ID = "stable_ts"
 INSTALL_HINT = "pip install \"transcription-skill[stable-ts]\"  (stable-ts 2.19+ with faster-whisper; pulls PyTorch)"
 RULE = "script-alignment@1"
 MIN_WORD_SECONDS = 0.02     # a word the aligner gave less time than this was not found in the audio
+DURATION_EPSILON = 1e-9     # float slack: 4.02 - 4.0 is 0.01999999999999957, still a 0.02 s word
 MIN_PLACED_SHARE = 0.5      # a line with fewer of its words placed than this share is reported as not spoken
 LANGUAGES_WITHOUT_SPACES = frozenset({"ja", "zh", "th", "lo", "my"})   # stable-ts aligns these per token
 MAX_SCRIPT_LINES = 5000
@@ -125,7 +126,7 @@ def place(lines: List[Tuple[int, str]], per_line: List[List[Tuple[float, float, 
     placed_total = 0
     word_total = 0
     for (number, text), ws in zip(lines, per_line):
-        ok = [math.isfinite(w[0]) and math.isfinite(w[1]) and (w[1] - w[0]) >= MIN_WORD_SECONDS for w in ws]
+        ok = [math.isfinite(w[0]) and math.isfinite(w[1]) and (w[1] - w[0]) >= MIN_WORD_SECONDS - DURATION_EPSILON for w in ws]
         placed = [w for w, k in zip(ws, ok) if k]
         word_total += len(ws)
         spoken = bool(ws) and len(placed) >= MIN_PLACED_SHARE * len(ws)

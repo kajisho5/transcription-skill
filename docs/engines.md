@@ -392,12 +392,13 @@ transcription transcribe talk.mp4 --engine speechcpp --model parakeet-tdt-0.6b-v
 
 - Program: [stable-ts](https://github.com/jianfch/stable-ts) 2.19.1 (MIT), `align()` on a faster-whisper model
   (`stable_whisper.load_faster_whisper`), `pip install "transcription-skill[stable-ts]"` (pulls PyTorch and openai-whisper).
+  The extra needs faster-whisper 1.1.0 or newer: stable-ts imports `BatchedInferencePipeline`, which 1.0.x lacks.
   Imported only inside `transcribe()`.
 - Weights: the `faster_whisper` checkpoints in the same Hugging Face cache (Systran's CTranslate2 conversions of OpenAI
   Whisper, MIT on the model cards); default `tiny`. `models pull MODEL --engine stable_ts` fetches one; offline after that.
 - It does not recognise: the request's `script_text` (one line per sentence or cue) and `language` are required; the
   transcript's words are the script's. `alignment.source` is `aligned`; each segment is one line (`script_line`).
-- A word the aligner gives less than 0.02 s is not placed; a line with fewer than half its words placed is not spoken.
+- A word the aligner gives less than 0.02 s is not placed (exactly 0.02 s is placed, whatever the float rounding); a line with fewer than half its words placed is not spoken.
   Both are listed under `alignment` and never get a time.
 - Japanese: supported, aligned per Whisper token (as stable-ts does for languages without spaces).
 - Measured on synthetic fixtures with known word starts: median start error `tiny` en 0.070 s / ja 0.047 s; `base`
