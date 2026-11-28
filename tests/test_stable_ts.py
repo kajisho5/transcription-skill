@@ -149,6 +149,13 @@ class PlacementTests(unittest.TestCase):
                          ("Good morning everyone.\nPlease silence your phones.\nLet us begin.", "en", False))
         self.assertEqual(env.loads, [{"model": "tiny", "local_only": False}])
 
+    def test_a_word_of_exactly_min_word_seconds_is_placed(self):
+        # 4.02 - 4.0 is 0.01999999999999957 in floating point: still a 0.02 s word, placed; 0 s and 0.01 s are not
+        segs, rec = ST.place([(1, "Yes."), (2, "No."), (3, "Maybe.")],
+                             [[(4.0, 4.02, " Yes.", 0.9)], [(5.0, 5.0, " No.", 0.0)], [(6.0, 6.01, " Maybe.", 0.1)]], "en", True)
+        self.assertEqual([(s.script_line, s.start, s.end) for s in segs], [(1, 4.0, 4.02)])
+        self.assertEqual([u["line"] for u in rec["unaligned_lines"]], [2, 3])
+
     def test_japanese_tokens_join_to_the_script_characters(self):
         with Env(FAKE_JA):
             res = ST.StableTsEngine().transcribe(ereq(language="ja", script_text="本日の講演を\n携帯電話\n"))
@@ -230,9 +237,16 @@ class RequestTests(unittest.TestCase):
             with self.assertRaises(TranscriptionError) as cm:
                 parse_request(dict(base, **extra))
             self.assertEqual(cm.exception.details.get("reason"), reason, extra)
-        for bad in ("", "   ", 5, "a\x00b", "x" * 200_001):
-            with self.assertRaises(TranscriptionError):
+        for bad in ("", "   ", 5, "a\x00b", "x" * 200_001, "\ud800", "ok \udfff"):
+            with self.assertRaises(TranscriptionError) as cm:
                 parse_request(dict(base, script_text=bad))
+            self.assertEqual(cm.exception.code, "INVALID_INPUT", repr(bad))
+        lone = json.loads('{"input": "a.wav", "engine": "stable_ts", "language": "en", "script_text": "\\ud800"}')
+        with self.assertRaises(TranscriptionError) as cm:   # a lone surrogate parses from JSON; refused, not a crash in parameters()
+            parse_request(lone).parameters()
+        self.assertEqual(cm.exception.code, "INVALID_INPUT")
+        for good in ("Hello.\nWorld.", "本日の講演を\n携帯電話", "emoji \U0001F600 ok"):
+            self.assertEqual(parse_request(dict(base, script_text=good)).script_text, good)
 
 
 @unittest.skipUnless(HAVE_FFMPEG, "needs ffmpeg/ffprobe")
@@ -263,6 +277,33 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(t["provenance"]["parameters"]["script"]["lines"], 3)
         self.assertTrue(again["cache_hit"])
         self.assertEqual(again["transcript"]["alignment"], t["alignment"])
+
+    def test_validator_checks_the_alignment_record_and_script_lines(self):
+        import copy
+        with Env():
+            t = self.run_st()["transcript"]
+
+        def errors(mutate):
+            d = copy.deepcopy(t)
+            mutate(d)
+            return validate_transcript(d).errors
+        self.assertTrue(errors(lambda d: d.__setitem__("alignment", {})))
+        self.assertTrue(errors(lambda d: d.__setitem__("alignment", "aligned")))
+        self.assertTrue(errors(lambda d: d["alignment"].__setitem__("source", "recognised")))
+        self.assertTrue(errors(lambda d: d["alignment"].pop("unaligned_words")))
+        self.assertTrue(errors(lambda d: d["alignment"].__setitem__("lines", -1)))
+        self.assertTrue(errors(lambda d: d["alignment"].__setitem__("placed_words", True)))
+        self.assertTrue(errors(lambda d: d["alignment"]["unaligned_lines"][0].__setitem__("line", 0)))
+        self.assertTrue(errors(lambda d: d["alignment"]["unaligned_words"][0].pop("position")))
+        self.assertTrue(errors(lambda d: d["segments"][0].__setitem__("script_line", 0)))
+        self.assertTrue(errors(lambda d: d["segments"][0].__setitem__("script_line", "1")))
+        self.assertTrue(errors(lambda d: d["segments"][0].__setitem__("script_line", True)))
+        self.assertEqual(errors(lambda d: None), [])
+        plain = copy.deepcopy(t)                    # a recognised transcript carries neither field and still validates
+        plain.pop("alignment")
+        for s in plain["segments"]:
+            s.pop("script_line")
+        self.assertEqual(validate_transcript(plain).errors, [])
 
     def test_engine_and_script_must_match(self):
         with Env():

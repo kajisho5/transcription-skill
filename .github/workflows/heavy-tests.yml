@@ -86,7 +86,10 @@ jobs:
         run: |
           set -o pipefail
           python -m unittest -v tests/test_speechcpp.py 2>&1 | tee test.log
-          ! grep -E "\.\.\. skipped" test.log
+          if grep -E "\.\.\. skipped" test.log; then
+            echo "::error::a test was skipped; the real-engine tests must run here"
+            exit 1
+          fi
           for t in test_real_cli_has_the_subcommands_and_flags_the_engine_uses test_real_timed_model_transcribes_japanese_with_word_timestamps \
                    test_real_untimed_model_gives_region_segments_with_null_words test_real_european_model_transcribes_english_with_word_timestamps \
                    test_real_doctor_reports_binary_backend_and_models; do
@@ -138,7 +141,10 @@ jobs:
         run: |
           set -o pipefail
           python -m unittest -v tests/test_qwen3_asr.py 2>&1 | tee test.log
-          ! grep -E "\.\.\. skipped" test.log
+          if grep -E "\.\.\. skipped" test.log; then
+            echo "::error::a test was skipped; the real-engine tests must run here"
+            exit 1
+          fi
           for t in test_real_japanese_with_word_timestamps test_real_english_with_word_timestamps; do
             grep -E "^$t .*\.\.\. ok$" test.log || { echo "::error::$t did not run and pass"; exit 1; }
           done
@@ -179,5 +185,8 @@ jobs:
         run: |
           set -o pipefail
           python -m unittest -v tests/test_stable_ts.py 2>&1 | tee test.log
-          ! grep -E "\.\.\. skipped" test.log
+          if grep -E "\.\.\. skipped" test.log; then
+            echo "::error::a test was skipped; the real-engine tests must run here"
+            exit 1
+          fi
           grep -E "median start error" test.log | tee -a "$GITHUB_STEP_SUMMARY"

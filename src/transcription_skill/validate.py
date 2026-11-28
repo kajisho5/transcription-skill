@@ -1,7 +1,8 @@
 """Transcript validator. A Transcript that fails here is never returned as a normal result.
 
 Checks: required fields, asset identity, timestamp validity and ordering, segment/word containment,
-language validity, confidence range, and leakage (credentials, command/argv, absolute paths).
+language validity, confidence range, the script-alignment record and script lines (ADR-052), and leakage
+(credentials, command/argv, absolute paths).
 """
 from __future__ import annotations
 
@@ -25,6 +26,8 @@ REQUIRED_SOURCE = ("filename", "fingerprint", "size_bytes", "media_duration")
 REQUIRED_PROVENANCE = ("engine", "engine_version", "execution_mode", "model", "model_version", "parameters", "parameters_hash",
                        "cache_key", "created_at", "processing_seconds", "skill_version", "skill", "tool")
 EXECUTION_MODES = ("local", "remote")
+REQUIRED_ALIGNMENT = ("source", "rule", "lines", "aligned_lines", "words", "placed_words", "unaligned_lines", "unaligned_words")
+ALIGNMENT_COUNTS = ("lines", "aligned_lines", "words", "placed_words")
 
 # keys that must never appear anywhere in a transcript document
 FORBIDDEN_KEYS = {"command", "argv", "cmd", "shell", "api_key", "apikey", "token", "secret", "password", "authorization",
@@ -75,6 +78,49 @@ def _check_conf(v: Any, where: str, rep: ValidationReport) -> None:
         return
     if not _is_num(v) or v < 0.0 or v > 1.0:
         rep.errors.append(f"{where}: confidence must be null or a number in [0, 1], got {v!r}")
+
+
+def _is_int(v: Any, minimum: int) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and v >= minimum
+
+
+def _check_alignment(rec: Any, rep: ValidationReport) -> None:
+    """The `alignment` record of a transcript aligned from a known script (ADR-052), as the schema states it."""
+    if not isinstance(rec, dict):
+        rep.errors.append("alignment must be an object")
+        return
+    missing = [k for k in REQUIRED_ALIGNMENT if k not in rec]
+    if missing:
+        rep.errors.append(f"alignment: missing {missing}")
+    if "source" in rec and rec["source"] != "aligned":
+        rep.errors.append(f"alignment.source must be 'aligned', got {rec['source']!r}")
+    if "rule" in rec and not isinstance(rec["rule"], str):
+        rep.errors.append("alignment.rule must be a string")
+    for k in ("min_word_seconds", "min_placed_share"):
+        if k in rec and not _is_num(rec[k]):
+            rep.errors.append(f"alignment.{k} must be a number")
+    for k in ALIGNMENT_COUNTS:
+        if k in rec and not _is_int(rec[k], 0):
+            rep.errors.append(f"alignment.{k} must be a non-negative integer")
+    for key, required, ints in (("unaligned_lines", ("line", "text"), (("line", 1), ("words", None), ("placed", None))),
+                                ("unaligned_words", ("line", "position", "text"), (("line", 1), ("position", 0)))):
+        items = rec.get(key)
+        if key not in rec:
+            continue
+        if not isinstance(items, list):
+            rep.errors.append(f"alignment.{key} must be a list")
+            continue
+        for i, item in enumerate(items):
+            where = f"alignment.{key}[{i}]"
+            if not isinstance(item, dict) or any(k not in item for k in required):
+                rep.errors.append(f"{where}: must be an object with {required}")
+                continue
+            if not isinstance(item["text"], str):
+                rep.errors.append(f"{where}: text must be a string")
+            for k, minimum in ints:
+                if k in item and not (_is_int(item[k], minimum) if minimum is not None
+                                      else isinstance(item[k], int) and not isinstance(item[k], bool)):
+                    rep.errors.append(f"{where}: {k} must be an integer" + (f" of at least {minimum}" if minimum is not None else ""))
 
 
 def validate_transcript(doc: Any, expected_asset_id: Optional[str] = None, expected_fingerprint: Optional[str] = None) -> ValidationReport:
@@ -216,6 +262,8 @@ def validate_transcript(doc: Any, expected_asset_id: Optional[str] = None, expec
         _check_conf(seg["confidence"], where, rep)
         if seg["speaker_id"] is not None and (not isinstance(seg["speaker_id"], str) or not seg["speaker_id"]):
             rep.errors.append(f"{where}: speaker_id must be null or a non-empty string")
+        if "script_line" in seg and not _is_int(seg["script_line"], 1):
+            rep.errors.append(f"{where}: script_line must be an integer of at least 1 (the 1-based script line), got {seg['script_line']!r}")
         words = seg["words"]
         if words is None:
             continue
@@ -255,6 +303,9 @@ def validate_transcript(doc: Any, expected_asset_id: Optional[str] = None, expec
                 rep.errors.append(f"{ww}: timing must be one of {WORD_TIMING_VALUES}, got {w['timing']!r}")
             if "pos" in w and w["pos"] not in WORD_POS_VALUES:
                 rep.errors.append(f"{ww}: pos must be one of {WORD_POS_VALUES}, got {w['pos']!r}")
+
+    if "alignment" in doc:
+        _check_alignment(doc["alignment"], rep)
 
     if any(indexed) and not all(indexed):
         rep.errors.append("words: index must be on every word or on none (documents written before word indices carry none)")
